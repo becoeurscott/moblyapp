@@ -18,7 +18,7 @@ services:
       - key: TRUST_PROXY
         value: "1"
       - key: CORS_ORIGINS
-        value: "*"
+        value: https://mobly-backend.onrender.com
       # MUST stay "false" on any publicly reachable host. In dev mode
       # src/services/otp.ts returns the login code in the HTTP response body
       # (and logs it), so anyone who can reach this URL can request a code for

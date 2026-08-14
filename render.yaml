@@ -1,0 +1,89 @@
+# Render blueprint — deploys the API. The database lives in Supabase, so no
+# managed Postgres is provisioned here.
+# Push this repo to GitHub, then in Render: New → Blueprint → pick the repo.
+# Values marked `sync: false` must be pasted once in the Render dashboard.
+services:
+  - type: web
+    name: mobly-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build && npx prisma migrate deploy
+    startCommand: npm start
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_PREFIX
+        value: /api/v1
+      - key: TRUST_PROXY
+        value: "1"
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: OTP_DEV_MODE
+        value: "true" # set to false once an SMS provider is wired
+
+      # Supabase — pooler URL at runtime, direct URL for migrations.
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_TTL
+        value: 15m
+      - key: JWT_REFRESH_TTL
+        value: 30d
+
+      # Cloudinary
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: CLOUDINARY_UPLOAD_FOLDER
+        value: mobly/listings
+
+      # Payments
+      - key: PAYMENTS_PROVIDER
+        value: stub
+      - key: PAYMENTS_WEBHOOK_SECRET
+        sync: false
+
+      # ---------------------------------------------------------------
+      # Social sign-in. NOTE the variable names: the live routes read
+      # `APPLE_AUDIENCE` (src/lib/apple.ts) and `GOOGLE_CLIENT_ID`
+      # (src/lib/google.ts). `APPLE_BUNDLE_IDS` / `GOOGLE_CLIENT_IDS` in
+      # src/config/env.ts feed a different, unused code path — setting
+      # those instead leaves Apple/Google sign-in silently broken with a
+      # generic 401.
+      # ---------------------------------------------------------------
+      - key: APPLE_AUDIENCE
+        value: cm.mobly.app
+      - key: GOOGLE_CLIENT_ID
+        # iOS OAuth client id. Must match the client whose *reversed* form is
+        # the CFBundleURLScheme in the app's Info.plist, and that client must
+        # be registered against bundle id cm.mobly.app in Google Cloud Console.
+        sync: false
+
+      # ---------------------------------------------------------------
+      # Push. A TestFlight/App Store build is signed with
+      # `aps-environment = production`, so APNS_PRODUCTION MUST be true —
+      # tokens from a production build are rejected by the sandbox gateway
+      # and push dies silently.
+      # ---------------------------------------------------------------
+      - key: APNS_PRODUCTION
+        value: "true"
+      - key: APNS_BUNDLE_ID
+        value: cm.mobly.app
+      - key: APNS_TEAM_ID
+        value: LGHS3SPMJ7
+      - key: APNS_KEY_ID
+        sync: false
+      - key: APNS_KEY
+        # Contents of secrets/AuthKey_<id>.p8 with real newlines replaced by
+        # literal \n so it fits on one line.
+        sync: false

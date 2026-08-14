@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Every env file except the committed template. `.env.bak` in particular held
+# live Supabase and Cloudinary credentials.
+.env
+.env.*
+!.env.example
+
+# APNs signing key and anything else secret
+secrets/
+*.p8
+
+# Database dumps — these contain real user rows.
+backups/

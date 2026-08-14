@@ -1,0 +1,696 @@
+// Mobly backend data model. Mirrors the iOS app's domain.
+//
+// Design notes:
+// - Every table carries `createdAt`/`updatedAt` so the app can do delta sync
+//   ("give me everything changed since X") and keep a local cache for offline.
+// - Money is stored as integer FCFA (`priceFcfa`), never floats.
+// - Display strings ("80 000 FCFA", "Meublé · 2 ch") are built in
+//   `src/lib/serialize.ts`, never stored.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Runtime traffic goes through the Supabase pooler (pgbouncer, port 6543).
+  url = env("DATABASE_URL")
+  // Migrations need a direct connection (port 5432) — pgbouncer can't run them.
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────
+
+enum DealType {
+  RENT // À louer (longue durée)
+  BUY // Acheter
+  SHORT // Court séjour
+}
+
+enum PriceUnit {
+  PER_MONTH // /mois
+  PER_DAY // /jour
+  TOTAL // vente
+}
+
+enum ListingStatus {
+  DRAFT
+  PENDING // en attente de validation
+  ACTIVE
+  BOOSTED
+  PAUSED // rendue indisponible par le propriétaire
+  REJECTED
+  ARCHIVED
+}
+
+enum MessageKind {
+  TEXT
+  VOICE
+  IMAGE
+  SYSTEM
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+}
+
+enum VisitStatus {
+  REQUESTED
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+enum ContactMethod {
+  CHAT
+  CALL
+  SHARE
+}
+
+enum PurchaseStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWING
+  ACTIONED
+  DISMISSED
+}
+
+enum ReportTarget {
+  LISTING
+  USER
+  MESSAGE
+  REVIEW
+}
+
+// ─────────────────────────────────────────────────────────────
+// Identity
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id           String  @id @default(cuid())
+  phone        String  @unique
+  fullName     String
+  // Unique so one address can't back two accounts. Nullable + unique is fine in
+  // Postgres — multiple NULLs are allowed, so phone-only accounts still work.
+  email        String? @unique
+  passwordHash String?
+
+  // Role. `isOwner` drives the app's visitor ↔ propriétaire switch.
+  isOwner     Boolean @default(false)
+  isAdmin     Boolean @default(false)
+  agencyName  String?
+
+  // Trust surfaces (visible in the app)
+  verified         Boolean   @default(true) // compte actif / téléphone vérifié
+  identityVerified Boolean   @default(false) // pièce d'identité contrôlée
+  verifiedAt       DateTime?
+  moblyScore       Float? // note agrégée de l'utilisateur
+  moblyScoreCount  Int       @default(0)
+  rating           Float?
+  responseRate     Float? // 0..1
+  responseTimeMins Int?
+
+  // Profile
+  avatarUrl    String?
+  /// Personal accent colour, stored as `#RRGGBB`. Drives the avatar circle in
+  /// chat, the profile identity card, and anywhere else the user shows up.
+  /// `null` = pick a deterministic default from a palette client-side.
+  avatarColor  String?
+  bio          String?
+  region       String?
+  city         String?
+  neighborhood String?
+  locale       String  @default("fr") // fr | en | pi
+
+  // Contact. WhatsApp is share-only — never the contact mechanism (2026 pivot).
+  whatsappNumber String?
+
+  // Membership / monetization
+  membershipTier    String?   @default("FREE")
+  membershipExpires DateTime?
+
+  // Security
+  isActive               Boolean   @default(true)
+  tokenVersion           Int       @default(0)
+  passwordResetTokenHash String?
+  passwordResetExpiresAt DateTime?
+  lastSeenAt             DateTime?
+
+  listings         Listing[]
+  favorites        Favorite[]
+  reviews          Review[]           @relation("ReviewAuthor")
+  reviewsReceived  Review[]           @relation("ReviewSubject")
+  messages         Message[]
+  notifications    Notification[]
+  threads          ThreadParticipant[]
+  refreshTokens    RefreshToken[]
+  devices          Device[]
+  savedSearches    SavedSearch[]
+  contactsMade     ContactEvent[]
+  visitsRequested  VisitRequest[]     @relation("VisitVisitor")
+  visitsReceived   VisitRequest[]     @relation("VisitOwner")
+  boostPurchases   BoostPurchase[]
+  subscriptions    Subscription[]
+  verifications    VerificationPurchase[]
+  reportsFiled     Report[]           @relation("ReportReporter")
+  legalAcceptances LegalAcceptance[]
+  sessions         AppSession[]
+  events           AppEvent[]
+  oauthIdentities  OAuthIdentity[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([city])
+  @@index([updatedAt])
+}
+
+/// One-time SMS codes. `code` is stored hashed in production.
+model Otp {
+  id        String   @id @default(cuid())
+  phone     String
+  code      String
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+}
+
+/// Rotating refresh tokens. `familyId` groups a login lineage so a replayed
+/// token can invalidate the whole family (theft detection).
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  familyId  String
+  parentId  String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+/// Push targets. One row per install so a user can have several devices.
+model Device {
+  id         String   @id @default(cuid())
+  userId     String
+  platform   String // ios | android
+  pushToken  String?
+  appVersion String?
+  locale     String?
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, pushToken])
+  @@index([userId])
+}
+
+/// Proof that a user accepted a given version of the CGU / privacy policy.
+model LegalAcceptance {
+  id         String   @id @default(cuid())
+  userId     String
+  docId      String // cgu | confidentialite | …
+  version    String
+  acceptedAt DateTime @default(now())
+  ipAddress  String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, docId, version])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Listings
+// ─────────────────────────────────────────────────────────────
+
+model Listing {
+  id       String        @id @default(cuid())
+  title    String
+  category String // Studios, Appartements, Bureaux…
+  deal     DealType      @default(RENT)
+  status   ListingStatus @default(PENDING)
+
+  // Location
+  region       String?
+  city         String
+  neighborhood String?
+  address      String?
+  lat          Float?
+  lng          Float?
+
+  // Price
+  priceFcfa  Int
+  priceUnit  PriceUnit @default(PER_MONTH)
+  currency   String    @default("XAF")
+  negotiable Boolean   @default(false)
+
+  // Characteristics. `features` holds the category-specific key/value pairs the
+  // publish wizard collects (chambres, salle de réunion, vitrine…), matching the
+  // app's `Listing.features` dictionary.
+  furnished          Boolean  @default(true)
+  rooms              Int      @default(1)
+  bathrooms          Int?
+  sizeSqm            Int?
+  minDurationMonths  Int?
+  features           Json     @default("{}")
+  tags               String[] @default([]) // équipements
+  about              String?
+
+  // Media
+  coverUrl  String? // uploaded cover (Cloudinary secure_url)
+  imageName String? // bundled asset fallback used by the app
+  photos    String[] @default([])
+
+  // Trust + social proof
+  verified    Boolean @default(true)
+  rating      Float?
+  reviewCount Int     @default(0)
+
+  // Availability
+  available     Boolean   @default(true)
+  availableFrom DateTime?
+
+  // Metrics (denormalized for the owner dashboard)
+  views     Int @default(0)
+  contacts  Int @default(0)
+  favorites Int @default(0)
+
+  // Boost
+  boostDaysLeft  Int?
+  boostExpiresAt DateTime?
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  favoritedBy   Favorite[]
+  reviews       Review[]
+  threads       Thread[]
+  boosts        Boost[]
+  boostPurchases BoostPurchase[]
+  listingPhotos ListingPhoto[]
+  contactEvents ContactEvent[]
+  visits        VisitRequest[]
+  viewEvents    ViewEvent[]
+
+  publishedAt DateTime?
+  archivedAt  DateTime? // soft delete — the app hides these, history survives
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([city])
+  @@index([category])
+  @@index([ownerId])
+  @@index([status])
+  @@index([updatedAt])
+}
+
+/// Cloudinary-backed photos. `publicId` is what we delete/transform with.
+model ListingPhoto {
+  id        String   @id @default(cuid())
+  listingId String
+  publicId  String? // Cloudinary public_id
+  url       String
+  width     Int?
+  height    Int?
+  order     Int      @default(0)
+  isCover   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  listingId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, listingId])
+  @@index([userId])
+}
+
+/// A stored filter set — powers "Recherches" in the Favoris tab and, later,
+/// push alerts when a matching listing appears.
+model SavedSearch {
+  id             String    @id @default(cuid())
+  userId         String
+  label          String
+  filters        Json      @default("{}")
+  notifyOnMatch  Boolean   @default(false)
+  lastCheckedAt  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Every time a listing detail page is opened. Feeds the owner's per-day
+/// stats chart and the "Origine des vues" breakdown. `source` is a free-form
+/// tag ("home", "explore", "search", "recommended"…) sent by the client so
+/// we can attribute where traffic came from without a heavier funnel schema.
+model ViewEvent {
+  id        String   @id @default(cuid())
+  listingId String
+  userId    String?  // null = anonymous / signed-out visitor
+  source    String?
+  createdAt DateTime @default(now())
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, createdAt])
+  @@index([listingId])
+}
+
+/// Every time a visitor opens a chat/call on a listing. Feeds the owner's
+/// "contacts" metric and the contact-rate stat.
+model ContactEvent {
+  id        String        @id @default(cuid())
+  listingId String
+  visitorId String
+  method    ContactMethod @default(CHAT)
+  createdAt DateTime      @default(now())
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  visitor User    @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([visitorId])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  listingId String
+  userId    String // author
+  subjectId String? // reviewed host, when the review targets a person
+  rating    Int
+  text      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  user    User    @relation("ReviewAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  subject User?   @relation("ReviewSubject", fields: [subjectId], references: [id], onDelete: SetNull)
+
+  @@unique([listingId, userId])
+  @@index([listingId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Conversation (the 2026 pivot: Mobly owns the funnel)
+// ─────────────────────────────────────────────────────────────
+
+model Thread {
+  id            String   @id @default(cuid())
+  listingId     String?
+  lastMessageAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  listing      Listing?            @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  messages     Message[]
+  participants ThreadParticipant[]
+
+  @@index([updatedAt])
+}
+
+model ThreadParticipant {
+  id          String    @id @default(cuid())
+  threadId    String
+  userId      String
+  unreadCount Int       @default(0)
+  lastReadAt  DateTime?
+  muted       Boolean   @default(false)
+
+  thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id          String        @id @default(cuid())
+  threadId    String
+  senderId    String
+  /// Client-generated id, unique per thread. Makes sending idempotent: a
+  /// retried POST after a flaky-network timeout resolves to the same row
+  /// instead of posting the message twice.
+  clientId    String?
+  kind        MessageKind   @default(TEXT)
+  text        String
+  mediaUrl    String? // voice note / image
+  durationSec Int? // voice note length
+  replyToId   String?
+  /// System messages posted from a visit state change. `visitId` points at the
+  /// VisitRequest row; `visitAction` snapshots the transition that produced
+  /// this message (REQUESTED / CONFIRMED / CANCELLED / COMPLETED / NO_SHOW /
+  /// RESCHEDULED). Both null on a normal chat message.
+  visitId     String?
+  visitAction String?
+  status      MessageStatus @default(SENT)
+  read        Boolean       @default(false)
+  deliveredAt DateTime?
+  readAt      DateTime?
+  deletedAt   DateTime?
+  createdAt   DateTime      @default(now())
+
+  thread  Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender  User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo Message?  @relation("MessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies Message[] @relation("MessageReply")
+
+  @@unique([threadId, clientId])
+  @@index([threadId])
+  @@index([createdAt])
+}
+
+/// In-app visit scheduling — replaces the old "call me on WhatsApp" handoff.
+model VisitRequest {
+  id          String      @id @default(cuid())
+  listingId   String
+  visitorId   String
+  ownerId     String
+  scheduledAt DateTime
+  status      VisitStatus @default(REQUESTED)
+  note        String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  visitor User    @relation("VisitVisitor", fields: [visitorId], references: [id], onDelete: Cascade)
+  owner   User    @relation("VisitOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([visitorId])
+  @@index([ownerId])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String?
+  payload   Json      @default("{}") // deep-link target (listingId, threadId…)
+  read      Boolean   @default(false)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Money
+// ─────────────────────────────────────────────────────────────
+
+/// Active/!historical boost windows applied to a listing.
+model Boost {
+  id        String   @id @default(cuid())
+  listingId String
+  days      Int
+  priceFcfa Int
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+}
+
+/// The payment attempt behind a boost. Kept separate from `Boost` so a failed
+/// or pending Mobile Money payment never elevates a listing.
+model BoostPurchase {
+  id           String         @id @default(cuid())
+  listingId    String
+  userId       String
+  plan         String // "3j" | "7j" | "30j"
+  priceFcfa    Int
+  durationDays Int
+  status       PurchaseStatus @default(PENDING)
+  startsAt     DateTime?
+  endsAt       DateTime?
+  providerName String? // mtn-momo | orange-money | stub
+  providerRef  String? // provider transaction id
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([userId])
+  @@index([status])
+}
+
+model Subscription {
+  id                String         @id @default(cuid())
+  userId            String
+  plan              String
+  status            PurchaseStatus @default(PENDING)
+  priceFcfa         Int
+  startedAt         DateTime?
+  currentPeriodEnd  DateTime?
+  cancelledAt       DateTime?
+  providerName      String?
+  providerRef       String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Paid identity verification (the "badge vérifié").
+model VerificationPurchase {
+  id           String         @id @default(cuid())
+  userId       String
+  priceFcfa    Int
+  status       PurchaseStatus @default(PENDING)
+  providerName String?
+  providerRef  String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Trust & safety — backs the modération/signalement policy
+// ─────────────────────────────────────────────────────────────
+
+model Report {
+  id         String       @id @default(cuid())
+  reporterId String
+  target     ReportTarget
+  targetId   String // listingId / userId / messageId / reviewId
+  reason     String
+  details    String?
+  status     ReportStatus @default(OPEN)
+  resolution String?
+  resolvedAt DateTime?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  reporter User @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@index([target, targetId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Analytics — per-user session tracking + typed event stream
+// ─────────────────────────────────────────────────────────────
+
+/// One app-open lifecycle. Anonymous sessions (`userId` null) are minted on
+/// cold launch before a sign-in; the userId is filled in later when the same
+/// device signs in (`/sessions/attach`). `endedAt` is set when the app is
+/// backgrounded/closed; `lastActiveAt` is bumped by the heartbeat.
+model AppSession {
+  id           String    @id @default(cuid())
+  userId       String?
+  /// Stable, per-install identifier (persisted in the client's UserDefaults).
+  /// Never a device serial — just a client-generated UUID.
+  deviceId     String
+  startedAt    DateTime  @default(now())
+  endedAt      DateTime?
+  lastActiveAt DateTime  @default(now())
+  appVersion   String?
+  os           String? // "iOS 26.5"
+  city         String?
+
+  user   User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  events AppEvent[]
+
+  @@index([userId])
+  @@index([deviceId])
+  @@index([startedAt])
+}
+
+/// Typed event stream. `name` is a dotted slug like `listing.view`, `chat.send`.
+/// `payload` is small JSON — ids, categories, counts, no PII beyond what's
+/// already on the record.
+model AppEvent {
+  id        String   @id @default(cuid())
+  sessionId String
+  userId    String? // duplicated from session for cheap per-user aggregates
+  name      String
+  payload   Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  session AppSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@index([userId, name])
+  @@index([name, createdAt])
+}
+
+/// Third-party sign-in identity (Apple, Google, …). One row per (provider,
+/// providerSub) pair, linked to a Mobly User. Kept out of the `User` table so
+/// a user can later add or drop providers without a schema change.
+model OAuthIdentity {
+  id          String   @id @default(cuid())
+  userId      String
+  provider    String   // "apple" | "google"
+  providerSub String   // provider's stable subject id (JWT `sub`)
+  email       String?  // may be Apple's private-relay address
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerSub])
+  @@index([userId])
+}

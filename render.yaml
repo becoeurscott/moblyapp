@@ -39,7 +39,10 @@ services:
       - key: TWILIO_MESSAGING_SERVICE_SID
         sync: false
 
-      # Supabase — pooler URL at runtime, direct URL for migrations.
+      # Supabase — transaction pooler at runtime; session pooler for migrations.
+      # On Render, do not point DIRECT_URL at db.<ref>.supabase.co:5432 unless
+      # your Supabase project has IPv4 enabled; direct connections need IPv6 by
+      # default and Prisma will fail with P1001.
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL

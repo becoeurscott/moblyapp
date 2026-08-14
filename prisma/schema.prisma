@@ -12,9 +12,11 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  // Runtime traffic goes through the Supabase pooler (pgbouncer, port 6543).
+  // Runtime traffic goes through the Supabase transaction pooler (port 6543).
   url = env("DATABASE_URL")
-  // Migrations need a direct connection (port 5432) — pgbouncer can't run them.
+  // Migrations use DIRECT_URL. On IPv4-only hosts such as Render, set this to
+  // Supabase's session pooler (port 5432), not db.<ref>.supabase.co direct,
+  // unless the project has Supabase's IPv4 add-on.
   directUrl = env("DIRECT_URL")
 }
 

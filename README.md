@@ -19,8 +19,10 @@ Auth (phone OTP + JWT), users/roles (visitor ↔ owner), listings (CRUD + search
    cp .env.example .env
    ```
    Two connection strings are required:
-   - `DATABASE_URL` → **pooler** (`…pooler.supabase.com:6543`, `?pgbouncer=true&connection_limit=1`), used at runtime.
-   - `DIRECT_URL` → **direct** (`db.<ref>.supabase.co:5432`), used by Prisma for migrations — pgbouncer cannot run them.
+   - `DATABASE_URL` → Supabase **transaction pooler** (`…pooler.supabase.com:6543`, `?pgbouncer=true&connection_limit=1`), used at runtime.
+   - `DIRECT_URL` → Supabase **session pooler** (`…pooler.supabase.com:5432`), used by Prisma migrations on IPv4-only hosts such as Render.
+
+   Do not use `db.<ref>.supabase.co:5432` on Render unless your Supabase project has IPv4 enabled. Supabase direct connections are IPv6-only by default, which causes Prisma `P1001` during `migrate deploy`.
 
    Percent-encode special characters in the password (`@` → `%40`, `#` → `%23`, `!` is safe).
 3. **Migrate + seed**

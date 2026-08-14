@@ -19,8 +19,25 @@ services:
         value: "1"
       - key: CORS_ORIGINS
         value: "*"
+      # MUST stay "false" on any publicly reachable host. In dev mode
+      # src/services/otp.ts returns the login code in the HTTP response body
+      # (and logs it), so anyone who can reach this URL can request a code for
+      # any phone number and read it straight back — account takeover for
+      # every account on the service.
+      #
+      # With this false and no SMS provider wired, requesting an OTP returns
+      # 503 by design. Password, Apple and Google sign-in are unaffected;
+      # phone signup needs the TWILIO_* vars below to be filled in.
       - key: OTP_DEV_MODE
-        value: "true" # set to false once an SMS provider is wired
+        value: "false"
+
+      # Twilio — required for phone signup / OTP sign-in to work at all.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_MESSAGING_SERVICE_SID
+        sync: false
 
       # Supabase — pooler URL at runtime, direct URL for migrations.
       - key: DATABASE_URL

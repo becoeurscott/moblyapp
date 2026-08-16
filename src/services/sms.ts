@@ -67,6 +67,10 @@ const TWILIO_USER_ERRORS: Record<number, string> = {
   30006: 'Numéro injoignable ou ligne fixe',
 };
 
+const TWILIO_STATUS_ERRORS: Record<number, string> = {
+  403: 'SMS refusé par Twilio. Vérifiez les permissions pays, le sender ID et le numéro destinataire.',
+};
+
 export interface SmsResult {
   delivered: boolean;
   /** Twilio message SID, for correlating with their console. */
@@ -112,12 +116,23 @@ export async function sendSms(to: string, body: string): Promise<SmsResult> {
     return { delivered: true, sid: message.sid };
   } catch (err) {
     const code = (err as { code?: number }).code;
+    const status = (err as { status?: number }).status;
     if (code && TWILIO_USER_ERRORS[code]) {
       throw new ApiError(400, TWILIO_USER_ERRORS[code], 'VALIDATION_FAILED');
     }
+    if (status && TWILIO_STATUS_ERRORS[status]) {
+      throw new ApiError(502, TWILIO_STATUS_ERRORS[status], 'INTERNAL');
+    }
     // Log the real reason, return something generic — Twilio errors can carry
     // account identifiers we don't want in a client response.
-    console.error('[sms] send failed', { to, code, err });
+    console.error('[sms] send failed', {
+      to,
+      code,
+      status,
+      message: err instanceof Error ? err.message : String(err),
+      moreInfo: (err as { moreInfo?: string }).moreInfo,
+      details: (err as { details?: unknown }).details,
+    });
     throw new ApiError(502, 'Envoi du SMS impossible. Réessayez.', 'INTERNAL');
   }
 }

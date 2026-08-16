@@ -122,7 +122,7 @@ export async function createOtp(
   });
 
   const code = generateCode();
-  await prisma.otp.create({
+  const otp = await prisma.otp.create({
     data: {
       phone,
       code: hashCode(phone, code),
@@ -134,7 +134,16 @@ export async function createOtp(
   // exercise real delivery locally. Dev mode only controls whether the code is
   // *also* echoed back for the simulator to prefill.
   if (smsConfigured()) {
-    await sendSms(phone, `Votre code Mobly est ${code}. Il expire dans 5 minutes.`);
+    try {
+      await sendSms(phone, `Votre code Mobly est ${code}. Il expire dans 5 minutes.`);
+    } catch (err) {
+      // Delivery failed, so this code never reached the user. Retire it
+      // immediately so a retry does not hit the resend cooldown or verify a
+      // code that was only generated server-side.
+      await prisma.otp.update({ where: { id: otp.id }, data: { consumed: true } })
+        .catch(() => {});
+      throw err;
+    }
   }
 
   if (env.otpDevMode) {
@@ -193,5 +202,4 @@ export async function pruneOtps(): Promise<number> {
   });
   return count;
 }
-
 

@@ -71,6 +71,12 @@ const TWILIO_STATUS_ERRORS: Record<number, string> = {
   403: 'SMS refusé par Twilio. Vérifiez les permissions pays, le sender ID et le numéro destinataire.',
 };
 
+function phoneFieldError(message: string): ApiError {
+  const err = new ApiError(422, message, 'VALIDATION_FAILED');
+  (err as ApiError & { fields?: Record<string, string> }).fields = { phone: message };
+  return err;
+}
+
 export interface SmsResult {
   delivered: boolean;
   /** Twilio message SID, for correlating with their console. */
@@ -118,10 +124,10 @@ export async function sendSms(to: string, body: string): Promise<SmsResult> {
     const code = (err as { code?: number }).code;
     const status = (err as { status?: number }).status;
     if (code && TWILIO_USER_ERRORS[code]) {
-      throw new ApiError(400, TWILIO_USER_ERRORS[code], 'VALIDATION_FAILED');
+      throw phoneFieldError(TWILIO_USER_ERRORS[code]);
     }
     if (status && TWILIO_STATUS_ERRORS[status]) {
-      throw new ApiError(502, TWILIO_STATUS_ERRORS[status], 'INTERNAL');
+      throw phoneFieldError(TWILIO_STATUS_ERRORS[status]);
     }
     // Log the real reason, return something generic — Twilio errors can carry
     // account identifiers we don't want in a client response.

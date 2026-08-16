@@ -85,6 +85,10 @@ function phoneFieldError(message: string): ApiError {
   return err;
 }
 
+function maskPhone(e164: string): string {
+  return e164.replace(/(\+\d{3})\d+(\d{2})$/, '$1…$2');
+}
+
 export interface SmsResult {
   delivered: boolean;
   /** Twilio message SID, for correlating with their console. */
@@ -126,6 +130,11 @@ export async function sendSms(to: string, body: string): Promise<SmsResult> {
       ...(env.twilio.messagingServiceSid
         ? { messagingServiceSid: env.twilio.messagingServiceSid }
         : { from: env.twilio.fromNumber }),
+    });
+    console.info('[sms] accepted by Twilio', {
+      to: maskPhone(to),
+      sid: message.sid,
+      status: message.status,
     });
     return { delivered: true, sid: message.sid };
   } catch (err) {

@@ -18,6 +18,14 @@ function getClient(): Twilio | null {
   if (!env.twilio.configured) return null;
   if (!client) {
     const { accountSid, authToken, apiKeySid, apiKeySecret } = env.twilio;
+    if (!accountSid.startsWith('AC')) {
+      console.error('[sms] invalid TWILIO_ACCOUNT_SID; expected AC... account SID');
+      throw new ApiError(503, 'Configuration SMS invalide', 'INTERNAL');
+    }
+    if ((apiKeySid || apiKeySecret) && !apiKeySid.startsWith('SK')) {
+      console.error('[sms] invalid TWILIO_API_KEY_SID; expected SK... API Key SID');
+      throw new ApiError(503, 'Configuration SMS invalide', 'INTERNAL');
+    }
     client = apiKeySid && apiKeySecret
       // API Key auth: the key is passed as the username and the account SID
       // supplied separately, so the key can be revoked without touching the

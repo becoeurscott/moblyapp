@@ -88,16 +88,19 @@ export const env = {
     apiKeySecret: process.env.TWILIO_API_KEY_SECRET ?? '',
     fromNumber: process.env.TWILIO_FROM_NUMBER ?? '',
     messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID ?? '',
+    verifyServiceSid: process.env.TWILIO_VERIFY_SERVICE_SID ?? '',
     allowedPrefixes: (process.env.SMS_ALLOWED_COUNTRIES ?? '237,33,32,1,44,49,41,39,34')
       .split(',')
       .map((s) => s.trim().replace(/^\+/, ''))
       .filter(Boolean),
-    /** True when we have an account, some credential, and a sender. */
+    /** True when we have an account, some credential, and a way to send. */
     get configured(): boolean {
       const hasCredential =
         Boolean(this.authToken) || Boolean(this.apiKeySid && this.apiKeySecret);
       return Boolean(
-        this.accountSid && hasCredential && (this.fromNumber || this.messagingServiceSid)
+        this.accountSid
+          && hasCredential
+          && (this.fromNumber || this.messagingServiceSid || this.verifyServiceSid)
       );
     },
   },

@@ -2,6 +2,7 @@ import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { prisma } from '../lib/prisma';
 import { env } from '../config/env';
 import { sendSms, smsConfigured, isAllowedDestination } from './sms';
+import { checkVerify, startVerify, verifyConfigured } from './verify';
 import { ApiError } from '../lib/http';
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -94,6 +95,11 @@ export async function createOtp(
     throw new ApiError(503, 'Service SMS indisponible', 'INTERNAL');
   }
 
+  if (verifyConfigured() && !env.otpDevMode) {
+    await startVerify(phone);
+    return { code: null };
+  }
+
   // Per-phone volume caps, checked before the cooldown so a caller who has
   // burned their budget is told that, not asked to wait 60s and try again.
   const now = Date.now();
@@ -164,6 +170,10 @@ export async function createOtp(
  * rotating addresses against a single number.
  */
 export async function verifyOtp(phone: string, code: string): Promise<OtpVerifyResult> {
+  if (verifyConfigured() && !env.otpDevMode) {
+    return checkVerify(phone, code);
+  }
+
   const otp = await prisma.otp.findFirst({
     where: { phone, consumed: false },
     orderBy: { createdAt: 'desc' },
@@ -202,4 +212,3 @@ export async function pruneOtps(): Promise<number> {
   });
   return count;
 }
-

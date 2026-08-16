@@ -142,7 +142,7 @@ signupRouter.post(
       );
     }
 
-    res.json({ sent: true, phone, codeLength: otpLength, devCode: code });
+    res.json({ sent: true, phone, codeLength: otpLength(), devCode: code });
   })
 );
 
@@ -154,8 +154,9 @@ signupRouter.post(
   '/verify',
   otpVerifyLimiter,
   asyncHandler(async (req, res) => {
+    const codeLength = otpLength();
     const schema = signupSchema.extend({
-      code: z.string().length(otpLength, `Code à ${otpLength} chiffres`),
+      code: z.string().length(codeLength, `Code à ${codeLength} chiffres`),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) validationError(fieldErrorsFrom(parsed.error));
@@ -359,7 +360,7 @@ signupRouter.post(
       pendingToken,
       email: identity.email,
       fullName: identity.fullName ?? null,
-      codeLength: otpLength,
+      codeLength: otpLength(),
     });
   })
 );
@@ -404,7 +405,7 @@ signupRouter.post(
         'OTP_RATE_LIMITED'
       );
     }
-    res.json({ sent: true, phone, codeLength: otpLength, devCode: code });
+    res.json({ sent: true, phone, codeLength: otpLength(), devCode: code });
   })
 );
 
@@ -416,11 +417,12 @@ signupRouter.post(
   '/oauth/phone/verify',
   otpVerifyLimiter,
   asyncHandler(async (req, res) => {
+    const codeLength = otpLength();
     const { pendingToken, phone: raw, code, fullName } = z
       .object({
         pendingToken: z.string().min(20),
         phone: z.string().min(6),
-        code: z.string().length(otpLength),
+        code: z.string().length(codeLength),
         fullName: z.string().trim().min(2).max(80).optional(),
       })
       .parse(req.body);

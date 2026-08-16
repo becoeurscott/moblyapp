@@ -352,7 +352,7 @@ authRouter.post(
       sent: true,
       maskedPhone: maskPhone(user.phone),
       resetToken: await issueResetToken(user.id, user.phone),
-      codeLength: otpLength,
+      codeLength: otpLength(),
       devCode: code,
     });
   })
@@ -362,10 +362,11 @@ authRouter.post(
   '/password/reset',
   otpVerifyLimiter,
   asyncHandler(async (req, res) => {
+    const codeLength = otpLength();
     const { resetToken, code, password } = z
       .object({
         resetToken: z.string().min(20),
-        code: z.string().length(otpLength),
+        code: z.string().length(codeLength),
         password: z.string().min(1),
       })
       .parse(req.body);

@@ -30,8 +30,12 @@ const PHONE_DAILY_CAP = 15;
 
 export type OtpVerifyResult = 'ok' | 'invalid' | 'expired' | 'locked';
 
+const VERIFY_OTP_LENGTH = 6;
+
 /** Exposed so routes can validate length without duplicating the constant. */
-export const otpLength = OTP_LENGTH;
+export function otpLength(): number {
+  return verifyConfigured() && !env.otpDevMode ? VERIFY_OTP_LENGTH : OTP_LENGTH;
+}
 
 /**
  * Codes are stored as an HMAC, never in plaintext.

@@ -81,6 +81,19 @@ export async function createOtp(
     );
   }
 
+  // Same reasoning as the country check above: if no code can possibly be
+  // delivered, fail here rather than after the record exists.
+  //
+  // This used to be checked at the *end*, after the OTP row had already been
+  // written, which made an unconfigured provider look like a rate limit: the
+  // first attempt 503'd but left a live row behind, so the retry hit the 60s
+  // resend cooldown ("Patientez 59s") and every attempt burned the per-phone
+  // hourly/daily caps — five failures in an hour locked the number out over
+  // SMS that were never sent.
+  if (!smsConfigured() && !env.otpDevMode) {
+    throw new ApiError(503, 'Service SMS indisponible', 'INTERNAL');
+  }
+
   // Per-phone volume caps, checked before the cooldown so a caller who has
   // burned their budget is told that, not asked to wait 60s and try again.
   const now = Date.now();
@@ -131,11 +144,7 @@ export async function createOtp(
     return { code };
   }
 
-  if (!smsConfigured()) {
-    // Production with no provider: the user would wait for a code that is
-    // never coming, so fail loudly instead.
-    throw new ApiError(503, 'Service SMS indisponible', 'INTERNAL');
-  }
+  // The "no provider" case is handled up front now, before any row is written.
   return { code: null };
 }
 

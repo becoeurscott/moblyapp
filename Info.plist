@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Keys that Xcode's generated Info.plist can't express (dictionaries).
+	  The INFOPLIST_KEY_* build settings still merge into this file.
+	-->
+
+	<!--
+	  App Transport Security.
+
+	  `NSAllowsLocalNetworking` permits cleartext HTTP to LAN addresses only
+	  (192.168.x.x, .local, etc.) so a device build can reach a dev server on
+	  the same wifi. It does NOT weaken ATS for the public internet — a
+	  production https:// host is still required and still validated.
+	-->
+	<!--
+	  Export compliance. The app uses only HTTPS/TLS and Apple's own Keychain
+	  crypto, which is exempt. Declaring it here means App Store Connect stops
+	  gating every single build behind the manual encryption questionnaire.
+	  If a custom crypto implementation is ever added, this must be revisited.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+
+	<!-- iOS 14+ requires this before an app may touch the local network. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Mobly se connecte au serveur de développement sur votre réseau local.</string>
+
+	<!--
+	  API the app talks to. Overridable per build configuration without
+	  touching code; the app also accepts an API_BASE_URL environment
+	  variable, which takes priority when running from Xcode.
+	-->
+	<key>MoblyAPIBaseURL</key>
+	<string>$(MOBLY_API_BASE_URL)</string>
+
+	<!--
+	  URL schemes the app claims. Google's OAuth for iOS uses the *reversed*
+	  client id as the redirect-uri scheme:
+	    client id  : 961218606453-3ovpslv8p174c6sii8t9h3otb7gn4er9.apps.googleusercontent.com
+	    reversed   : com.googleusercontent.apps.961218606453-3ovpslv8p174c6sii8t9h3otb7gn4er9
+	  ASWebAuthenticationSession only intercepts callbacks whose scheme is
+	  declared here — without it Google's redirect opens Safari instead of
+	  returning to the app.
+	-->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.mobly.app.google</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.961218606453-3ovpslv8p174c6sii8t9h3otb7gn4er9</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

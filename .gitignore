@@ -1,17 +1,42 @@
+# Xcode build output
+build/
+DerivedData/
+*.o
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.xcarchive
+
+# Per-user Xcode state
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Swift Package Manager
+.swiftpm/
+.build/
+
+# macOS
+.DS_Store
+
+# Node / backend
 node_modules/
 dist/
 *.log
-.DS_Store
 
-# Every env file except the committed template. `.env.bak` in particular held
-# live Supabase and Cloudinary credentials.
+# Env files
 .env
 .env.*
 !.env.example
 
-# APNs signing key and anything else secret
+# Signing & secrets
 secrets/
 *.p8
+*.p12
+*.mobileprovision
+*.cer
 
-# Database dumps — these contain real user rows.
+# Database dumps
 backups/

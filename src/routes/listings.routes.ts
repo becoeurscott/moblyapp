@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { Prisma, DealType } from '@prisma/client';
+import { Prisma, DealType, ListingStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
-import { requireAuth, requireOwner } from '../middleware/auth';
+import { optionalAuth, requireAuth, requireOwner } from '../middleware/auth';
 import { serializeListing } from '../lib/serialize';
 import { cacheGet, cacheSet, cacheBust } from '../lib/cache';
 
@@ -16,6 +16,8 @@ const LIST_TTL_MS = 60_000;
 const ownerSelect = {
   owner: { select: { id: true, fullName: true, verified: true, rating: true, avatarUrl: true } },
 } as const;
+
+const PUBLIC_LISTING_STATUSES: ListingStatus[] = [ListingStatus.ACTIVE, ListingStatus.BOOSTED];
 
 /** GET /api/listings — search + filter. Boosted listings float to the top. */
 listingsRouter.get(
@@ -46,7 +48,10 @@ listingsRouter.get(
       return res.json(hit);
     }
 
-    const where: Prisma.ListingWhereInput = { available: true };
+    const where: Prisma.ListingWhereInput = {
+      available: true,
+      status: { in: PUBLIC_LISTING_STATUSES },
+    };
     if (q.category && q.category !== 'Tous') where.category = q.category;
     if (q.region) where.region = q.region;
     if (q.city) where.city = { contains: q.city, mode: 'insensitive' };
@@ -71,7 +76,7 @@ listingsRouter.get(
       prisma.listing.findMany({
         where,
         include: ownerSelect,
-        orderBy: [{ status: 'desc' }, { createdAt: 'desc' }], // BOOSTED > PENDING > ACTIVE alphabetically? see note
+        orderBy: [{ createdAt: 'desc' }],
         skip: q.offset,
         take: q.limit,
       }),
@@ -95,15 +100,24 @@ listingsRouter.get(
  *  double-counted so the metric reflects real interest. */
 listingsRouter.get(
   '/:id',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const source = typeof req.query.source === 'string'
       ? String(req.query.source).slice(0, 32) : null;
-    const listing = await prisma.listing.update({
+    const listing = await prisma.listing.findUnique({
       where: { id: req.params.id },
-      data: { views: { increment: 1 } },
       include: ownerSelect,
     }).catch(() => null);
     if (!listing) throw new ApiError(404, 'Annonce introuvable', 'NOT_FOUND');
+    const publicStatus = PUBLIC_LISTING_STATUSES.includes(listing.status);
+    const canSeePrivate = listing.ownerId === req.userId || req.user?.isAdmin === true;
+    if ((!listing.available || !publicStatus) && !canSeePrivate) {
+      throw new ApiError(404, 'Annonce introuvable', 'NOT_FOUND');
+    }
+    await prisma.listing.update({
+      where: { id: listing.id },
+      data: { views: { increment: 1 } },
+    });
     // Skip the raw event when the owner is viewing their own annonce —
     // otherwise the "traffic" chart is dominated by the owner refreshing.
     if (listing.ownerId !== req.userId) {

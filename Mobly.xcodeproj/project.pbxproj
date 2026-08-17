@@ -263,7 +263,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				CODE_SIGN_ENTITLEMENTS = Mobly.entitlements;
 				INFOPLIST_FILE = Info.plist;
-				MOBLY_API_BASE_URL = "http://127.0.0.1:4000/api/v1";
+				MOBLY_API_BASE_URL = "https://mobly-backend.onrender.com/api/v1";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Mobly utilise votre position pour afficher les espaces proches de vous et renseigner votre ville.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

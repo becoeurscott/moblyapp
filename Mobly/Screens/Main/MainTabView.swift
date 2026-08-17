@@ -199,12 +199,20 @@ struct MoblyTabBar: View {
                             .font(.moblyBody(9.5, weight: active ? .semibold : .regular))
                     }
                     .foregroundStyle(active ? Color.moblyPrimary : Color(hex: 0x9A9DAC))
+                    // This padding used to sit on the HStack. Moved inside the
+                    // button so it belongs to the tap target instead of the bar
+                    // — same bar height, but each cell is now ~61pt tall rather
+                    // than the ~37pt of glyph+label.
+                    .padding(.vertical, 12)
                     .frame(maxWidth: .infinity)
+                    // Without this, only the opaque pixels of the icon and text
+                    // accept touches, so taps beside the glyph fall through and
+                    // the tab appears not to respond.
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.vertical, 12)
         .padding(.horizontal, 10)
         .modifier(LiquidGlassBar(cornerRadius: 30))
         .shadow(color: Color(hex: 0x14152A).opacity(0.14), radius: 20, y: 8)

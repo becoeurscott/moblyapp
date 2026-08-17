@@ -87,7 +87,18 @@ struct RootView: View {
             case .splash:
                 SplashView {
                     withAnimation(.easeInOut(duration: 0.45)) {
-                        route = .onboarding
+                        // A token in the Keychain means this user was signed in
+                        // last time, so go straight to the tab bar rather than
+                        // replaying onboarding + welcome on every cold launch.
+                        //
+                        // Deliberately routed on the *stored* token instead of
+                        // waiting for bootstrap() to confirm with /me: on a cold
+                        // Render instance that call can take ~50s, and holding
+                        // the splash for it would read as a frozen app. If the
+                        // token turns out to be revoked, bootstrap posts
+                        // `sessionExpired` and the handler below bounces to
+                        // Welcome a moment later.
+                        route = MoblyAPI.shared.isAuthenticated ? .placeholder : .onboarding
                     }
                 }
                 .transition(.opacity)

@@ -133,6 +133,16 @@ struct ListingDetailView: View {
             }
         }
         .background(Color.white)
+        // Belt-and-braces (again): even with ignoresSafeArea on heroGallery
+        // itself, a flat gray band the height of the status bar still showed
+        // above the photo — this screen sits in a ZStack that, as a whole,
+        // was still reserving the top safe area regardless of what an
+        // individual child requested. Ignoring it here, on the true
+        // outermost container, is what finally lets the photo paint behind
+        // the status bar. Harmless for the bottom edge: stickyBar already
+        // handles the home-indicator inset itself via a fixed 30pt bottom
+        // padding plus its own `.ignoresSafeArea(edges: .bottom)`.
+        .ignoresSafeArea(edges: .top)
         .onAppear {
             SessionTracker.shared.log("listing.view", [
                 "listingId": listing.id,
@@ -250,6 +260,13 @@ struct ListingDetailView: View {
 
     // MARK: Hero gallery
 
+    /// Roughly half the screen, like the Airbnb/Zillow immersive cover — was a
+    /// flat 380pt, which on a tall phone left the photo covering barely a
+    /// third of the screen instead of reading as a cover image.
+    private var heroHeight: CGFloat {
+        UIScreen.main.bounds.height * 0.5
+    }
+
     private var heroGallery: some View {
         ZStack(alignment: .top) {
             // Swipeable auto-sliding gallery with rounded bottom corners.
@@ -257,14 +274,14 @@ struct ListingDetailView: View {
                 ForEach(Array(gallery.enumerated()), id: \.offset) { i, name in
                     RemoteImage(source: name, width: ImageSlot.hero, contentMode: .fill)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 380)
+                        .frame(height: heroHeight)
                         .clipped()
                         .contentShape(Rectangle())
                         .onTapGesture { showViewer = true }
                         .tag(i)
                 }
             }
-            .frame(height: 380)
+            .frame(height: heroHeight)
             .tabViewStyle(.page(indexDisplayMode: .never))
             .clipShape(UnevenRoundedRectangle(
                 cornerRadii: .init(bottomLeading: 26, bottomTrailing: 26),
@@ -315,9 +332,17 @@ struct ListingDetailView: View {
                 .background(Capsule().fill(.black.opacity(0.28)))
                 .padding(.bottom, 16)
             }
-            .frame(height: 380)
+            .frame(height: heroHeight)
         }
-        .frame(height: 380)
+        .frame(height: heroHeight)
+        // Belt-and-braces: the outer VStack in `body` already carries
+        // `.ignoresSafeArea(edges: .top)`, but that left a plain white strip
+        // the height of the status bar / Dynamic Island sitting above the
+        // photo — the safe-area top inset was still being reserved somewhere
+        // in the propagation through the ZStack/VStack above. Applying it
+        // directly on the hero itself is what actually makes the photo
+        // (and its overlaid close/share/heart buttons) reach true y = 0.
+        .ignoresSafeArea(edges: .top)
     }
 
     // MARK: Content

@@ -63,7 +63,16 @@ final class AuthStore: ObservableObject {
             apply(u)
         } catch let e as MoblyAPI.APIError {
             // Offline at launch isn't a sign-out — keep the token and retry later.
-            if !e.isOffline { api.clearSession() }
+            if !e.isOffline {
+                api.clearSession()
+                // RootView routes straight to the tab bar when a token exists,
+                // without waiting for this call. `clearSession()` only drops the
+                // token — it notifies nobody — so on a revoked or expired token
+                // the user would sit in the signed-in UI while every request
+                // 401s. Post the same notification a refused refresh posts so
+                // they get bounced to Welcome.
+                NotificationCenter.default.post(name: MoblyAPI.sessionExpired, object: nil)
+            }
         } catch {
             // Leave the session alone on an unrecognised failure.
         }

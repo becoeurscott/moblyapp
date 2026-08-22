@@ -22,6 +22,8 @@ enum AppRoute: Hashable {
     case placeholder
 }
 
+private let hasSeenOnboardingKey = "hasSeenOnboarding"
+
 struct RootView: View {
     @ObservedObject private var lang = AppLang.shared
     @ObservedObject private var listingStore = ListingStore.shared
@@ -98,13 +100,29 @@ struct RootView: View {
                         // token turns out to be revoked, bootstrap posts
                         // `sessionExpired` and the handler below bounces to
                         // Welcome a moment later.
-                        route = MoblyAPI.shared.isAuthenticated ? .placeholder : .onboarding
+                        if MoblyAPI.shared.isAuthenticated {
+                            route = .placeholder
+                        } else {
+                            // Onboarding is a one-time, first-launch-ever intro.
+                            // The flag is written the instant onboarding is
+                            // ABOUT to show, not on completion — otherwise a
+                            // user who swipes partway through and closes the
+                            // app would see the slides restart from the
+                            // beginning next launch. First launch ever shows
+                            // it; every launch after that (finished, closed
+                            // mid-way, or already at Welcome) goes straight to
+                            // Welcome.
+                            let seen = UserDefaults.standard.bool(forKey: hasSeenOnboardingKey)
+                            if !seen { UserDefaults.standard.set(true, forKey: hasSeenOnboardingKey) }
+                            route = seen ? .welcome : .onboarding
+                        }
                     }
                 }
                 .transition(.opacity)
 
             case .onboarding:
                 OnboardingView {
+                    UserDefaults.standard.set(true, forKey: hasSeenOnboardingKey)
                     withAnimation(.easeInOut(duration: 0.4)) {
                         route = .welcome
                     }

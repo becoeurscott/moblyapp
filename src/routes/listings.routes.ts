@@ -34,7 +34,7 @@ listingsRouter.get(
         min: z.coerce.number().optional(),
         max: z.coerce.number().optional(),
         rooms: z.coerce.number().optional(),
-        limit: z.coerce.number().min(1).max(100).default(30),
+        limit: z.coerce.number().min(1).max(500).default(200),
         offset: z.coerce.number().min(0).default(0),
       })
       .parse(req.query);

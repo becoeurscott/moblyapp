@@ -64,63 +64,66 @@ struct MainTabView: View {
         ZStack(alignment: .bottom) {
             Color.white.ignoresSafeArea()
 
-            Group {
-                switch tab {
-                case .home:
-                    HomeView(
-                        onOpenListing: { selectedListing = $0 },
-                        onNotifications: { showNotifications = true },
-                        onOpenCategory: { cat in
-                            searchCategory = cat
-                            searchQuery = ""
-                            showSearch = true
-                        },
-                        onOpenCity: { city in
-                            searchCategory = nil
-                            searchQuery = city
-                            showSearch = true
-                        },
-                        onOpenCityMap: { city in
-                            exploreLocation = city
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { tab = .explore }
-                        },
-                        onOpenExplore: { showExplore = true }
-                    )
-                case .explore:
-                    ExploreView(
-                        onOpenListing: { selectedListing = $0 },
-                        initialLocation: exploreLocation,
-                        initialFilters: explorePresetFilters,
-                        onLocationConsumed: {
-                            exploreLocation = ""
-                            explorePresetFilters = nil
-                        }
-                    )
-                case .messages:
-                    MessagesView()
-                case .favorites:
-                    FavoritesView(
-                        onOpenListing: { selectedListing = $0 },
-                        onOpenSearch: { search in
-                            exploreLocation = search.location
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { tab = .explore }
-                        },
-                        onOpenSavedSearch: { item in
-                            explorePresetFilters = item.filters
-                            // Non-empty string so `onLocationConsumed`
-                            // clears both after Explore reads them.
-                            exploreLocation = item.label
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { tab = .explore }
-                        }
-                    )
-                case .profile:
-                    ProfileView(
-                        onOpenFavorites: {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { tab = .favorites }
-                        },
-                        onLogout: onLogout
-                    )
-                }
+            ZStack {
+                HomeView(
+                    onOpenListing: { selectedListing = $0 },
+                    onNotifications: { showNotifications = true },
+                    onOpenCategory: { cat in
+                        searchCategory = cat
+                        searchQuery = ""
+                        showSearch = true
+                    },
+                    onOpenCity: { city in
+                        searchCategory = nil
+                        searchQuery = city
+                        showSearch = true
+                    },
+                    onOpenCityMap: { city in
+                        exploreLocation = city
+                        tab = .explore
+                    },
+                    onOpenExplore: { showExplore = true }
+                )
+                .opacity(tab == .home ? 1 : 0)
+                .allowsHitTesting(tab == .home)
+
+                ExploreView(
+                    onOpenListing: { selectedListing = $0 },
+                    initialLocation: exploreLocation,
+                    initialFilters: explorePresetFilters,
+                    onLocationConsumed: {
+                        exploreLocation = ""
+                        explorePresetFilters = nil
+                    }
+                )
+                .opacity(tab == .explore ? 1 : 0)
+                .allowsHitTesting(tab == .explore)
+
+                MessagesView()
+                    .opacity(tab == .messages ? 1 : 0)
+                    .allowsHitTesting(tab == .messages)
+
+                FavoritesView(
+                    onOpenListing: { selectedListing = $0 },
+                    onOpenSearch: { search in
+                        exploreLocation = search.location
+                        tab = .explore
+                    },
+                    onOpenSavedSearch: { item in
+                        explorePresetFilters = item.filters
+                        exploreLocation = item.label
+                        tab = .explore
+                    }
+                )
+                .opacity(tab == .favorites ? 1 : 0)
+                .allowsHitTesting(tab == .favorites)
+
+                ProfileView(
+                    onOpenFavorites: { tab = .favorites },
+                    onLogout: onLogout
+                )
+                .opacity(tab == .profile ? 1 : 0)
+                .allowsHitTesting(tab == .profile)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -157,14 +160,7 @@ struct MainTabView: View {
             SearchResultsView(
                 initialCategory: searchCategory,
                 initialQuery: searchQuery,
-                onClose: { showSearch = false },
-                onOpenListing: { listing in
-                    showSearch = false
-                    // present detail after the search sheet dismisses
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        selectedListing = listing
-                    }
-                }
+                onClose: { showSearch = false }
             )
         }
     }
@@ -173,6 +169,7 @@ struct MainTabView: View {
 struct MoblyTabBar: View {
     @Binding var tab: MoblyTab
     @ObservedObject private var chat = ChatStore.shared
+    @Namespace private var pillNS
     private var hasUnread: Bool { chat.threads.contains { $0.unread > 0 } }
 
     var body: some View {
@@ -199,15 +196,21 @@ struct MoblyTabBar: View {
                             .font(.moblyBody(9.5, weight: active ? .semibold : .regular))
                     }
                     .foregroundStyle(active ? Color.moblyPrimary : Color(hex: 0x9A9DAC))
-                    // This padding used to sit on the HStack. Moved inside the
-                    // button so it belongs to the tap target instead of the bar
-                    // — same bar height, but each cell is now ~61pt tall rather
-                    // than the ~37pt of glyph+label.
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 4)
                     .frame(maxWidth: .infinity)
-                    // Without this, only the opaque pixels of the icon and text
-                    // accept touches, so taps beside the glyph fall through and
-                    // the tab appears not to respond.
+                    .background {
+                        if active {
+                            Capsule(style: .continuous)
+                                .fill(Color.moblyPrimary.opacity(0.14))
+                                .overlay(
+                                    Capsule(style: .continuous)
+                                        .stroke(Color.moblyPrimary.opacity(0.25), lineWidth: 1)
+                                )
+                                .shadow(color: Color.moblyPrimary.opacity(0.15), radius: 8, y: 2)
+                                .matchedGeometryEffect(id: "pill", in: pillNS)
+                        }
+                    }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

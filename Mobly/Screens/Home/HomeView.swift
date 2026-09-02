@@ -27,11 +27,20 @@ struct HomeView: View {
     private var searching: Bool { searchActive || !searchText.isEmpty }
 
     private var suggestions: [(name: String, region: String)] {
-        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        let q = searchText.trimmingCharacters(in: .whitespaces)
+            .folding(options: .diacriticInsensitive, locale: .current).lowercased()
         guard !q.isEmpty else { return [] }
         return MoblyData.searchableLocations.filter {
-            $0.name.lowercased().contains(q) || $0.region.lowercased().contains(q)
+            let name = $0.name.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+            let region = $0.region.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+            return name.contains(q) || q.contains(name)
+                || region.contains(q)
+                || Self.commonPrefixLen(name, q) >= 4
         }
+    }
+
+    private static func commonPrefixLen(_ a: String, _ b: String) -> Int {
+        zip(a, b).prefix(while: { $0 == $1 }).count
     }
 
     var body: some View {
@@ -241,6 +250,7 @@ struct HomeView: View {
                     .foregroundStyle(Color(hex: 0xC4C7D2))
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

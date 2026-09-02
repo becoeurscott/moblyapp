@@ -35,7 +35,49 @@ struct ExploreView: View {
             let target = MoblyData.canonicalCategory(activeChip)
             byCategory = MoblyData.all.filter { $0.category == target }
         }
-        return byCategory.filter { passesFilters($0) }
+        var filtered = byCategory.filter { passesFilters($0) }
+
+        if !committedLocation.isEmpty {
+            let city = committedLocation
+                .split(separator: ",").first
+                .map { String($0).trimmingCharacters(in: .whitespaces) }
+                ?? committedLocation
+            let cityFolded = city.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+            var cityFiltered = filtered.filter {
+                $0.location.folding(options: .diacriticInsensitive, locale: .current)
+                    .lowercased().contains(cityFolded)
+            }
+            if cityFiltered.isEmpty {
+                let words = cityFolded.split(separator: " ").map(String.init).filter { $0.count >= 3 }
+                cityFiltered = filtered.filter { listing in
+                    let loc = listing.location.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+                    return words.contains { loc.contains($0) }
+                }
+            }
+            filtered = cityFiltered
+            let target = locationCoordinate(committedLocation)
+            filtered.sort { a, b in
+                distSq(target, baseCoord(for: a)) < distSq(target, baseCoord(for: b))
+            }
+        }
+
+        return filtered
+    }
+
+    private func baseCoord(for l: Listing) -> CLLocationCoordinate2D {
+        if let lat = l.lat, let lng = l.lng, lat != 0 || lng != 0 {
+            return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+        }
+        let city = l.location.split(separator: ",").last.map {
+            String($0).trimmingCharacters(in: .whitespaces)
+        } ?? l.location
+        return locationCoordinate(city)
+    }
+
+    private func distSq(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> Double {
+        let dlat = a.latitude - b.latitude
+        let dlon = a.longitude - b.longitude
+        return dlat * dlat + dlon * dlon
     }
 
     /// Where to fly the camera on first appear / after "recentrer".
@@ -106,10 +148,28 @@ struct ExploreView: View {
     @State private var filters = FilterState()
 
     private var locationSuggestions: [(name: String, region: String)] {
-        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        let q = searchText.trimmingCharacters(in: .whitespaces)
+            .folding(options: .diacriticInsensitive, locale: .current).lowercased()
         guard !q.isEmpty else { return Array(MoblyData.searchableLocations.prefix(6)) }
         return MoblyData.searchableLocations.filter {
-            $0.name.lowercased().contains(q) || $0.region.lowercased().contains(q)
+            let name = $0.name.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+            let region = $0.region.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+            return name.contains(q) || q.contains(name)
+                || region.contains(q)
+                || Self.commonPrefixLen(name, q) >= 4
+        }
+    }
+
+    private static func commonPrefixLen(_ a: String, _ b: String) -> Int {
+        zip(a, b).prefix(while: { $0 == $1 }).count
+    }
+
+    private func bestCityMatch(_ query: String) -> (name: String, region: String)? {
+        let q = query.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+        return MoblyData.searchableLocations.first {
+            let name = $0.name.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+            return name == q || name.contains(q) || q.contains(name)
+                || Self.commonPrefixLen(name, q) >= 4
         }
     }
 
@@ -225,43 +285,33 @@ struct ExploreView: View {
     }
 
     var body: some View {
-        ZStack {
-            Map(position: $position) {
-                ForEach(Array(listings.enumerated()), id: \.element.id) { i, l in
-                    // Empty title — the pin already carries the price; the
-                    // extra floating label was redundant and cluttered the map.
-                    Annotation("", coordinate: coord(i)) {
-                        PricePin(price: shortPrice(l.price), selected: selected == l.id)
-                            .onTapGesture {
-                                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                                    selected = l.id
-                                }
+        Map(position: $position) {
+            ForEach(Array(listings.enumerated()), id: \.element.id) { i, l in
+                Annotation("", coordinate: coord(i)) {
+                    PricePin(price: shortPrice(l.price), selected: selected == l.id)
+                        .onTapGesture {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                selected = l.id
                             }
-                    }
+                        }
                 }
-                UserAnnotation()   // blue "you are here" dot
             }
-            // Show POIs (roads, parks, shops) like Google Maps does — the map
-            // reads as a real map, not a stripped background under the pins.
-            .mapStyle(.standard(elevation: .realistic,
-                                pointsOfInterest: .including([.publicTransport, .park, .school, .hospital, .airport, .restaurant, .cafe, .foodMarket, .store])))
-            .mapControls {
-                MapCompass()
-                MapScaleView()
-            }
-            .onMapCameraChange { ctx in
-                // Track what the user is actually looking at so the +/–
-                // buttons zoom relative to the current view, not the initial
-                // one, and "fit country" knows what it's toggling.
-                currentSpan = ctx.region.span
-                currentCenter = ctx.region.center
-            }
-            .ignoresSafeArea()
-
+            UserAnnotation()
+        }
+        .mapStyle(.standard(elevation: .realistic,
+                            pointsOfInterest: .including([.publicTransport, .park, .school, .hospital, .airport, .restaurant, .cafe, .foodMarket, .store])))
+        .mapControls {
+            MapCompass()
+            MapScaleView()
+        }
+        .onMapCameraChange { ctx in
+            currentSpan = ctx.region.span
+            currentCenter = ctx.region.center
+        }
+        .ignoresSafeArea()
+        .overlay(alignment: .top) {
             VStack(spacing: 0) {
                 topBar
-                // Dropdown is now part of the same VStack as the search bar
-                // — attached, sized to its content, no full-screen overlay.
                 if searchActive {
                     searchDropdown
                         .padding(.horizontal, 18)
@@ -271,18 +321,21 @@ struct ExploreView: View {
                 if !searchActive {
                     chipRow.padding(.top, 10)
                 }
-                Spacer()
-                if !searchActive {
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if !searchActive {
+                Group {
                     if let sel = listings.first(where: { $0.id == selected }) {
                         selectedPreview(sel)
-                            .padding(.bottom, 112)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     } else if listings.isEmpty {
-                        emptyFilterState.padding(.bottom, 112)
+                        emptyFilterState
                     } else {
-                        carousel.padding(.bottom, 112) // clear the floating tab bar
+                        carousel
                     }
                 }
+                .padding(.bottom, 112)
             }
         }
         .sheet(isPresented: $showFilters) {
@@ -297,6 +350,12 @@ struct ExploreView: View {
                 goTo(initialLocation)
                 onLocationConsumed()
             }
+        }
+        .onChange(of: initialLocation) { _, loc in
+            guard !loc.isEmpty else { return }
+            if let preset = initialFilters { filters = preset }
+            goTo(loc)
+            onLocationConsumed()
         }
     }
 
@@ -424,13 +483,22 @@ struct ExploreView: View {
                                   action: { goTo("\(s.name), \(s.region)") })
                 }
             } else if placeCompleter.suggestions.isEmpty {
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(Color(hex: 0x9A9DAC))
-                    Text("Aucun résultat pour \"\(searchText)\"")
-                        .font(.moblyBody(13))
-                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                let local = locationSuggestions
+                if !local.isEmpty {
+                    ForEach(local, id: \.name) { s in
+                        suggestionRow(title: s.name,
+                                      subtitle: "\(s.region), Cameroun",
+                                      action: { goTo("\(s.name), \(s.region)") })
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(Color(hex: 0x9A9DAC))
+                        Text("Aucun résultat pour \"\(searchText)\"")
+                            .font(.moblyBody(13))
+                            .foregroundStyle(Color(hex: 0x9A9DAC))
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 14)
                 }
-                .padding(.horizontal, 16).padding(.vertical, 14)
             } else {
                 ForEach(placeCompleter.suggestions) { s in
                     suggestionRow(title: s.title,
@@ -443,38 +511,37 @@ struct ExploreView: View {
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white)
         )
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: Color(hex: 0x14152A).opacity(0.14), radius: 16, y: 8)
-        // Sizes to content — no whitespace below the last row.
         .fixedSize(horizontal: false, vertical: true)
         .onChange(of: searchText) { _, q in placeCompleter.update(query: q) }
     }
 
     private func suggestionRow(title: String, subtitle: String,
                                action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle().fill(Color.moblySurfaceTint).frame(width: 32, height: 32)
-                    Image(systemName: "mappin.and.ellipse")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.moblyPrimary)
-                }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(LT(title)).font(.moblyHeading(13.5))
-                        .foregroundStyle(Color.moblyTextPrimary)
-                        .lineLimit(1)
-                    Text(LT(subtitle)).font(.moblyBody(11.5))
-                        .foregroundStyle(Color(hex: 0x9A9DAC))
-                        .lineLimit(1)
-                }
-                Spacer()
-                Image(systemName: "arrow.up.left")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color(hex: 0xC4C7D2))
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(Color.moblySurfaceTint).frame(width: 32, height: 32)
+                Image(systemName: "mappin.and.ellipse")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.moblyPrimary)
             }
-            .padding(.horizontal, 14).padding(.vertical, 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(LT(title)).font(.moblyHeading(13.5))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                    .lineLimit(1)
+                Text(LT(subtitle)).font(.moblyBody(11.5))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+                    .lineLimit(1)
+            }
+            Spacer()
+            Image(systemName: "arrow.up.left")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color(hex: 0xC4C7D2))
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .onTapGesture { action() }
     }
 
     /// Resolve the user's picked place to a coordinate and zoom the map to
@@ -549,43 +616,53 @@ struct ExploreView: View {
             }
 
             HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
-                TextField("Explorer sur la carte", text: $searchText)
-                    .font(.moblyBody(13.5))
-                    .foregroundStyle(Color.moblyTextPrimary)
-                    .focused($searchActive)
-                    .autocorrectionDisabled()
-                    .submitLabel(.search)
-                    .onSubmit {
-                        let q = searchText.trimmingCharacters(in: .whitespaces)
-                        guard !q.isEmpty else { return }
-                        goTo(q)
-                        // Remember this query so the user can find it later
-                        // under Favoris > Recherches (and see the count).
-                        SavedSearchStore.shared.add(label: q,
-                                                    query: q,
-                                                    filters: filters)
-                    }
-                if !searchText.isEmpty {
-                    Button(action: clearSearch) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 15))
-                            .foregroundStyle(Color(hex: 0xC4C7D2))
-                    }
-                } else {
-                    Button { showFilters = true } label: {
-                        Image(systemName: "line.3.horizontal.decrease")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Color.moblyPrimary)
-                            .overlay(alignment: .topTrailing) {
-                                if filters.count > 0 {
-                                    Circle().fill(Color.moblyAccent)
-                                        .frame(width: 7, height: 7).offset(x: 5, y: -5)
+                ZStack {
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(Color(hex: 0x9A9DAC))
+                        TextField("Explorer sur la carte", text: $searchText)
+                            .font(.moblyBody(13.5))
+                            .foregroundStyle(Color.moblyTextPrimary)
+                            .focused($searchActive)
+                            .autocorrectionDisabled()
+                            .submitLabel(.search)
+                            .onSubmit {
+                                let q = searchText.trimmingCharacters(in: .whitespaces)
+                                guard !q.isEmpty else { return }
+                                if let match = bestCityMatch(q) {
+                                    goTo("\(match.name), \(match.region)")
+                                } else {
+                                    goTo(q)
                                 }
+                                SavedSearchStore.shared.add(label: q,
+                                                            query: q,
+                                                            filters: filters)
                             }
+                        if !searchText.isEmpty {
+                            Button(action: clearSearch) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(Color(hex: 0xC4C7D2))
+                            }
+                        }
                     }
+                    if !searchActive {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { searchActive = true }
+                    }
+                }
+                Button { showFilters = true } label: {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.moblyPrimary)
+                        .overlay(alignment: .topTrailing) {
+                            if filters.count > 0 {
+                                Circle().fill(Color.moblyAccent)
+                                    .frame(width: 7, height: 7).offset(x: 5, y: -5)
+                            }
+                        }
                 }
             }
             .padding(.horizontal, 16)
@@ -644,60 +721,116 @@ struct ExploreView: View {
 
     // MARK: Selected pin preview (mini detail)
 
+    private func previewCategoryLine(_ l: Listing) -> String {
+        let furnished = l.deals.contains("Meublé") ? "Meublé" : (l.deals.contains("Non meublé") ? "Non meublé" : nil)
+        if let f = furnished {
+            return "\(LT(l.category)) - \(f)"
+        }
+        return LT(l.category)
+    }
+
     private func selectedPreview(_ l: Listing) -> some View {
-        HStack(spacing: 12) {
-            ListingCover(listing: l, width: ImageSlot.thumb)
-                .frame(width: 96, height: 96)
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        ZStack(alignment: .topTrailing) {
+        VStack(spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
+                ListingCover(listing: l, width: ImageSlot.thumb)
+                    .frame(width: 56, height: 56)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(l.title)
+                        .font(.moblyHeading(14))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                        .lineLimit(1)
+                        .padding(.trailing, 28)
+                    Text(l.location)
+                        .font(.moblyBody(11))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Color.moblyAccent)
+                        Text(l.rating)
+                            .font(.moblyBody(11, weight: .semibold))
+                            .foregroundStyle(Color.moblyTextPrimary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.white.opacity(0.55)))
+                }
+                Spacer(minLength: 0)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
+                Text(previewCategoryLine(l))
+                    .font(.moblyBody(11))
+                    .foregroundStyle(Color(hex: 0x6B6F80))
+                    .lineLimit(1)
                 HStack(spacing: 3) {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 10)).foregroundStyle(Color.moblyPrimary)
-                    Text(l.rating).font(.moblyBody(11, weight: .semibold))
-                        .foregroundStyle(Color.moblyTextPrimary)
-                    Spacer()
-                    Button {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { selected = nil }
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(Color(hex: 0x9A9DAC))
-                            .frame(width: 24, height: 24)
-                            .background(Circle().fill(Color(hex: 0xF4F5F8)))
-                    }
-                    .buttonStyle(.plain)
+                    Text(l.price)
+                        .font(.moblyHeading(13))
+                        .foregroundStyle(Color.moblyPrimary)
+                    Text(LT(l.priceUnit))
+                        .font(.moblyBody(10))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
                 }
-                Text(l.title)
-                    .font(.moblyHeading(15))
-                    .foregroundStyle(Color.moblyTextPrimary)
-                    .lineLimit(1)
-                Text(l.location)
-                    .font(.moblyBody(11.5))
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
-                    .lineLimit(1)
-                HStack {
-                    HStack(spacing: 2) {
-                        Text(l.price).font(.moblyHeading(14)).foregroundStyle(Color.moblyPrimary)
-                        Text(LT(l.priceUnit)).font(.moblyBody(10)).foregroundStyle(Color(hex: 0x9A9DAC))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.45)))
+
+            HStack(spacing: 8) {
+                Button { onOpenListing(l) } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "bubble.left.fill")
+                            .font(.system(size: 10))
+                        Text("Message")
+                            .font(.moblyBody(12, weight: .semibold))
                     }
-                    Spacer()
-                    Button { onOpenListing(l) } label: {
-                        Text("Voir détails")
-                            .font(.moblyBody(11.5, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(Capsule().fill(Color.moblyPrimary))
-                    }
-                    .buttonStyle(.plain)
+                    .foregroundStyle(Color(hex: 0x3A4FF0))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+                    .background(Capsule().fill(Color(hex: 0xDDE1FC)))
                 }
-                .padding(.top, 2)
+                .buttonStyle(.plain)
+
+                Button { onOpenListing(l) } label: {
+                    Text(L("Détails"))
+                        .font(.moblyBody(12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(Capsule().fill(Color.moblyPrimary))
+                }
+                .buttonStyle(.plain)
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.white))
-        .shadow(color: .black.opacity(0.15), radius: 16, y: 8)
+        .padding(10)
+
+            Button {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { selected = nil }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color(hex: 0x6B6F80))
+                    .frame(width: 24, height: 24)
+                    .background(Circle().fill(Color.white.opacity(0.5)))
+            }
+            .buttonStyle(.plain)
+            .padding(10)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.5), lineWidth: 1)
+        )
+        .shadow(color: Color(hex: 0x14152A).opacity(0.12), radius: 16, y: 8)
         .padding(.horizontal, 18)
     }
 

@@ -59,6 +59,14 @@ struct MainTabView: View {
     /// FilterState to apply the next time Explore renders. Set when the
     /// user taps a saved recherche in Favoris.
     @State private var explorePresetFilters: FilterState? = nil
+    @ObservedObject private var push = PushService.shared
+    @ObservedObject private var callService = CallService.shared
+    @State private var showAcceptedCall = false
+
+    private func openListing(_ listing: Listing) {
+        ListingStore.shared.prefetchGallery(for: listing)
+        selectedListing = listing
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -66,7 +74,7 @@ struct MainTabView: View {
 
             ZStack {
                 HomeView(
-                    onOpenListing: { selectedListing = $0 },
+                    onOpenListing: { openListing($0) },
                     onNotifications: { showNotifications = true },
                     onOpenCategory: { cat in
                         searchCategory = cat
@@ -88,7 +96,7 @@ struct MainTabView: View {
                 .allowsHitTesting(tab == .home)
 
                 ExploreView(
-                    onOpenListing: { selectedListing = $0 },
+                    onOpenListing: { openListing($0) },
                     initialLocation: exploreLocation,
                     initialFilters: explorePresetFilters,
                     onLocationConsumed: {
@@ -104,7 +112,7 @@ struct MainTabView: View {
                     .allowsHitTesting(tab == .messages)
 
                 FavoritesView(
-                    onOpenListing: { selectedListing = $0 },
+                    onOpenListing: { openListing($0) },
                     onOpenSearch: { search in
                         exploreLocation = search.location
                         tab = .explore
@@ -163,6 +171,41 @@ struct MainTabView: View {
                 onClose: { showSearch = false }
             )
         }
+        .onChange(of: push.pendingThreadId) { _, threadId in
+            guard threadId != nil else { return }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { tab = .messages }
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { callService.state == .incoming },
+            set: { if !$0 { callService.rejectCall() } }
+        )) {
+            IncomingCallView()
+        }
+        .onChange(of: callService.state) { old, new in
+            if old == .incoming && new == .connected {
+                showAcceptedCall = true
+            }
+            if new == .idle || new == .ended {
+                showAcceptedCall = false
+            }
+        }
+        .fullScreenCover(isPresented: $showAcceptedCall) {
+            CallView(
+                thread: ChatThread(
+                    id: callService.threadId ?? "",
+                    initial: String(callService.peerName.prefix(1)).uppercased(),
+                    color: .moblyPrimary,
+                    name: callService.peerName,
+                    verified: false, online: true, time: "",
+                    listing: "", listingTitle: "", listingPrice: "",
+                    listingImage: "ListingGreen",
+                    preview: "", unread: 0, fromMe: false,
+                    peerId: callService.peerId
+                ),
+                isVideo: callService.isVideo,
+                onEnd: { callService.endCall(); showAcceptedCall = false }
+            )
+        }
     }
 }
 
@@ -170,53 +213,57 @@ struct MoblyTabBar: View {
     @Binding var tab: MoblyTab
     @ObservedObject private var chat = ChatStore.shared
     @Namespace private var pillNS
-    private var hasUnread: Bool { chat.threads.contains { $0.unread > 0 } }
+
+    private var unreadCount: Int {
+        chat.threads.reduce(0) { $0 + $1.unread }
+    }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 2) {
             ForEach(MoblyTab.allCases, id: \.self) { t in
                 let active = t == tab
                 Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { tab = t }
+                    withAnimation(.easeInOut(duration: 0.22)) { tab = t }
                     UISelectionFeedbackGenerator().selectionChanged()
                 } label: {
-                    VStack(spacing: 4) {
-                        ZStack {
+                    HStack(spacing: 7) {
+                        ZStack(alignment: .topTrailing) {
                             Image(systemName: active ? t.iconFilled : t.icon)
-                                .font(.system(size: 20, weight: .medium))
-                                .overlay(alignment: .topTrailing) {
-                                    if t == .messages && hasUnread {
-                                        Circle().fill(Color.moblyAccent)
-                                            .frame(width: 7, height: 7)
-                                            .offset(x: 5, y: -2)
-                                    }
-                                }
+                                .font(.system(size: 18, weight: active ? .semibold : .regular))
+                            if t == .messages && unreadCount > 0 {
+                                Text("\(min(unreadCount, 99))")
+                                    .font(.moblyBody(10, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 20, height: 20)
+                                    .background(Color(hex: 0xEF4444), in: Circle())
+                                    .offset(x: 8, y: -8)
+                            }
                         }
-                        Text(L(t.title))
-                            .font(.moblyBody(9.5, weight: active ? .semibold : .regular))
+                        if active {
+                            Text(L(t.title))
+                                .font(.moblyBody(12.5, weight: .semibold))
+                                .lineLimit(1)
+                        }
                     }
-                    .foregroundStyle(active ? Color.moblyPrimary : Color(hex: 0x9A9DAC))
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 4)
-                    .frame(maxWidth: .infinity)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .foregroundStyle(active ? .white : Color(hex: 0x9A9DAC))
+                    .padding(.horizontal, active ? 16 : 0)
+                    .padding(.vertical, 12)
                     .background {
                         if active {
                             Capsule(style: .continuous)
-                                .fill(Color.moblyPrimary.opacity(0.14))
-                                .overlay(
-                                    Capsule(style: .continuous)
-                                        .stroke(Color.moblyPrimary.opacity(0.25), lineWidth: 1)
-                                )
-                                .shadow(color: Color.moblyPrimary.opacity(0.15), radius: 8, y: 2)
+                                .fill(Color.moblyPrimary)
                                 .matchedGeometryEffect(id: "pill", in: pillNS)
                         }
                     }
+                    .frame(maxWidth: active ? nil : .infinity)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .modifier(LiquidGlassBar(cornerRadius: 30))
         .shadow(color: Color(hex: 0x14152A).opacity(0.14), radius: 20, y: 8)
         .padding(.horizontal, 16)

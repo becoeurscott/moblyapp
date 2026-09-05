@@ -21,6 +21,10 @@
 	  gating every single build behind the manual encryption questionnaire.
 	  If a custom crypto implementation is ever added, this must be revisited.
 	-->
+	<!-- Microphone: needed for voice-note recording in chat. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Mobly utilise le micro pour enregistrer des notes vocales dans vos conversations.</string>
+
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 

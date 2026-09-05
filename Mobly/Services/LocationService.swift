@@ -68,9 +68,8 @@ final class LocationService: NSObject, ObservableObject {
             case .denied, .restricted:
                 cont.resume(returning: nil)
             case .notDetermined:
-                oneShotWaiters.append { cont.resume(returning: $0) }
-                oneShotPending = true
                 manager.requestWhenInUseAuthorization()
+                cont.resume(returning: nil)
             case .authorizedWhenInUse, .authorizedAlways:
                 oneShotWaiters.append { cont.resume(returning: $0) }
                 oneShotPending = true

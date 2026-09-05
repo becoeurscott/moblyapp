@@ -114,35 +114,26 @@ struct ListingDetailView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
+            Color.white.ignoresSafeArea()
+
             VStack(spacing: 0) {
-                // Fixed hero — stays pinned while the content below scrolls.
                 heroGallery
 
                 ScrollView(showsIndicators: false) {
                     content
                         .padding(.horizontal, 22)
-                        .padding(.top, 20)
+                        .padding(.top, 14)
                         .padding(.bottom, 120)
                 }
             }
-            .ignoresSafeArea(edges: .top)
 
             VStack(spacing: 0) {
                 if !isAvailable { unavailableBanner }
                 stickyBar
             }
         }
-        .background(Color.white)
-        // Belt-and-braces (again): even with ignoresSafeArea on heroGallery
-        // itself, a flat gray band the height of the status bar still showed
-        // above the photo — this screen sits in a ZStack that, as a whole,
-        // was still reserving the top safe area regardless of what an
-        // individual child requested. Ignoring it here, on the true
-        // outermost container, is what finally lets the photo paint behind
-        // the status bar. Harmless for the bottom edge: stickyBar already
-        // handles the home-indicator inset itself via a fixed 30pt bottom
-        // padding plus its own `.ignoresSafeArea(edges: .bottom)`.
         .ignoresSafeArea(edges: .top)
+        .swipeToDismiss(onDismiss: onClose)
         .onAppear {
             SessionTracker.shared.log("listing.view", [
                 "listingId": listing.id,
@@ -264,28 +255,28 @@ struct ListingDetailView: View {
     /// flat 380pt, which on a tall phone left the photo covering barely a
     /// third of the screen instead of reading as a cover image.
     private var heroHeight: CGFloat {
-        UIScreen.main.bounds.height * 0.5
+        UIScreen.main.bounds.height * 0.38
+    }
+
+    private var safeAreaTop: CGFloat {
+        (UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.windows.first?.safeAreaInsets.top) ?? 59
     }
 
     private var heroGallery: some View {
         ZStack(alignment: .top) {
-            // Swipeable auto-sliding gallery with rounded bottom corners.
             TabView(selection: $photoIndex) {
                 ForEach(Array(gallery.enumerated()), id: \.offset) { i, name in
                     RemoteImage(source: name, width: ImageSlot.hero, contentMode: .fill)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: heroHeight)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipped()
                         .contentShape(Rectangle())
                         .onTapGesture { showViewer = true }
                         .tag(i)
                 }
             }
-            .frame(height: heroHeight)
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .clipShape(UnevenRoundedRectangle(
-                cornerRadii: .init(bottomLeading: 26, bottomTrailing: 26),
-                style: .continuous))
             .onReceive(autoSlide) { _ in
                 guard !reduceMotion, !showViewer else { return }
                 withAnimation(.easeInOut(duration: 0.6)) {
@@ -293,7 +284,6 @@ struct ListingDetailView: View {
                 }
             }
 
-            // top buttons
             HStack {
                 CircleIconButton(icon: "xmark", action: onClose)
                 Spacer()
@@ -315,9 +305,8 @@ struct ListingDetailView: View {
                 }
             }
             .padding(.horizontal, 18)
-            .padding(.top, 56)
+            .padding(.top, safeAreaTop + 8)
 
-            // small centered page dots
             VStack {
                 Spacer()
                 HStack(spacing: 6) {
@@ -332,16 +321,12 @@ struct ListingDetailView: View {
                 .background(Capsule().fill(.black.opacity(0.28)))
                 .padding(.bottom, 16)
             }
-            .frame(height: heroHeight)
         }
         .frame(height: heroHeight)
-        // Belt-and-braces: the outer VStack in `body` already carries
-        // `.ignoresSafeArea(edges: .top)`, but that left a plain white strip
-        // the height of the status bar / Dynamic Island sitting above the
-        // photo — the safe-area top inset was still being reserved somewhere
-        // in the propagation through the ZStack/VStack above. Applying it
-        // directly on the hero itself is what actually makes the photo
-        // (and its overlaid close/share/heart buttons) reach true y = 0.
+        .clipped()
+        .clipShape(UnevenRoundedRectangle(
+            cornerRadii: .init(bottomLeading: 26, bottomTrailing: 26),
+            style: .continuous))
         .ignoresSafeArea(edges: .top)
     }
 
@@ -740,45 +725,43 @@ struct ListingDetailView: View {
 
     private var stickyBar: some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(listing.price)
-                        .font(.moblyHeading(18))
-                        .foregroundStyle(Color.moblyTextPrimary)
-                    if !listing.priceUnit.isEmpty {
-                        Text(LT(listing.priceUnit))
-                            .font(.moblyBody(11.5))
-                            .foregroundStyle(Color(hex: 0x9A9DAC))
-                    }
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(listing.price)
+                    .font(.moblyHeading(16))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                if !listing.priceUnit.isEmpty {
+                    Text(LT(listing.priceUnit))
+                        .font(.moblyBody(11))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                        .lineLimit(1)
                 }
             }
+            .layoutPriority(1)
             Spacer(minLength: 4)
             Button {
                 guard AuthStore.shared.isSignedIn else { needsSignIn = true; return }
                 showVisitSheet = true
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "calendar")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("Visite")
-                        .font(.moblyHeading(14))
-                }
-                .foregroundStyle(Color.moblyPrimary)
-                .padding(.horizontal, 16)
-                .frame(height: 48)
-                .background(Capsule().fill(Color(hex: 0xEEF0FE)))
+                Image(systemName: "calendar")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Color.moblyPrimary)
+                    .frame(width: 48, height: 48)
+                    .background(Circle().fill(Color(hex: 0xEEF0FE)))
             }
             .buttonStyle(.plain)
             .disabled(!isAvailable)
             .opacity(isAvailable ? 1 : 0.4)
             Button(action: contactOwner) {
                 Text("Message")
-                    .font(.moblyHeading(14.5))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 20)
+                    .font(.moblyHeading(14))
+                    .foregroundStyle(Color(hex: 0x3A4FF0))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 16)
                     .frame(height: 48)
-                    .background(Capsule().fill(isAvailable ? Color.moblyAccent : Color(hex: 0xC4C7D2)))
-                    .shadow(color: (isAvailable ? Color.moblyAccent : .clear).opacity(0.3), radius: 12, y: 6)
+                    .background(Capsule().fill(isAvailable ? Color(hex: 0xDDE1FC) : Color(hex: 0xC4C7D2)))
             }
             .disabled(!isAvailable)
             .buttonStyle(.plain)
@@ -787,7 +770,7 @@ struct ListingDetailView: View {
         .padding(.top, 14)
         .padding(.bottom, 30)
         .background(
-            Color.white
+            Rectangle().fill(.ultraThinMaterial)
                 .shadow(color: Color(hex: 0x14152A).opacity(0.08), radius: 16, y: -4)
                 .ignoresSafeArea(edges: .bottom)
         )

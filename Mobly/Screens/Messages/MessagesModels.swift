@@ -117,6 +117,7 @@ struct ChatMessage: Identifiable, Equatable {
     var voiceDuration: String? = nil     // e.g. "0:12"
     var voiceSeconds: Int? = nil         // integer duration used by the player
     var imageName: String? = nil
+    var mediaUrl: String? = nil
     /// Set only when `kind == .location`. Coordinates parsed from the
     /// message text (a Google Maps URL) and reused to open the native map app.
     var locationLat: Double? = nil

@@ -55,21 +55,14 @@ final class ListingStore: ObservableObject {
     /// first screens paint from disk instead of the network. Limited to the
     /// visible-ish window — prefetching all 126 would waste a data plan.
     private func prefetchCovers(for listings: [Listing]) {
-        let urls = listings.prefix(12).compactMap { l -> URL? in
-            guard let s = l.coverUrl else { return nil }
-            return URL(string: s.cdnSized(ImageSlot.hero))
-        }
-        guard !urls.isEmpty else { return }
-        Task.detached(priority: .utility) {
-            await withTaskGroup(of: Void.self) { group in
-                for url in urls {
-                    group.addTask {
-                        // Response lands in URLCache.shared; AsyncImage reads it later.
-                        _ = try? await URLSession.shared.data(from: url)
-                    }
-                }
-            }
-        }
+        let covers = listings.prefix(24).compactMap { $0.coverUrl }
+        ImagePrefetch.warm(covers, width: ImageSlot.hero)
+    }
+
+    /// Call when the user taps a listing card — warms the gallery photos during
+    /// the 300ms present animation so the detail screen opens without shimmers.
+    func prefetchGallery(for listing: Listing) {
+        ImagePrefetch.warm(listing.photos, width: ImageSlot.hero)
     }
 
     // MARK: - Cache

@@ -5,18 +5,11 @@ struct CallView: View {
     var isVideo: Bool
     var onEnd: () -> Void = {}
 
-    @State private var seconds = 0
-    @State private var connected = false
-    @State private var muted = false
-    @State private var speaker = false
-    @State private var videoOn = true
-
-    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    @ObservedObject private var call = CallService.shared
 
     var body: some View {
         ZStack {
-            // Background
-            if isVideo && videoOn {
+            if isVideo {
                 LinearGradient(colors: [Color(hex: 0x1A1A2E), Color(hex: 0x3A4FF0)],
                                startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea()
@@ -27,7 +20,6 @@ struct CallView: View {
             }
 
             VStack(spacing: 0) {
-                // Encrypted badge
                 HStack(spacing: 6) {
                     Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold))
                     Text("Appel Mobly chiffré")
@@ -38,26 +30,39 @@ struct CallView: View {
 
                 Spacer()
 
-                // Avatar + name + status
                 ZStack {
+                    if call.state == .outgoing || call.state == .incoming {
+                        Circle().fill(thread.color.opacity(0.15))
+                            .frame(width: 160, height: 160)
+                            .scaleEffect(call.state == .outgoing ? 1.3 : 1)
+                            .opacity(call.state == .outgoing ? 0 : 0.5)
+                            .animation(.easeOut(duration: 1.5).repeatForever(autoreverses: false),
+                                       value: call.state == .outgoing)
+                        Circle().fill(thread.color.opacity(0.25))
+                            .frame(width: 145, height: 145)
+                            .scaleEffect(call.state == .outgoing ? 1.15 : 1)
+                            .opacity(call.state == .outgoing ? 0.2 : 0.6)
+                            .animation(.easeOut(duration: 1.5).repeatForever(autoreverses: false).delay(0.3),
+                                       value: call.state == .outgoing)
+                    }
                     Circle().fill(thread.color).frame(width: 120, height: 120)
                         .shadow(color: thread.color.opacity(0.5), radius: 30)
                     Text(thread.initial).font(.moblyHeading(48)).foregroundStyle(.white)
                 }
-                .scaleEffect(connected ? 1 : 1.05)
-                .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: connected)
+                .scaleEffect(call.state == .outgoing ? 1.05 : 1)
+                .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                           value: call.state == .outgoing)
 
                 Text(thread.name)
                     .font(.moblyHeading(26)).foregroundStyle(.white)
                     .padding(.top, 22)
-                Text(connected ? timeString(seconds) : (isVideo ? "Appel vidéo…" : "Appel en cours…"))
+                Text(statusText)
                     .font(.moblyBody(14)).foregroundStyle(.white.opacity(0.7))
                     .padding(.top, 6)
 
                 Spacer()
 
-                // Small self preview (video)
-                if isVideo && videoOn {
+                if isVideo {
                     HStack {
                         Spacer()
                         RoundedRectangle(cornerRadius: 16)
@@ -65,27 +70,31 @@ struct CallView: View {
                             .frame(width: 90, height: 130)
                             .overlay(Image(systemName: "person.fill")
                                 .font(.system(size: 30)).foregroundStyle(.white.opacity(0.5)))
-                            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.2), lineWidth: 1))
+                            .overlay(RoundedRectangle(cornerRadius: 16)
+                                .stroke(.white.opacity(0.2), lineWidth: 1))
                             .padding(.trailing, 20)
                     }
                     .padding(.bottom, 20)
                 }
 
-                // Controls
-                HStack(spacing: 22) {
-                    controlButton(muted ? "mic.slash.fill" : "mic.fill", active: muted) { muted.toggle() }
-                    if isVideo {
-                        controlButton(videoOn ? "video.fill" : "video.slash.fill", active: !videoOn) { videoOn.toggle() }
-                    } else {
-                        controlButton(speaker ? "speaker.wave.2.fill" : "speaker.fill", active: speaker) { speaker.toggle() }
+                if call.state == .connected || call.state == .outgoing {
+                    HStack(spacing: 22) {
+                        controlButton(call.muted ? "mic.slash.fill" : "mic.fill",
+                                      active: call.muted) { call.toggleMute() }
+                        if isVideo {
+                            controlButton("video.fill", active: false) {}
+                        } else {
+                            controlButton(call.speaker ? "speaker.wave.2.fill" : "speaker.fill",
+                                          active: call.speaker) { call.toggleSpeaker() }
+                        }
+                        controlButton("plus.message.fill", active: false) {}
                     }
-                    controlButton("plus.message.fill", active: false) {}
+                    .padding(.bottom, 26)
                 }
-                .padding(.bottom, 26)
 
-                // End call
                 Button {
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                    call.endCall()
                     onEnd()
                 } label: {
                     Image(systemName: "phone.down.fill")
@@ -98,12 +107,23 @@ struct CallView: View {
                 .padding(.bottom, 50)
             }
         }
-        .onReceive(timer) { _ in if connected { seconds += 1 } }
         .onAppear {
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                withAnimation { connected = true }
+            if call.state == .idle {
+                call.startCall(thread: thread, isVideo: isVideo)
             }
+        }
+        .onChange(of: call.state) { _, newState in
+            if newState == .idle { onEnd() }
+        }
+    }
+
+    private var statusText: String {
+        switch call.state {
+        case .idle: return ""
+        case .outgoing: return isVideo ? "Appel vidéo…" : "Appel en cours…"
+        case .incoming: return "Appel entrant…"
+        case .connected: return call.timeString
+        case .ended: return "Appel terminé"
         }
     }
 
@@ -116,10 +136,6 @@ struct CallView: View {
                 .background(Circle().fill(active ? .white : Color.white.opacity(0.18)))
         }
         .buttonStyle(.plain)
-    }
-
-    private func timeString(_ s: Int) -> String {
-        String(format: "%02d:%02d", s / 60, s % 60)
     }
 }
 

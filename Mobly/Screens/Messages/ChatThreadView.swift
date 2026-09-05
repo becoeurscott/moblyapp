@@ -1,6 +1,8 @@
 import SwiftUI
+import PhotosUI
 import CoreLocation
 import UIKit
+import AVFoundation
 
 struct ChatThreadView: View {
     let thread: ChatThread
@@ -12,9 +14,12 @@ struct ChatThreadView: View {
     @ObservedObject private var auth = AuthStore.shared
     @State private var draft = ""
     @State private var replyingTo: ChatMessage?
-    @State private var showAttachments = false
-    @State private var isRecording = false
-    @State private var recordSeconds = 0
+    @State private var activeSheet: ActiveSheet?
+    enum ActiveSheet: String, Identifiable {
+        case attachments, galerie, camera
+        var id: String { rawValue }
+    }
+    @StateObject private var recorder = VoiceRecorder()
 
     @State private var reactionTarget: ChatMessage?
     @State private var showDetail = false
@@ -23,12 +28,20 @@ struct ChatThreadView: View {
     @State private var callIsVideo = false
     @State private var showProposeVisit = false
     @State private var visitActionBusy = false
+    @State private var isUploading = false
+    @State private var uploadingPreview: UIImage?
+    @State private var fullScreenImageURL: URL?
+    @State private var fullScreenLocalImage: UIImage?
     /// Server-reported availability of the listing this conversation is
     /// about. `.unavailable` greys the pill and shows "Non disponible";
     /// `.missing` (server returned 404) shows "Annonce supprimée" and
     /// blocks the tap-through to detail.
     @State private var listingState: ListingState = .available
     enum ListingState { case available, unavailable, missing }
+    @State private var showMicPermissionAlert = false
+    @State private var showMicHint = false
+    @State private var linkPreviewDismissed = false
+    @StateObject private var linkPreview = LinkPreviewService()
     @FocusState private var inputFocused: Bool
 
     /// Messages for this thread, mapped from the store on each render so a
@@ -64,6 +77,7 @@ struct ChatThreadView: View {
                 replyToMe: quoted?.senderId == me,
                 voiceDuration: voice.map { $0.label },
                 voiceSeconds: voice.map { $0.seconds },
+                mediaUrl: dto.mediaUrl,
                 locationLat: loc?.lat,
                 locationLng: loc?.lng,
                 day: Self.dayLabel(dto.createdAt),
@@ -140,7 +154,7 @@ struct ChatThreadView: View {
                        rating: "4.7", imageName: thread.listingImage, category: "Appartements")
     }
 
-    private let recordTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    // Voice recording is handled by the VoiceRecorder @StateObject above.
 
     /// The most recent visit-related system message, pinned to the top of the
     /// thread so both parties always see the current appointment state.
@@ -203,7 +217,7 @@ struct ChatThreadView: View {
                 }
                 messagesList
                 if replyingTo != nil { replyPreview }
-                if !isRecording { quickReplies }
+                // if !recorder.isRecording { quickReplies } // DEBUG: hidden to test mic tap
                 composer
             }
             .background(Color(hex: 0xF4F5F8))
@@ -213,6 +227,8 @@ struct ChatThreadView: View {
                 reactionOverlay(target)
             }
         }
+        .swipeToDismiss(onDismiss: onBack)
+        .onAppear { recorder.requestPermissionIfNeeded() }
         .task {
             chat.activeThreadId = thread.id
             ThreadPrefs.shared.clearManualUnread(thread.id)
@@ -221,7 +237,32 @@ struct ChatThreadView: View {
             await refreshListingState()
         }
         .onDisappear { if chat.activeThreadId == thread.id { chat.activeThreadId = nil } }
-        .sheet(isPresented: $showAttachments) { attachmentSheet }
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .attachments:
+                attachmentSheet
+                    .presentationDetents([.height(240)])
+            case .galerie:
+                PhotoLibraryPicker { images in
+                    activeSheet = nil
+                    guard !images.isEmpty else { return }
+                    uploadAndSendCameraImages(images)
+                }
+                .ignoresSafeArea()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+                .interactiveDismissDisabled()
+            case .camera:
+                CameraPickerView { image in
+                    activeSheet = nil
+                    if let image { uploadAndSendCamera(image) }
+                }
+                .ignoresSafeArea()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+                .interactiveDismissDisabled()
+            }
+        }
         .sheet(isPresented: $showProposeVisit) {
             ProposeVisitFromChatSheet(thread: thread)
                 .presentationDetents([.height(520)])
@@ -241,6 +282,25 @@ struct ChatThreadView: View {
         }
         .fullScreenCover(isPresented: $showCall) {
             CallView(thread: thread, isVideo: callIsVideo, onEnd: { showCall = false })
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { fullScreenImageURL != nil },
+            set: { if !$0 { fullScreenImageURL = nil } }
+        )) {
+            if let url = fullScreenImageURL {
+                FullScreenImageViewer(url: url, onClose: { fullScreenImageURL = nil })
+                    .ignoresSafeArea()
+            }
+        }
+        .alert("Microphone désactivé", isPresented: $showMicPermissionAlert) {
+            Button("Ouvrir Réglages") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Annuler", role: .cancel) {}
+        } message: {
+            Text("Autorisez l'accès au microphone dans Réglages pour enregistrer des notes vocales.")
         }
     }
 
@@ -388,12 +448,20 @@ struct ChatThreadView: View {
                                 message: m,
                                 onReply: { replyingTo = m },
                                 onReact: { reactionTarget = m },
-                                onDelete: { }   // TODO: DELETE /threads/:id/messages/:mid
+                                onDelete: { },   // TODO: DELETE /threads/:id/messages/:mid
+                                onImageTap: { url in fullScreenImageURL = url }
                             )
                             .id(m.id)
                         }
                     }
 
+                    if let preview = uploadingPreview {
+                        HStack {
+                            Spacer(minLength: 50)
+                            uploadPreviewBubble(preview)
+                        }
+                        .id("uploading")
+                    }
                     if partnerTyping { TypingIndicator().id("typing") }
                     Color.clear.frame(height: 4).id("bottom")
                 }
@@ -402,12 +470,52 @@ struct ChatThreadView: View {
             }
             .onChange(of: messages.count) { _, _ in scrollDown(proxy) }
             .onChange(of: partnerTyping) { _, _ in scrollDown(proxy) }
+            .onChange(of: uploadingPreview == nil) { _, _ in scrollDown(proxy) }
             .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
         }
     }
 
     private func scrollDown(_ proxy: ScrollViewProxy) {
         withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("bottom", anchor: .bottom) }
+    }
+
+    // MARK: Upload preview bubble
+
+    private func uploadPreviewBubble(_ image: UIImage) -> some View {
+        ZStack(alignment: .bottomTrailing) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 200, height: 150)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    ZStack {
+                        Color.black.opacity(0.35)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        VStack(spacing: 8) {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(1.2)
+                            Text("Envoi…")
+                                .font(.moblyBody(11, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
+
+            Text(ChatThread.relativeTime(Date()))
+                .font(.system(size: 9.5))
+                .foregroundStyle(.white.opacity(0.7))
+                .padding(.trailing, 8).padding(.bottom, 6)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        .background(
+            UnevenRoundedRectangle(cornerRadii: .init(
+                topLeading: 18, bottomLeading: 18,
+                bottomTrailing: 5, topTrailing: 18))
+                .fill(Color.moblyPrimary)
+        )
     }
 
     // MARK: Reply preview above composer
@@ -461,18 +569,49 @@ struct ChatThreadView: View {
     // MARK: Composer
 
     private var composer: some View {
-        Group {
-            if isRecording { recordingBar } else { normalComposer }
+        VStack(spacing: 0) {
+            if showMicHint {
+                HStack {
+                    Spacer()
+                    Text("Appuyez longuement pour enregistrer")
+                        .font(.moblyBody(12, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(Capsule().fill(Color(hex: 0x1A1A2E).opacity(0.85)))
+                        .fixedSize()
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+                .transition(.opacity)
+            }
+            if let preview = linkPreview.preview, !linkPreviewDismissed {
+                ComposerLinkPreview(preview: preview) {
+                    linkPreviewDismissed = true
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+                .transition(.opacity)
+            }
+            Group {
+                if recorder.isRecording { recordingBar } else { normalComposer }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 28)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 28)
+        .animation(.easeInOut(duration: 0.2), value: showMicHint)
+        .animation(.easeInOut(duration: 0.2), value: linkPreview.preview?.url)
         .background(Color.white)
+        .onChange(of: draft) { _, newValue in
+            linkPreviewDismissed = false
+            linkPreview.detectAndFetch(in: newValue)
+        }
     }
 
     private var normalComposer: some View {
-        HStack(spacing: 10) {
-            Button { showAttachments = true } label: {
+        let canSend = !draft.trimmingCharacters(in: .whitespaces).isEmpty
+        return HStack(spacing: 10) {
+            Button { activeSheet = .attachments } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
@@ -484,23 +623,51 @@ struct ChatThreadView: View {
                 TextField("Message…", text: $draft, axis: .vertical)
                     .font(.moblyBody(13.5)).foregroundStyle(Color.moblyTextPrimary)
                     .focused($inputFocused).lineLimit(1...4)
-                Image(systemName: "face.smiling")
-                    .font(.system(size: 16, weight: .medium)).foregroundStyle(Color(hex: 0x9A9DAC))
             }
             .padding(.horizontal, 16).frame(minHeight: 44)
             .background(RoundedRectangle(cornerRadius: 22).fill(Color(hex: 0xF4F5F8)))
 
-            if draft.trimmingCharacters(in: .whitespaces).isEmpty {
-                Button { startRecording() } label: { sendCircle("mic.fill") }
-            } else {
-                Button { send() } label: { sendCircle("paperplane.fill") }
+            Button {
+                if canSend {
+                    send()
+                } else {
+                    let permission = AVAudioSession.sharedInstance().recordPermission
+                    if permission == .denied {
+                        showMicPermissionAlert = true
+                        return
+                    }
+                    if permission == .undetermined {
+                        recorder.requestPermissionIfNeeded()
+                        return
+                    }
+                    withAnimation(.easeInOut(duration: 0.2)) { showMicHint = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        withAnimation(.easeInOut(duration: 0.2)) { showMicHint = false }
+                    }
+                }
+            } label: {
+                sendCircle(canSend ? "paperplane.fill" : "mic.fill")
             }
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.2).onEnded { _ in
+                    guard !canSend else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) { showMicHint = false }
+                    let permission = AVAudioSession.sharedInstance().recordPermission
+                    guard permission == .granted else {
+                        if permission == .denied { showMicPermissionAlert = true }
+                        return
+                    }
+                    recorder.startRecording()
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }
+            )
+            .id(canSend)
         }
     }
 
     private var recordingBar: some View {
         HStack(spacing: 12) {
-            Button { cancelRecording() } label: {
+            Button { recorder.cancelRecording() } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(Color(hex: 0xE5484D))
@@ -508,19 +675,17 @@ struct ChatThreadView: View {
             }
             HStack(spacing: 8) {
                 Circle().fill(Color(hex: 0xE5484D)).frame(width: 9, height: 9)
-                    .opacity(recordSeconds % 2 == 0 ? 1 : 0.3)
-                Text(timeString(recordSeconds))
+                    .opacity(Int(recorder.duration) % 2 == 0 ? 1 : 0.3)
+                LiveWaveform(samples: recorder.samples)
+                    .frame(height: 28)
+                Text(timeString(Int(recorder.duration)))
                     .font(.moblyBody(14, weight: .medium)).foregroundStyle(Color.moblyTextPrimary)
-                Spacer()
-                Text("Glissez pour annuler")
-                    .font(.moblyBody(11.5)).foregroundStyle(Color(hex: 0x9A9DAC))
             }
             .padding(.horizontal, 16).frame(height: 44)
             .background(RoundedRectangle(cornerRadius: 22).fill(Color(hex: 0xF4F5F8)))
 
             Button { stopRecordingAndSend() } label: { sendCircle("paperplane.fill") }
         }
-        .onReceive(recordTimer) { _ in if isRecording { recordSeconds += 1 } }
     }
 
     private func sendCircle(_ icon: String) -> some View {
@@ -531,6 +696,7 @@ struct ChatThreadView: View {
             .shadow(color: Color.moblyPrimary.opacity(0.3), radius: 10, y: 5)
     }
 
+
     // MARK: Attachment sheet
 
     private var attachmentSheet: some View {
@@ -538,15 +704,25 @@ struct ChatThreadView: View {
             Capsule().fill(Color(hex: 0xE2E4EC)).frame(width: 40, height: 5).padding(.top, 10).padding(.bottom, 18)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()),
                                 GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
-                attachItem("photo.fill", "Galerie", 0x3A4FF0) { sendImage() }
-                attachItem("camera.fill", "Caméra", 0x1F8A5B) { sendImage() }
-                attachItem("doc.fill", "Document", 0xFF6B35) { showAttachments = false }
+                attachItem("photo.fill", "Galerie", 0x3A4FF0) {
+                    activeSheet = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        activeSheet = .galerie
+                    }
+                }
+                attachItem("camera.fill", "Caméra", 0x1F8A5B) {
+                    activeSheet = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        activeSheet = .camera
+                    }
+                }
+                attachItem("doc.fill", "Document", 0xFF6B35, enabled: false) { }
                 attachItem("mappin.circle.fill", "Position", 0xE5484D) { sendLocation() }
-                attachItem("person.crop.circle.fill", "Contact", 0x8B5CF6) { showAttachments = false }
-                attachItem("chart.bar.fill", "Sondage", 0x2A6FDB) { showAttachments = false }
+                attachItem("person.crop.circle.fill", "Contact", 0x8B5CF6, enabled: false) { }
+                attachItem("chart.bar.fill", "Sondage", 0x2A6FDB, enabled: false) { }
                 if iAmTheOwner {
                     attachItem("calendar.badge.plus", "Visite", 0x1F8A5B) {
-                        showAttachments = false
+                        activeSheet = nil
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             showProposeVisit = true
                         }
@@ -556,10 +732,9 @@ struct ChatThreadView: View {
             .padding(.horizontal, 24)
             Spacer()
         }
-        .presentationDetents([.height(240)])
     }
 
-    private func attachItem(_ icon: String, _ label: String, _ color: UInt32, action: @escaping () -> Void) -> some View {
+    private func attachItem(_ icon: String, _ label: String, _ color: UInt32, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 7) {
                 ZStack {
@@ -568,8 +743,10 @@ struct ChatThreadView: View {
                 }
                 Text(LT(label)).font(.moblyBody(11)).foregroundStyle(Color.moblyTextPrimary)
             }
+            .opacity(enabled ? 1 : 0.35)
         }
         .buttonStyle(.plain)
+        .disabled(!enabled)
     }
 
     // MARK: Reaction overlay
@@ -607,6 +784,8 @@ struct ChatThreadView: View {
         let replyId = replyingTo?.id
         draft = ""
         replyingTo = nil
+        linkPreview.clear()
+        linkPreviewDismissed = false
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         Task {
             await chat.send(threadId: thread.id, text: text,
@@ -614,17 +793,50 @@ struct ChatThreadView: View {
         }
     }
 
-    // Attachments still need an upload endpoint (Cloudinary is configured but
-    // has no route yet), so these send the caption only rather than silently
-    // dropping the file.
     private func sendImage() {
-        showAttachments = false
+        activeSheet = nil
+    }
+
+    private func uploadAndSendCamera(_ image: UIImage) {
+        uploadAndSendCameraImages([image])
+    }
+
+    private func uploadAndSendCameraImages(_ images: [UIImage]) {
         guard let me = auth.user?.id else { return }
-        Task { await chat.send(threadId: thread.id, text: "📷 Photo", myUserId: me) }
+        let jpegs = images.compactMap { $0.jpegData(compressionQuality: 0.8) }
+        guard !jpegs.isEmpty else { return }
+        withAnimation(.easeInOut(duration: 0.25)) { uploadingPreview = images.first }
+        isUploading = true
+        Task {
+            do {
+                let uploaded = try await MoblyAPI.shared.uploadOwnerPhotos(jpegs)
+                for photo in uploaded {
+                    await chat.send(threadId: thread.id, text: "📷 Photo",
+                                    myUserId: me, kind: "IMAGE", mediaUrl: photo.url)
+                }
+            } catch {
+                for jpeg in jpegs {
+                    let localUrl = Self.saveToLocalCache(jpeg)
+                    await chat.send(threadId: thread.id, text: "📷 Photo",
+                                    myUserId: me, kind: "IMAGE", mediaUrl: localUrl)
+                }
+            }
+            withAnimation(.easeInOut(duration: 0.25)) { uploadingPreview = nil }
+            isUploading = false
+        }
+    }
+
+    private static func saveToLocalCache(_ jpeg: Data) -> String {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("chat-photos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent(UUID().uuidString + ".jpg")
+        try? jpeg.write(to: file)
+        return file.absoluteString
     }
 
     private func sendLocation() {
-        showAttachments = false
+        activeSheet = nil
         guard let me = auth.user?.id else { return }
         Task {
             guard let coord = await LocationService.shared.requestOneShotCoordinate() else {
@@ -643,26 +855,29 @@ struct ChatThreadView: View {
     }
 
     private func sendVoice() {
-        isRecording = false
+        guard let result = recorder.stopRecording() else { return }
         guard let me = auth.user?.id else { return }
-        let label = timeString(recordSeconds)
-        recordSeconds = 0
-        Task { await chat.send(threadId: thread.id, text: "🎤 Note vocale (\(label))", myUserId: me) }
-    }
-
-    private func startRecording() {
-        isRecording = true
-        recordSeconds = 0
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-    }
-
-    private func cancelRecording() {
-        isRecording = false
-        recordSeconds = 0
+        let seconds = Int(result.duration)
+        let label = timeString(seconds)
+        let voiceText = "🎤 Note vocale (\(label))"
+        let audioUrl = result.url
+        let audioSamples = result.samples
+        Task {
+            await chat.send(threadId: thread.id, text: voiceText, myUserId: me)
+            // Register audio under whatever id the message now has (could be
+            // the optimistic local id or the server-confirmed id).
+            if let newest = (chat.messages[thread.id] ?? [])
+                .last(where: { $0.text == voiceText && $0.senderId == me }) {
+                AudioPlayerManager.shared.registerAudio(id: newest.id, url: audioUrl, samples: audioSamples)
+            }
+        }
     }
 
     private func stopRecordingAndSend() {
-        guard recordSeconds > 0 else { return cancelRecording() }
+        guard recorder.isRecording, recorder.duration > 0.5 else {
+            recorder.cancelRecording()
+            return
+        }
         sendVoice()
     }
 
@@ -691,6 +906,7 @@ struct MessageBubble: View {
     var onReply: () -> Void = {}
     var onReact: () -> Void = {}
     var onDelete: () -> Void = {}
+    var onImageTap: ((URL) -> Void)?
 
     @State private var dragOffset: CGFloat = 0
 
@@ -717,7 +933,7 @@ struct MessageBubble: View {
     }
 
     private var bubble: some View {
-        VStack(alignment: .trailing, spacing: 6) {
+        VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 6) {
             if let reply = message.replyToText {
                 HStack(spacing: 6) {
                     Rectangle().fill(message.fromMe ? Color.white.opacity(0.8) : Color.moblyPrimary)
@@ -761,23 +977,53 @@ struct MessageBubble: View {
     @ViewBuilder private var content: some View {
         switch message.kind {
         case .text:
-            Text(message.text)
-                .font(.moblyBody(13.5))
-                .foregroundStyle(message.fromMe ? .white : Color.moblyTextPrimary)
-                .multilineTextAlignment(.leading)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(message.text)
+                    .font(.moblyBody(13.5))
+                    .foregroundStyle(message.fromMe ? .white : Color.moblyTextPrimary)
+                    .multilineTextAlignment(.leading)
+                if LinkPreviewService.firstURL(in: message.text) != nil {
+                    MessageLinkPreview(text: message.text, fromMe: message.fromMe)
+                }
+            }
         case .voice:
             VoiceBubble(message: message)
         case .image:
-            Image(message.imageName ?? "ListingGreen")
-                .resizable().scaledToFill()
-                .frame(width: 200, height: 150)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if let urlStr = message.mediaUrl, let url = URL(string: urlStr) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable().scaledToFill()
+                            .frame(width: 200, height: 150)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    case .failure:
+                        imagePlaceholder
+                    default:
+                        ProgressView()
+                            .frame(width: 200, height: 150)
+                    }
+                }
+                .onTapGesture { onImageTap?(url) }
+            } else {
+                imagePlaceholder
+            }
         case .location:
             LocationBubble(message: message)
         case .visit:
             // Rendered via VisitCardBubble, not this bubble. Kept for exhaustive-switch.
             EmptyView()
         }
+    }
+
+    private var imagePlaceholder: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(hex: 0xF1F2F6))
+            Image(systemName: "photo")
+                .font(.system(size: 28))
+                .foregroundStyle(Color(hex: 0xC4C7D2))
+        }
+        .frame(width: 200, height: 150)
     }
 
     private var statusTicks: some View {
@@ -897,7 +1143,9 @@ struct VoiceBubble: View {
             }
             .buttonStyle(.plain)
 
-            Waveform(tint: tint, dim: dimTint, progress: progress, isPlaying: isPlaying)
+            Waveform(tint: tint, dim: dimTint, progress: progress,
+                     isPlaying: isPlaying,
+                     realSamples: player.samples(for: message.id))
                 .frame(width: 130, height: 24)
 
             Text(formatMinSec(displaySeconds))
@@ -988,17 +1236,43 @@ struct Waveform: View {
     var dim: Color = .gray.opacity(0.3)
     var progress: Double = 0
     var isPlaying: Bool = false
+    /// When non-nil, use real recorded audio levels instead of the static
+    /// placeholder pattern. The array is down-sampled to fit the bar count.
+    var realSamples: [CGFloat]? = nil
 
-    private let heights: [CGFloat] = [8, 14, 20, 10, 16, 22, 12, 18, 9, 15, 21, 11, 17, 13, 19,
-                                       10, 16, 8, 14, 20, 12, 18, 9]
+    private static let fallbackHeights: [CGFloat] = [
+        8, 14, 20, 10, 16, 22, 12, 18, 9, 15, 21, 11, 17, 13, 19,
+        10, 16, 8, 14, 20, 12, 18, 9
+    ]
+    private let barCount = 23
     @State private var pulse: Bool = false
 
+    /// Build bar heights from real samples (down-sampled to `barCount`) or
+    /// fall back to the static pattern for legacy messages.
+    private var heights: [CGFloat] {
+        guard let raw = realSamples, !raw.isEmpty else {
+            return Self.fallbackHeights
+        }
+        // Down-sample the raw levels to exactly `barCount` bars.
+        var out = [CGFloat]()
+        let step = Double(raw.count) / Double(barCount)
+        for i in 0..<barCount {
+            let lo = Int(Double(i) * step)
+            let hi = min(raw.count, Int(Double(i + 1) * step))
+            let slice = raw[lo..<max(lo + 1, hi)]
+            let avg = slice.reduce(0, +) / CGFloat(slice.count)
+            // Scale 0-1 level to 4-22 pt height.
+            out.append(4 + avg * 18)
+        }
+        return out
+    }
+
     var body: some View {
-        let barCount = heights.count
+        let bars = heights
         let played = Int((Double(barCount) * progress).rounded(.down))
         HStack(alignment: .center, spacing: 3) {
-            ForEach(0..<barCount, id: \.self) { i in
-                let base = heights[i]
+            ForEach(0..<bars.count, id: \.self) { i in
+                let base = bars[i]
                 let live = isPlaying && i == played
                 Capsule()
                     .fill(i < played ? tint : dim)
@@ -1010,6 +1284,27 @@ struct Waveform: View {
                    value: pulse)
         .onAppear { pulse = isPlaying }
         .onChange(of: isPlaying) { _, v in pulse = v }
+    }
+}
+
+/// Live recording waveform — renders the most recent samples as bars that
+/// scroll left, giving visual feedback that the microphone is capturing audio.
+struct LiveWaveform: View {
+    let samples: [CGFloat]
+    private let maxBars = 40
+
+    var body: some View {
+        GeometryReader { geo in
+            HStack(alignment: .center, spacing: 2) {
+                let visible = Array(samples.suffix(maxBars))
+                ForEach(Array(visible.enumerated()), id: \.offset) { _, level in
+                    Capsule()
+                        .fill(Color.moblyPrimary)
+                        .frame(width: 2.5, height: max(3, level * geo.size.height))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        }
     }
 }
 
@@ -1027,22 +1322,35 @@ struct DateSeparator: View {
 }
 
 struct TypingIndicator: View {
-    @State private var animate = false
+    @State private var phase = false
     var body: some View {
         HStack {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 ForEach(0..<3, id: \.self) { i in
-                    Circle().fill(Color(hex: 0x9A9DAC))
-                        .frame(width: 7, height: 7)
-                        .scaleEffect(animate ? 1 : 0.5)
-                        .animation(.easeInOut(duration: 0.5).repeatForever().delay(Double(i) * 0.15), value: animate)
+                    Circle()
+                        .fill(Color(hex: 0x9A9DAC))
+                        .frame(width: 8, height: 8)
+                        .offset(y: phase ? -6 : 2)
+                        .animation(
+                            .easeInOut(duration: 0.45)
+                                .repeatForever(autoreverses: true)
+                                .delay(Double(i) * 0.18),
+                            value: phase
+                        )
                 }
             }
-            .padding(.horizontal, 14).padding(.vertical, 12)
-            .background(UnevenRoundedRectangle(cornerRadii: .init(topLeading: 18, bottomLeading: 5, bottomTrailing: 18, topTrailing: 18)).fill(.white))
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(
+                UnevenRoundedRectangle(cornerRadii: .init(
+                    topLeading: 18, bottomLeading: 5, bottomTrailing: 18, topTrailing: 18
+                ))
+                .fill(Color.white)
+                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+            )
             Spacer(minLength: 50)
         }
-        .onAppear { animate = true }
+        .transition(.move(edge: .leading).combined(with: .opacity))
+        .onAppear { phase = true }
     }
 }
 
@@ -1482,6 +1790,172 @@ struct ProposeVisitFromChatSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Photo library picker
+
+struct PhotoLibraryPicker: UIViewControllerRepresentable {
+    var onFinish: ([UIImage]) -> Void
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var config = PHPickerConfiguration()
+        config.selectionLimit = 5
+        config.filter = .images
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ vc: PHPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(onFinish: onFinish) }
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        let onFinish: ([UIImage]) -> Void
+        init(onFinish: @escaping ([UIImage]) -> Void) { self.onFinish = onFinish }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            guard !results.isEmpty else { onFinish([]); return }
+            var images: [UIImage] = []
+            let group = DispatchGroup()
+            for result in results {
+                group.enter()
+                result.itemProvider.loadObject(ofClass: UIImage.self) { object, _ in
+                    if let img = object as? UIImage { images.append(img) }
+                    group.leave()
+                }
+            }
+            group.notify(queue: .main) { [weak self] in
+                self?.onFinish(images)
+            }
+        }
+    }
+}
+
+// MARK: - Camera picker
+
+struct CameraPickerView: UIViewControllerRepresentable {
+    var onFinish: (UIImage?) -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ vc: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(onFinish: onFinish) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onFinish: (UIImage?) -> Void
+        init(onFinish: @escaping (UIImage?) -> Void) { self.onFinish = onFinish }
+
+        func imagePickerController(_ picker: UIImagePickerController,
+                                   didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            let image = info[.originalImage] as? UIImage
+            onFinish(image)
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            onFinish(nil)
+        }
+    }
+}
+
+// MARK: - Full-screen image viewer
+
+struct FullScreenImageViewer: View {
+    let url: URL
+    var onClose: () -> Void
+
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let img):
+                    img.resizable()
+                        .scaledToFit()
+                        .scaleEffect(scale)
+                        .offset(offset)
+                        .gesture(
+                            MagnifyGesture()
+                                .onChanged { v in scale = lastScale * v.magnification }
+                                .onEnded { v in
+                                    lastScale = max(1, scale)
+                                    scale = lastScale
+                                    if scale == 1 { offset = .zero; lastOffset = .zero }
+                                }
+                        )
+                        .simultaneousGesture(
+                            DragGesture()
+                                .onChanged { v in
+                                    if scale > 1 {
+                                        offset = CGSize(
+                                            width: lastOffset.width + v.translation.width,
+                                            height: lastOffset.height + v.translation.height
+                                        )
+                                    }
+                                }
+                                .onEnded { v in
+                                    lastOffset = offset
+                                    if scale <= 1 {
+                                        let dragY = v.translation.height
+                                        if abs(dragY) > 100 {
+                                            onClose()
+                                        }
+                                    }
+                                }
+                        )
+                        .onTapGesture(count: 2) {
+                            withAnimation(.spring(response: 0.3)) {
+                                if scale > 1 {
+                                    scale = 1; lastScale = 1
+                                    offset = .zero; lastOffset = .zero
+                                } else {
+                                    scale = 2.5; lastScale = 2.5
+                                }
+                            }
+                        }
+                case .failure:
+                    VStack(spacing: 12) {
+                        Image(systemName: "photo.slash")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.white.opacity(0.5))
+                        Text("Impossible de charger l'image")
+                            .font(.moblyBody(14))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                default:
+                    ProgressView().tint(.white).scaleEffect(1.3)
+                }
+            }
+
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Circle().fill(.white.opacity(0.2)))
+                    }
+                    .padding(.trailing, 16).padding(.top, 8)
+                }
+                Spacer()
+            }
+        }
+        .statusBarHidden()
     }
 }
 

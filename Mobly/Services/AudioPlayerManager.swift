@@ -1,13 +1,15 @@
 import Foundation
+import AVFoundation
 import Combine
 
-/// Voice-note "player" for chat bubbles.
+/// Voice-note player for chat bubbles.
 ///
-/// Voice messages travel as text placeholders (`🎤 Note vocale (M:SS)`) — no
-/// audio file is attached — so this simulates playback: on play the elapsed
-/// counter and 0-1 progress advance every tick, driving the waveform tint and
-/// timer in the bubble. When a real audio-upload pipeline lands, swap the
-/// timer for `AVAudioPlayer` without changing the view surface.
+/// Supports two modes:
+/// 1. **Real playback** — when a message has a registered audio file, uses
+///    `AVAudioPlayer` to play the actual recording.
+/// 2. **Legacy simulated playback** — for older text-only voice messages
+///    (`🎤 Note vocale (M:SS)`) without an audio file. A timer advances the
+///    progress bar at real-time speed.
 @MainActor
 final class AudioPlayerManager: ObservableObject {
     static let shared = AudioPlayerManager()
@@ -24,26 +26,109 @@ final class AudioPlayerManager: ObservableObject {
     private var duration: Int = 0
     private var timer: Timer?
 
+    // Real audio playback
+    private var audioPlayer: AVAudioPlayer?
+    /// Message id -> local audio file URL
+    private var audioUrls: [String: URL] = [:]
+    /// Message id -> normalised samples captured during recording
+    private var audioSamples: [String: [CGFloat]] = [:]
+
     private init() {}
 
-    func toggle(id: String, duration: Int) {
-        let d = max(duration, 1)
+    // MARK: - Audio registration
+
+    /// Register a recorded voice note so it can be played back with real audio.
+    func registerAudio(id: String, url: URL, samples: [CGFloat]) {
+        audioUrls[id] = url
+        audioSamples[id] = samples
+    }
+
+    /// Return the recorded waveform samples for a message, if available.
+    func samples(for id: String) -> [CGFloat]? {
+        audioSamples[id]
+    }
+
+    /// Whether a real audio file is registered for the given message.
+    func hasRealAudio(for id: String) -> Bool {
+        audioUrls[id] != nil
+    }
+
+    // MARK: - Playback
+
+    func toggle(id: String, duration dur: Int) {
+        let d = max(dur, 1)
         if currentId == id {
-            isPlaying ? pause() : resume()
+            // Same message — toggle pause/resume.
+            if isPlaying {
+                audioPlayer?.pause()
+                pause()
+            } else {
+                if audioUrls[id] != nil {
+                    audioPlayer?.play()
+                }
+                resume()
+            }
         } else {
-            currentId = id
-            self.duration = d
-            elapsed = 0
-            progress = 0
-            resume()
+            // Different message — stop whatever is playing and start this one.
+            stopCurrentPlayback()
+            if audioUrls[id] != nil {
+                playReal(id: id)
+            } else {
+                // Legacy fake playback
+                currentId = id
+                self.duration = d
+                elapsed = 0
+                progress = 0
+                resume()
+            }
         }
     }
 
+    /// Play real audio for a message.
+    private func playReal(id: String) {
+        guard let url = audioUrls[id] else { return }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.play()
+            audioPlayer = player
+            currentId = id
+            isPlaying = true
+            duration = max(1, Int(player.duration))
+            elapsed = 0
+            progress = 0
+            timer?.invalidate()
+            timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.tickReal() }
+            }
+        } catch {
+            print("[AudioPlayerManager] playReal error: \(error)")
+        }
+    }
+
+    private func tickReal() {
+        guard let player = audioPlayer else { return }
+        if !player.isPlaying {
+            finish()
+            return
+        }
+        let d = player.duration
+        guard d > 0 else { return }
+        progress = player.currentTime / d
+        elapsed = Int(player.currentTime)
+    }
+
+    // MARK: - Legacy simulated playback
+
     private func resume() {
         isPlaying = true
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tick() }
+        // Only start the simulated ticker for legacy (non-real-audio) playback.
+        if audioPlayer == nil {
+            timer?.invalidate()
+            timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.tick() }
+            }
         }
     }
 
@@ -62,10 +147,25 @@ final class AudioPlayerManager: ObservableObject {
 
     private func finish() {
         pause()
+        audioPlayer?.stop()
+        audioPlayer = nil
         progress = 0
         elapsed = 0
         currentId = nil
     }
+
+    private func stopCurrentPlayback() {
+        timer?.invalidate()
+        timer = nil
+        audioPlayer?.stop()
+        audioPlayer = nil
+        isPlaying = false
+        progress = 0
+        elapsed = 0
+        currentId = nil
+    }
+
+    // MARK: - Query helpers
 
     /// Progress to render for the given bubble — 0 unless it's the active one.
     func progress(for id: String) -> Double {

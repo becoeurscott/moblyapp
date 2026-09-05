@@ -462,55 +462,6 @@ struct EditProfileView: View {
     }
 }
 
-// MARK: - Identity verification
-
-struct IdentityVerificationView: View {
-    var body: some View {
-        ProfileScaffold(title: "Vérification d'identité") {
-            VStack(spacing: 16) {
-                VStack(spacing: 12) {
-                    ZStack {
-                        Circle().fill(Color(hex: 0xE9F9EF)).frame(width: 84, height: 84)
-                        Image(systemName: "checkmark.shield.fill").font(.system(size: 40))
-                            .foregroundStyle(Color(hex: 0x1F8A5B))
-                    }
-                    Text(AuthStore.shared.user?.verified == true
-                         ? "Identité vérifiée" : "Identité non vérifiée")
-                        .font(.moblyHeading(19)).foregroundStyle(Color.moblyTextPrimary)
-                    Text(AuthStore.shared.user?.verified == true
-                         ? "Votre profil affiche le badge vérifié.\nCela renforce la confiance des hôtes."
-                         : "Vérifiez votre identité pour rassurer les propriétaires.")
-                        .font(.moblyBody(13)).foregroundStyle(Color(hex: 0x9A9DAC))
-                        .multilineTextAlignment(.center).lineSpacing(2)
-                }
-                .frame(maxWidth: .infinity).padding(.vertical, 12)
-
-                card {
-                    VStack(spacing: 0) {
-                        verifyRow("Pièce d'identité (CNI)", done: true)
-                        Divider().padding(.leading, 44)
-                        verifyRow("Selfie de vérification", done: true)
-                        Divider().padding(.leading, 44)
-                        verifyRow("Numéro de téléphone", done: true)
-                    }
-                }
-            }
-        }
-    }
-
-    private func verifyRow(_ label: String, done: Bool) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 20)).foregroundStyle(done ? Color(hex: 0x1F8A5B) : Color(hex: 0xC4C7D2))
-            Text(LT(label)).font(.moblyBody(14, weight: .medium)).foregroundStyle(Color.moblyTextPrimary)
-            Spacer()
-            Text(done ? "Vérifié" : "En attente").font(.moblyBody(12))
-                .foregroundStyle(done ? Color(hex: 0x1F8A5B) : Color(hex: 0x9A9DAC))
-        }
-        .padding(.vertical, 12)
-    }
-}
-
 // MARK: - Language
 
 struct LanguageView: View {

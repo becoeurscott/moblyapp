@@ -20,7 +20,7 @@ struct ProfileView: View {
     @ObservedObject private var lang = AppLang.shared
 
     @State private var showBecomeOwner = false
-    @State private var showAdmin = false
+
     /// Logout is a three-beat flow: confirm → sign out (spinner) → goodbye
     /// card, then RootView takes over and returns to Welcome.
     @State private var confirmLogout = false
@@ -88,20 +88,14 @@ struct ProfileView: View {
         .fullScreenCover(isPresented: $showBecomeOwner) {
             BecomeOwnerView(onClose: { showBecomeOwner = false })
         }
-        .fullScreenCover(isPresented: $showAdmin) {
-            AdminDashboardView()
-        }
+
         .onAppear {
             if ProcessInfo.processInfo.environment["OPEN_BECOME_OWNER"] == "1" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                     showBecomeOwner = true
                 }
             }
-            if ProcessInfo.processInfo.environment["OPEN_ADMIN"] == "1" {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                    showAdmin = true
-                }
-            }
+
         }
     }
 
@@ -125,9 +119,6 @@ struct ProfileView: View {
                 }
                 .padding(.bottom, 22)
 
-                if auth.user?.isAdmin == true {
-                    adminCTA.padding(.bottom, 22)
-                }
 
                 menuGroup("COMPTE", account)
                 menuGroup("PRÉFÉRENCES", prefs)
@@ -151,9 +142,9 @@ struct ProfileView: View {
     @ObservedObject private var auth = AuthStore.shared
     @ObservedObject private var userData = UserDataStore.shared
 
-    /// From the server. Was hardcoded `true`, so every account — including a
-    /// brand-new one — displayed as verified.
-    private var identityVerified: Bool { auth.user?.verified ?? false }
+    /// From the server. `verified` only means the phone was confirmed, so the
+    /// identity badge reads `identityVerified` — the result of the KYC check.
+    private var identityVerified: Bool { auth.user?.identityVerified ?? false }
 
     private var displayName: String { auth.user?.fullName ?? "Invité" }
     private var displayCity: String { auth.isSignedIn ? Session.shared.phone : "Non connecté" }
@@ -197,16 +188,30 @@ struct ProfileView: View {
                 Spacer()
             }
 
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(identityVerified ? Color(hex: 0x34C759) : Color(hex: 0xE5484D))
-                    .frame(width: 10, height: 10)
-                Text(LT(identityVerified ? "Identité vérifiée" : "Identité non vérifiée"))
-                    .font(.moblyBody(12, weight: .medium)).foregroundStyle(.white)
-                Spacer()
+            // Tappable: an unverified account is one step from the badge, and
+            // this row is where the user looks when they wonder why it's red.
+            NavigationLink(value: ProfileRoute.identity) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(identityVerified ? Color(hex: 0x34C759) : Color(hex: 0xE5484D))
+                        .frame(width: 10, height: 10)
+                    Text(LT(identityVerified ? "Identité vérifiée" : "Identité non vérifiée"))
+                        .font(.moblyBody(12, weight: .medium)).foregroundStyle(.white)
+                    Spacer()
+                    if !identityVerified {
+                        Text(LT("Vérifier"))
+                            .font(.moblyBody(12, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.8))
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.14)))
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.14)))
+            .buttonStyle(.plain)
         }
         .padding(22)
         .background(
@@ -329,51 +334,6 @@ struct ProfileView: View {
             .padding(15)
             .background(RoundedRectangle(cornerRadius: 18).fill(.white))
             .shadow(color: Color(hex: 0x14152A).opacity(0.06), radius: 10, y: 3)
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: Admin CTA (gated on auth.user?.isAdmin)
-
-    /// Deliberately distinct from the owner card: dark background, orange
-    /// shield accent, "restricted access" microcopy. Only rendered when the
-    /// signed-in user has `isAdmin == true`, so a regular user can't discover
-    /// its existence.
-    private var adminCTA: some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            showAdmin = true
-        } label: {
-            HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 13)
-                        .fill(Color.moblyAccent.opacity(0.22))
-                    Image(systemName: "lock.shield.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Color.moblyAccent)
-                }.frame(width: 44, height: 44)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text("Espace admin")
-                            .font(.moblyHeading(14.5)).foregroundStyle(.white)
-                        Text("ACCÈS RESTREINT")
-                            .font(.moblyBody(9, weight: .bold))
-                            .foregroundStyle(Color.moblyAccent)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Capsule().fill(Color.moblyAccent.opacity(0.15)))
-                    }
-                    Text("Gérer utilisateurs, annonces et signalements")
-                        .font(.moblyBody(11.5))
-                        .foregroundStyle(Color.white.opacity(0.7))
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.5))
-            }
-            .padding(15)
-            .background(RoundedRectangle(cornerRadius: 18).fill(Color(hex: 0x14152A)))
-            .shadow(color: Color.moblyAccent.opacity(0.35), radius: 14, y: 6)
         }
         .buttonStyle(.plain)
     }

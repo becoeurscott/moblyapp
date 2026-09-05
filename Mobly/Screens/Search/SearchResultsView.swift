@@ -4,25 +4,23 @@ struct SearchResultsView: View {
     var initialCategory: String?
     var initialQuery: String = ""
     var onClose: () -> Void = {}
-    var onOpenListing: (Listing) -> Void = { _ in }
 
     @ObservedObject private var listingStore = ListingStore.shared
     @State private var query: String
     @State private var activeChip: String
     @State private var filters = FilterState()
     @State private var showFilters = false
+    @State private var selectedListing: Listing?
     @FocusState private var searchFocused: Bool
 
     private let chips = MoblyData.searchCategories
 
     init(initialCategory: String? = nil,
          initialQuery: String = "",
-         onClose: @escaping () -> Void = {},
-         onOpenListing: @escaping (Listing) -> Void = { _ in }) {
+         onClose: @escaping () -> Void = {}) {
         self.initialCategory = initialCategory
         self.initialQuery = initialQuery
         self.onClose = onClose
-        self.onOpenListing = onOpenListing
         // Only preselect a chip if it's one of the transaction filters;
         // space categories (Villas, Bureaux…) just open the full list.
         let preset = initialCategory.flatMap { MoblyData.searchCategories.contains($0) ? $0 : nil }
@@ -125,39 +123,43 @@ struct SearchResultsView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 6)
 
-            HStack {
-                Text(headerLabel)
-                    .font(.moblyHeading(16))
-                    .foregroundStyle(Color.moblyTextPrimary)
-                Spacer()
-                Text("\(results.count) résultats")
-                    .font(.moblyBody(12))
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
-            }
-            .padding(.horizontal, 22)
-            .padding(.top, 8)
-            .padding(.bottom, 6)
+            ScrollView(.vertical, showsIndicators: true) {
+                HStack {
+                    Text(headerLabel)
+                        .font(.moblyHeading(16))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                    Spacer()
+                    Text("\(results.count) résultats")
+                        .font(.moblyBody(12))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                }
+                .padding(.horizontal, 22)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
 
-            ScrollView(showsIndicators: false) {
                 LazyVStack(spacing: 16) {
                     ForEach(results) { listing in
-                        ResultCard(listing: listing) { onOpenListing(listing) }
+                        ResultCard(listing: listing) {
+                            ListingStore.shared.prefetchGallery(for: listing)
+                            selectedListing = listing
+                        }
                     }
                 }
                 .padding(.horizontal, 22)
                 .padding(.top, 8)
-                .padding(.bottom, 30)
+                .padding(.bottom, 120)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .refreshable { await listingStore.refresh() }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.white)
         .sheet(isPresented: $showFilters) {
             FilterPanelView(filters: $filters,
                             onApply: { showFilters = false },
                             onClose: { showFilters = false })
                 .presentationDetents([.large])
+        }
+        .fullScreenCover(item: $selectedListing) { listing in
+            ListingDetailView(listing: listing, onClose: { selectedListing = nil })
+                .transition(.move(edge: .bottom))
         }
     }
 
@@ -246,77 +248,67 @@ struct SearchResultsView: View {
 struct ResultCard: View {
     let listing: Listing
     var onOpen: () -> Void
-    @State private var pressed = false
 
     var body: some View {
-        Button(action: onOpen) {
-            HStack(alignment: .top, spacing: 13) {
-                ZStack(alignment: .topLeading) {
-                    ListingCover(listing: listing, width: ImageSlot.thumb)
-                        .frame(width: 108, height: 108)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    HeartButton(listing: listing)
-                        .padding(7)
+        HStack(alignment: .top, spacing: 13) {
+            ZStack(alignment: .topLeading) {
+                ListingCover(listing: listing, width: ImageSlot.thumb)
+                    .frame(width: 108, height: 108)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                HeartButton(listing: listing)
+                    .padding(7)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .top) {
+                    Text(listing.title)
+                        .font(.moblyHeading(15))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                        .lineLimit(1)
+                    Spacer()
+                    HStack(spacing: 3) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 10)).foregroundStyle(Color.moblyPrimary)
+                        Text(listing.rating)
+                            .font(.moblyBody(11.5, weight: .semibold))
+                            .foregroundStyle(Color.moblyTextPrimary)
+                    }
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .top) {
-                        Text(listing.title)
-                            .font(.moblyHeading(15))
-                            .foregroundStyle(Color.moblyTextPrimary)
-                            .lineLimit(1)
-                        Spacer()
-                        HStack(spacing: 3) {
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 10)).foregroundStyle(Color.moblyPrimary)
-                            Text(listing.rating)
-                                .font(.moblyBody(11.5, weight: .semibold))
-                                .foregroundStyle(Color.moblyTextPrimary)
-                        }
-                    }
+                Text("\(listing.location) · \(listing.reviewCount) avis")
+                    .font(.moblyBody(11.5))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+                    .lineLimit(1)
 
-                    Text("\(listing.location) · \(listing.reviewCount) avis")
-                        .font(.moblyBody(11.5))
-                        .foregroundStyle(Color(hex: 0x9A9DAC))
-                        .lineLimit(1)
+                Text("Équipements")
+                    .font(.moblyBody(11, weight: .semibold))
+                    .foregroundStyle(Color.moblyPrimary)
+                    .padding(.top, 3)
+                Text(listing.tags.joined(separator: "  ·  "))
+                    .font(.moblyBody(11))
+                    .foregroundStyle(Color(hex: 0x6B6F80))
+                    .lineLimit(1)
 
-                    // amenity bullets
-                    Text("Équipements")
-                        .font(.moblyBody(11, weight: .semibold))
+                Spacer(minLength: 2)
+
+                HStack(spacing: 3) {
+                    Text(listing.price)
+                        .font(.moblyHeading(14))
                         .foregroundStyle(Color.moblyPrimary)
-                        .padding(.top, 3)
-                    Text(listing.tags.joined(separator: "  ·  "))
+                    Text(LT(listing.priceUnit))
                         .font(.moblyBody(11))
-                        .foregroundStyle(Color(hex: 0x6B6F80))
-                        .lineLimit(1)
-
-                    Spacer(minLength: 2)
-
-                    HStack(spacing: 3) {
-                        Text(listing.price)
-                            .font(.moblyHeading(14))
-                            .foregroundStyle(Color.moblyPrimary)
-                        Text(LT(listing.priceUnit))
-                            .font(.moblyBody(11))
-                            .foregroundStyle(Color(hex: 0x9A9DAC))
-                    }
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
                 }
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.white))
-            .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(hex: 0xEFF0F4), lineWidth: 1))
-            .shadow(color: Color(hex: 0x14152A).opacity(0.05), radius: 10, y: 5)
-            .scaleEffect(pressed ? 0.98 : 1)
-            .animation(.easeOut(duration: 0.12), value: pressed)
         }
-        .buttonStyle(.plain)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in pressed = true }
-                .onEnded { _ in pressed = false }
-        )
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.white))
+        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(hex: 0xEFF0F4), lineWidth: 1))
+        .shadow(color: Color(hex: 0x14152A).opacity(0.05), radius: 10, y: 5)
+        .contentShape(Rectangle())
+        .onTapGesture { onOpen() }
     }
 }
 

@@ -49,44 +49,31 @@ struct HomeView: View {
                 .padding(.horizontal, 22)
                 .padding(.top, 8)
 
-            VStack(spacing: 0) {
-                searchBar
-                    .padding(.horizontal, 22)
-                    .padding(.top, 18)
-                if searching {
-                    // Dropdown is now anchored directly under the search bar
-                    // (part of the same VStack) — no full-screen overlay, no
-                    // detached sheet. Sizes to its own content via
-                    // `fixedSize(vertical: true)` so it never adds blank
-                    // space when few suggestions are returned.
-                    suggestionsCard
-                        .padding(.horizontal, 22)
-                        .padding(.top, 6)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-            .padding(.bottom, searching ? 4 : 20)
+            searchBar
+                .padding(.horizontal, 22)
+                .padding(.top, 18)
+                .padding(.bottom, 20)
 
             ZStack(alignment: .top) {
                 ScrollView(showsIndicators: false) {
                     feed
                         .padding(.bottom, 100)
                 }
-                // Pull down to refresh. `.refreshable` holds the spinner until
-                // the task finishes, so the gesture reflects the real request
-                // rather than snapping back immediately.
                 .refreshable {
                     await store.refresh()
                     await UserDataStore.shared.loadFavorites()
                 }
 
                 if searching {
-                    // Light scrim over the feed so the dropdown reads as the
-                    // active surface without covering the search bar itself.
                     Color.black.opacity(0.06)
                         .ignoresSafeArea()
                         .onTapGesture { dismissSearch() }
                         .transition(.opacity)
+
+                    suggestionsCard
+                        .padding(.horizontal, 22)
+                        .padding(.top, 6)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
         }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - CDN resizing
 
@@ -52,47 +53,98 @@ struct ShimmerPlaceholder: View {
     }
 }
 
+// MARK: - Cached image loader
+
+/// Loads images checking URLCache synchronously first, so cached images render
+/// on the first frame with no shimmer flash. Only shows the shimmer when the
+/// image is genuinely being fetched from the network.
+@MainActor
+final class CachedImageLoader: ObservableObject {
+    @Published var image: UIImage?
+    @Published var failed = false
+
+    private var url: URL?
+    private var task: Task<Void, Never>?
+
+    func load(_ url: URL) {
+        guard self.url != url else { return }
+        self.url = url
+        task?.cancel()
+        failed = false
+
+        let request = URLRequest(url: url)
+        if let cached = URLCache.shared.cachedResponse(for: request),
+           let img = UIImage(data: cached.data) {
+            image = img
+            return
+        }
+
+        image = nil
+        task = Task {
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard !Task.isCancelled else { return }
+                if let img = UIImage(data: data) {
+                    withAnimation(.easeIn(duration: 0.2)) { image = img }
+                    let cached = CachedURLResponse(response: response, data: data)
+                    URLCache.shared.storeCachedResponse(cached, for: request)
+                } else {
+                    failed = true
+                }
+            } catch {
+                if !Task.isCancelled { failed = true }
+            }
+        }
+    }
+}
+
 // MARK: - Remote image
 
-/// Loads a remote URL at a CDN-appropriate size, showing a shimmer while it
-/// arrives and an optional local asset if it fails. Strings that aren't URLs
-/// are treated as bundled asset names.
+/// Loads a remote URL at a CDN-appropriate size, showing a shimmer only when
+/// the image is not in the disk cache. Cached images paint on the first frame.
 struct RemoteImage: View {
     let source: String
     var width: Int = ImageSlot.card
     var contentMode: ContentMode = .fill
-    /// Asset name rendered if the remote load fails.
     var fallbackAsset: String? = nil
+
+    @StateObject private var loader = CachedImageLoader()
 
     var body: some View {
         if source.hasPrefix("http"), let url = URL(string: source.cdnSized(width)) {
-            AsyncImage(url: url, transaction: Transaction(animation: .easeIn(duration: 0.25))) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable().aspectRatio(contentMode: contentMode)
-                case .failure:
-                    if let fallbackAsset {
-                        Image(fallbackAsset).resizable().aspectRatio(contentMode: contentMode)
-                    } else {
-                        Rectangle().fill(Color(hex: 0xEEF0FE))
-                            .overlay(Image(systemName: "photo")
-                                .font(.system(size: 20))
-                                .foregroundStyle(Color(hex: 0xB9BECF)))
+            content
+                .onAppear { loader.load(url) }
+                .onChange(of: source) { _, _ in
+                    if let newURL = URL(string: source.cdnSized(width)) {
+                        loader.load(newURL)
                     }
-                default:
-                    ShimmerPlaceholder()
                 }
-            }
         } else if source.hasPrefix("file://"), let url = URL(string: source),
                   let data = try? Data(contentsOf: url),
                   let ui = UIImage(data: data) {
-            // Owner-uploaded photos live in Caches/mobly_owner_photos as JPGs
-            // and are referenced by `file://` URL in Listing.photos. No cache
-            // logic needed — the OS caches disk reads for us, and images are
-            // typically <500 KB after JPEG compression.
             Image(uiImage: ui).resizable().aspectRatio(contentMode: contentMode)
         } else {
             Image(source).resizable().aspectRatio(contentMode: contentMode)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let img = loader.image {
+            Image(uiImage: img)
+                .resizable()
+                .aspectRatio(contentMode: contentMode)
+        } else if loader.failed {
+            if let fallbackAsset {
+                Image(fallbackAsset).resizable().aspectRatio(contentMode: contentMode)
+            } else {
+                Rectangle().fill(Color(hex: 0xEEF0FE))
+                    .overlay(Image(systemName: "photo")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Color(hex: 0xB9BECF)))
+            }
+        } else {
+            ShimmerPlaceholder()
         }
     }
 }
@@ -109,5 +161,27 @@ enum MoblyImageCache {
             diskCapacity: 512 * 1024 * 1024,     // 512 MB
             diskPath: "mobly_images"
         )
+    }
+}
+
+// MARK: - Prefetch
+
+enum ImagePrefetch {
+    /// Warm URLCache with a list of image URLs in the background. Returns
+    /// immediately; the downloads run at utility priority.
+    static func warm(_ urls: [String], width: Int = ImageSlot.hero) {
+        let targets = urls.prefix(6).compactMap { URL(string: $0.cdnSized(width)) }
+        guard !targets.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            await withTaskGroup(of: Void.self) { group in
+                for url in targets {
+                    group.addTask {
+                        let req = URLRequest(url: url)
+                        guard URLCache.shared.cachedResponse(for: req) == nil else { return }
+                        _ = try? await URLSession.shared.data(for: req)
+                    }
+                }
+            }
+        }
     }
 }

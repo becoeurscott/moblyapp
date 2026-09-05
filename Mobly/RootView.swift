@@ -384,7 +384,7 @@ private struct PreviewChatWrapper: View {
                        createdAt: now.addingTimeInterval(-400)),
             MessageDTO(id: "d5", threadId: id, senderId: me, clientId: nil,
                        kind: "TEXT",
-                       text: "📍 Ma position: https://www.google.com/maps?q=4.048200,9.703700",
+                       text: "Super ! Voici la localisation : https://maps.app.goo.gl/abc123",
                        mediaUrl: nil, durationSec: nil, replyToId: nil, visitId: nil,
                        visitAction: nil, read: true, readAt: nil,
                        createdAt: now.addingTimeInterval(-120)),

@@ -21,6 +21,11 @@ final class ChatSocket: NSObject, ObservableObject {
         case typing(threadId: String, userId: String, typing: Bool)
         case read(threadId: String, userId: String)
         case presence(userId: String, online: Bool)
+        case callIncoming(callId: String, threadId: String, fromId: String, fromName: String, isVideo: Bool)
+        case callAccepted(callId: String)
+        case callRejected(callId: String)
+        case callEnded(callId: String)
+        case callAudio(Data)
     }
 
     var onEvent: ((Event) -> Void)?
@@ -94,6 +99,29 @@ final class ChatSocket: NSObject, ObservableObject {
         sendJSON(["type": "read", "threadId": threadId])
     }
 
+    // MARK: - Call signaling
+
+    func sendCallStart(callId: String, threadId: String, isVideo: Bool) {
+        sendJSON(["type": "call:start", "callId": callId, "threadId": threadId, "isVideo": isVideo])
+    }
+
+    func sendCallAccept(callId: String) {
+        sendJSON(["type": "call:accept", "callId": callId])
+    }
+
+    func sendCallReject(callId: String) {
+        sendJSON(["type": "call:reject", "callId": callId])
+    }
+
+    func sendCallEnd(callId: String) {
+        sendJSON(["type": "call:end", "callId": callId])
+    }
+
+    func sendCallAudio(_ data: Data) {
+        guard state == .connected else { return }
+        task?.send(.data(data)) { _ in }
+    }
+
     private func sendJSON(_ dict: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
               let text = String(data: data, encoding: .utf8) else { return }
@@ -115,7 +143,12 @@ final class ChatSocket: NSObject, ObservableObject {
                     switch message {
                     case .string(let text): self.handle(text)
                     case .data(let data):
-                        self.handle(String(data: data, encoding: .utf8) ?? "")
+                        if let text = String(data: data, encoding: .utf8),
+                           text.first == "{" {
+                            self.handle(text)
+                        } else {
+                            self.onEvent?(.callAudio(data))
+                        }
                     @unknown default: break
                     }
                     // One receive only ever delivers one frame — re-arm.
@@ -150,6 +183,19 @@ final class ChatSocket: NSObject, ObservableObject {
             if let userId = envelope.userId {
                 onEvent?(.presence(userId: userId, online: envelope.online ?? false))
             }
+        case "call:incoming":
+            if let callId = envelope.callId, let threadId = envelope.threadId,
+               let from = envelope.from {
+                onEvent?(.callIncoming(callId: callId, threadId: threadId,
+                                       fromId: from.id, fromName: from.name,
+                                       isVideo: envelope.isVideo ?? false))
+            }
+        case "call:accepted":
+            if let callId = envelope.callId { onEvent?(.callAccepted(callId: callId)) }
+        case "call:rejected":
+            if let callId = envelope.callId { onEvent?(.callRejected(callId: callId)) }
+        case "call:ended":
+            if let callId = envelope.callId { onEvent?(.callEnded(callId: callId)) }
         case "error":
             // The server refused the token — a reconnect loop would just spam
             // it, so wait for the app to re-authenticate.
@@ -159,6 +205,11 @@ final class ChatSocket: NSObject, ObservableObject {
         }
     }
 
+    private struct CallPeer: Decodable {
+        let id: String
+        let name: String
+    }
+
     private struct Envelope: Decodable {
         let type: String
         let threadId: String?
@@ -166,6 +217,9 @@ final class ChatSocket: NSObject, ObservableObject {
         let typing: Bool?
         let online: Bool?
         let message: MessageDTO?
+        let callId: String?
+        let isVideo: Bool?
+        let from: CallPeer?
     }
 
     // MARK: - Keepalive & reconnect

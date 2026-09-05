@@ -156,8 +156,9 @@ struct RecommendedCard: View {
                 .padding(12)
             }
             .frame(width: 230)
-            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white))
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(hex: 0xEDEEF2), lineWidth: 1))
+            .background(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color(hex: 0xE2E4EC), lineWidth: 1.5))
             .shadow(color: Color(hex: 0x14152A).opacity(0.05), radius: 10, y: 4)
         }
         .buttonStyle(.plain)

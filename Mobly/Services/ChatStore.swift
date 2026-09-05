@@ -256,11 +256,12 @@ final class ChatStore: ObservableObject {
     /// on that same `clientId`, a retry after a dropped connection resolves to
     /// the existing message rather than posting twice.
     func send(threadId: String, text: String, myUserId: String,
+              kind: String = "TEXT", mediaUrl: String? = nil,
               replyToId: String? = nil) async {
         let clientId = UUID().uuidString
         let optimistic = MessageDTO(
             id: "local-\(clientId)", threadId: threadId, senderId: myUserId,
-            clientId: clientId, kind: "TEXT", text: text, mediaUrl: nil,
+            clientId: clientId, kind: kind, text: text, mediaUrl: mediaUrl,
             durationSec: nil, replyToId: replyToId, visitId: nil, visitAction: nil,
             read: false, readAt: nil, createdAt: Date()
         )
@@ -269,12 +270,14 @@ final class ChatStore: ObservableObject {
 
         do {
             struct Body: Encodable {
-                let text: String; let clientId: String; let replyToId: String?
+                let text: String; let clientId: String; let kind: String
+                let mediaUrl: String?; let replyToId: String?
             }
             struct Wrap: Decodable { let message: MessageDTO }
             let w: Wrap = try await api.request(
                 "threads/\(threadId)/messages", method: "POST",
-                body: Body(text: text, clientId: clientId, replyToId: replyToId),
+                body: Body(text: text, clientId: clientId, kind: kind,
+                           mediaUrl: mediaUrl, replyToId: replyToId),
                 authorized: true
             )
             // Swap the placeholder for the confirmed row.
@@ -388,6 +391,18 @@ final class ChatStore: ObservableObject {
                     threads[i].participants[j].online = online
                 }
             }
+
+        case .callIncoming(let callId, let threadId, let fromId, let fromName, let isVideo):
+            CallService.shared.handleIncoming(callId: callId, threadId: threadId,
+                                              fromId: fromId, fromName: fromName, isVideo: isVideo)
+        case .callAccepted:
+            CallService.shared.handleAccepted()
+        case .callRejected:
+            CallService.shared.handleRejected()
+        case .callEnded:
+            CallService.shared.handleEnded()
+        case .callAudio(let data):
+            CallService.shared.handleAudioData(data)
         }
     }
 

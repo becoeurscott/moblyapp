@@ -350,11 +350,16 @@ private struct AnnonceCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 15))
                 .saturation(dimmed ? 0 : 1)
                 .opacity(dimmed ? 0.55 : 1)
-                .overlay(alignment: .topLeading) { badge.padding(6) }
             VStack(alignment: .leading, spacing: 6) {
-                Text(annonce.listing.title).font(.moblyHeading(16.5))
-                    .foregroundStyle(dimmed ? Color.moblyTextSecondary : Color.moblyTextPrimary)
-                    .lineLimit(1)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(annonce.listing.title).font(.moblyHeading(16.5))
+                        .foregroundStyle(dimmed ? Color.moblyTextSecondary : Color.moblyTextPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(annonce.status.label)
+                        .font(.moblyBody(12, weight: .bold))
+                        .foregroundStyle(statusColor)
+                }
                 Text(annonce.listing.price + LT(annonce.listing.priceUnit))
                     .font(.moblyHeading(15))
                     .foregroundStyle(dimmed ? Color(hex: 0x9A9DAC) : Color.moblyPrimary)
@@ -370,20 +375,12 @@ private struct AnnonceCard: View {
         .padding(14)
     }
 
-    private var badge: some View {
-        Text(annonce.status.label)
-            .font(.moblyBody(9, weight: .bold))
-            .foregroundStyle(badgeColor)
-            .padding(.horizontal, 7).padding(.vertical, 4)
-            .background(Capsule().fill(.white.opacity(0.95)))
-            .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
-    }
-    private var badgeColor: Color {
+    private var statusColor: Color {
         switch annonce.status {
         case .boosted:  return Color.moblyAccent
         case .active:   return Color(hex: 0x1F8A5B)
         case .pending:  return Color(hex: 0x9A6B00)
-        case .inactive: return Color(hex: 0x9A9DAC)   // paused / rejected / archived
+        case .inactive: return Color(hex: 0x9A9DAC)
         }
     }
 

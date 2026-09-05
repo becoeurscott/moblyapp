@@ -104,13 +104,15 @@ final class PushService: NSObject, ObservableObject {
 }
 
 extension PushService: UNUserNotificationCenterDelegate {
-    /// A banner while the app is open would duplicate what the socket already
-    /// delivered — but the badge and list still update.
+    /// Chat messages suppress the banner (the socket already delivered them);
+    /// everything else (re-engagement, visits, announcements) shows a full alert.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.badge, .sound]
+        let info = notification.request.content.userInfo
+        let isChat = info["threadId"] != nil
+        return isChat ? [.badge, .sound] : [.banner, .badge, .sound]
     }
 
     /// Tapped — remember the thread so the UI can open it once it's ready.

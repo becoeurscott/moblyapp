@@ -146,6 +146,9 @@ struct ExploreView: View {
     @FocusState private var searchActive: Bool
     @State private var showFilters = false
     @State private var filters = FilterState()
+    @State private var chatListing: Listing?
+    @ObservedObject private var auth = AuthStore.shared
+    @State private var needsSignIn = false
 
     private var locationSuggestions: [(name: String, region: String)] {
         let q = searchText.trimmingCharacters(in: .whitespaces)
@@ -356,6 +359,14 @@ struct ExploreView: View {
             if let preset = initialFilters { filters = preset }
             goTo(loc)
             onLocationConsumed()
+        }
+        .fullScreenCover(item: $chatListing) { listing in
+            ChatOpeningView(listing: listing, onBack: { chatListing = nil })
+        }
+        .alert("Connexion requise", isPresented: $needsSignIn) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Connectez-vous pour contacter le propriétaire.")
         }
     }
 
@@ -756,9 +767,6 @@ struct ExploreView: View {
                             .font(.moblyBody(11, weight: .semibold))
                             .foregroundStyle(Color.moblyTextPrimary)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(Color.white.opacity(0.55)))
                 }
                 Spacer(minLength: 0)
             }
@@ -783,7 +791,13 @@ struct ExploreView: View {
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.45)))
 
             HStack(spacing: 8) {
-                Button { onOpenListing(l) } label: {
+                Button {
+                    if auth.isSignedIn {
+                        chatListing = l
+                    } else {
+                        needsSignIn = true
+                    }
+                } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "bubble.left.fill")
                             .font(.system(size: 10))
@@ -903,13 +917,6 @@ private struct ExploreCard: View {
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 9)).foregroundStyle(Color.moblyPrimary)
-                        Text(listing.rating)
-                            .font(.moblyBody(10.5, weight: .semibold))
-                            .foregroundStyle(Color.moblyTextPrimary)
-                    }
                     Text(listing.title)
                         .font(.moblyHeading(14))
                         .foregroundStyle(Color.moblyTextPrimary)
@@ -918,6 +925,13 @@ private struct ExploreCard: View {
                         .font(.moblyBody(11))
                         .foregroundStyle(Color(hex: 0x9A9DAC))
                         .lineLimit(1)
+                    HStack(spacing: 3) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 9)).foregroundStyle(Color.moblyPrimary)
+                        Text(listing.rating)
+                            .font(.moblyBody(10.5, weight: .semibold))
+                            .foregroundStyle(Color.moblyTextPrimary)
+                    }
                     Spacer(minLength: 0)
                     HStack(spacing: 2) {
                         Text(listing.price)

@@ -2,32 +2,36 @@ import SwiftUI
 
 struct MoblyNotification: Identifiable {
     enum Kind {
-        case message, visit, match, priceDrop, verified, boost
+        case message, visit, match, priceDrop, verified, boost, newListing, reengage
         var icon: String {
             switch self {
-            case .message:  return "bubble.left.fill"
-            case .visit:    return "calendar.badge.checkmark"
-            case .match:    return "sparkles"
-            case .priceDrop: return "arrow.down.circle.fill"
-            case .verified: return "checkmark.seal.fill"
-            case .boost:    return "megaphone.fill"
+            case .message:    return "bubble.left.fill"
+            case .visit:      return "calendar.badge.checkmark"
+            case .match:      return "sparkles"
+            case .priceDrop:  return "arrow.down.circle.fill"
+            case .verified:   return "checkmark.seal.fill"
+            case .boost:      return "megaphone.fill"
+            case .newListing: return "house.fill"
+            case .reengage:   return "bell.badge.fill"
             }
         }
         var tint: UInt32 {
             switch self {
-            case .message:  return 0x3A4FF0
-            case .visit:    return 0x1F8A5B
-            case .match:    return 0xFF6B35
-            case .priceDrop: return 0x1F8A5B
-            case .verified: return 0x3A4FF0
-            case .boost:    return 0xFF6B35
+            case .message:    return 0x3A4FF0
+            case .visit:      return 0x1F8A5B
+            case .match:      return 0xFF6B35
+            case .priceDrop:  return 0x1F8A5B
+            case .verified:   return 0x3A4FF0
+            case .boost:      return 0xFF6B35
+            case .newListing: return 0xFF6B35
+            case .reengage:   return 0x3A4FF0
             }
         }
         var bg: UInt32 {
             switch self {
-            case .message, .verified: return 0xEEF0FE
-            case .visit, .priceDrop:  return 0xEAF6EF
-            case .match, .boost:      return 0xFFF1EA
+            case .message, .verified, .reengage: return 0xEEF0FE
+            case .visit, .priceDrop:             return 0xEAF6EF
+            case .match, .boost, .newListing:    return 0xFFF1EA
             }
         }
     }
@@ -58,6 +62,8 @@ struct MoblyNotification: Identifiable {
         case "PRICE_DROP":                                  k = .priceDrop
         case "VERIFIED":                                    k = .verified
         case "BOOST", "PROMO", "ANNOUNCEMENT", "ALERT":     k = .boost
+        case "NEW_LISTING":                                 k = .newListing
+        case "REENGAGE_3D", "REENGAGE_7D", "REENGAGE_14D": k = .reengage
         default:                                            k = .message
         }
         return MoblyNotification(

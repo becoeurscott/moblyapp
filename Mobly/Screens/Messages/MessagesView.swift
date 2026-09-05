@@ -4,6 +4,7 @@ struct MessagesView: View {
     @ObservedObject private var chat = ChatStore.shared
     @ObservedObject private var auth = AuthStore.shared
     @ObservedObject private var prefs = ThreadPrefs.shared
+    @ObservedObject private var push = PushService.shared
     @State private var openThread: ChatThread?
     @State private var searchText = ""
     @State private var showArchived = false
@@ -157,6 +158,11 @@ struct MessagesView: View {
                         }
                     }
                 }
+
+                Color.clear.frame(height: 100)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -189,6 +195,24 @@ struct MessagesView: View {
         }
         .fullScreenCover(item: $openThread) { thread in
             ChatThreadView(thread: thread, onBack: { openThread = nil })
+        }
+        .onChange(of: push.pendingThreadId) { _, threadId in
+            guard let threadId else { return }
+            push.pendingThreadId = nil
+            if let dto = chat.threads.first(where: { $0.id == threadId }) {
+                chat.markRead(threadId: threadId)
+                Task { await chat.loadMessages(threadId: threadId) }
+                openThread = ChatThread.from(dto, myUserId: auth.user?.id)
+            } else {
+                Task {
+                    await chat.loadThreads()
+                    if let dto = chat.threads.first(where: { $0.id == threadId }) {
+                        chat.markRead(threadId: threadId)
+                        await chat.loadMessages(threadId: threadId)
+                        openThread = ChatThread.from(dto, myUserId: auth.user?.id)
+                    }
+                }
+            }
         }
         .confirmationDialog(
             "Supprimer cette conversation ?",

@@ -329,6 +329,20 @@ final class MoblyAPI {
         return res
     }
 
+    // MARK: - Identity verification (Didit)
+
+    /// Start a check. Returns the one-shot hosted URL to open in a browser
+    /// sheet — the documents go straight to the provider, never through us.
+    func startIdentityVerification() async throws -> IdentitySessionDTO {
+        try await request("verification/session", method: "POST", authorized: true)
+    }
+
+    /// Current verification state. Polled after the hosted flow closes, since
+    /// the provider's webhook may still be in flight.
+    func identityVerificationStatus() async throws -> IdentityStatusDTO {
+        try await request("verification/me", authorized: true)
+    }
+
     // MARK: - Social sign-in
 
     /// Exchange an Apple identity token for a Mobly session. Same response
@@ -463,7 +477,7 @@ final class MoblyAPI {
     // MARK: - Listings
 
     func searchListings(query: String? = nil, category: String? = nil,
-                        city: String? = nil, limit: Int = 100) async throws -> [ListingDTO] {
+                        city: String? = nil, limit: Int = 200) async throws -> [ListingDTO] {
         var q: [String: String] = ["limit": String(limit)]
         if let query { q["query"] = query }
         if let category, category != "Tous" { q["category"] = category }
@@ -837,6 +851,10 @@ struct UserDTO: Decodable, Identifiable {
     let email: String?
     let isOwner: Bool
     let verified: Bool
+    /// Pièce d'identité contrôlée par Didit — distinct from `verified`, which
+    /// only means the phone number was confirmed. Optional so the locally
+    /// hand-built UserDTO JSON (avatar refresh, DEBUG fixtures) still decodes.
+    let identityVerified: Bool?
     /// Set from the device location, not typed by the user.
     let city: String?
     let region: String?
@@ -848,6 +866,22 @@ struct UserDTO: Decodable, Identifiable {
     /// True for the small handful of accounts with the Mobly admin flag. Gates
     /// the entry point to AdminDashboardView on the Profile screen.
     let isAdmin: Bool?
+}
+
+struct IdentitySessionDTO: Decodable {
+    let checkId: String
+    /// Provider-hosted verification page. Single use — never cache it.
+    let url: String
+    let status: String
+}
+
+struct IdentityStatusDTO: Decodable {
+    let identityVerified: Bool
+    let verifiedAt: Date?
+    /// NONE · PENDING · IN_REVIEW · APPROVED · DECLINED · ABANDONED
+    let status: String
+    /// Why a check was refused, when the provider says. Shown to the user.
+    let reason: String?
 }
 
 struct ListingDTO: Codable, Identifiable {

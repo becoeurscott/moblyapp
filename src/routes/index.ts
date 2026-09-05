@@ -13,6 +13,8 @@ import { analyticsRouter } from './analytics.routes';
 import { oauthRouter } from './oauth.routes';
 import { uploadsRouter } from './uploads.routes';
 import { adminRouter } from './admin.routes';
+import { cronRouter } from './cron.routes';
+import { verificationRouter } from './verification.routes';
 
 export const api = Router();
 
@@ -37,4 +39,6 @@ api.use('/threads', chatRouter);
 api.use('/devices', devicesRouter);
 api.use('/notifications', notificationsRouter);
 api.use('/users', usersRouter);
+api.use('/cron', cronRouter);
+api.use('/verification', verificationRouter); // Didit KYC: session, status, webhook
 api.use('/', miscRouter); // /geo, /categories

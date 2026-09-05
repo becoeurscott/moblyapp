@@ -157,6 +157,31 @@ export const env = {
     process.env.WHATSAPP_MESSAGE_TEMPLATE ??
     'Bonjour, j\'ai vu votre annonce "{title}" sur Mobly et je suis intéressé.',
 
+  // Cron — shared secret that protects scheduled endpoints from public access.
+  cronSecret: process.env.CRON_SECRET ?? (isProd ? '' : 'dev-cron-secret'),
+
+  /**
+   * Didit (https://didit.me) — hosted identity verification (pièce d'identité
+   * + selfie), the engine behind `User.identityVerified`.
+   *
+   * `DIDIT_API_KEY` is server-only and must never reach the app: the phone
+   * receives a one-shot hosted URL, nothing else. `DIDIT_WEBHOOK_SECRET` is the
+   * `secret_shared_key` handed back once when the webhook destination is
+   * created — without it every incoming webhook is rejected, since an unsigned
+   * "Approved" would be a free verified badge for anyone who finds the URL.
+   */
+  didit: {
+    apiKey: process.env.DIDIT_API_KEY ?? '',
+    workflowId: process.env.DIDIT_WORKFLOW_ID ?? '',
+    webhookSecret: process.env.DIDIT_WEBHOOK_SECRET ?? '',
+    baseUrl: (process.env.DIDIT_BASE_URL ?? 'https://verification.didit.me').replace(/\/+$/, ''),
+    /** Where Didit sends the user when the hosted flow ends. */
+    callbackUrl: process.env.DIDIT_CALLBACK_URL ?? 'moblyapp://kyc/return',
+    get configured(): boolean {
+      return Boolean(this.apiKey && this.workflowId);
+    },
+  },
+
   // Payments — "stub" auto-settles so the boost flow is buildable without a PSP.
   payments: {
     provider: process.env.PAYMENTS_PROVIDER ?? 'stub',

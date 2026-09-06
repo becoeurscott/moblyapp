@@ -159,7 +159,24 @@ struct ChatThreadView: View {
     /// The most recent visit-related system message, pinned to the top of the
     /// thread so both parties always see the current appointment state.
     private var latestVisitMessage: ChatMessage? {
-        messages.reversed().first(where: { $0.kind == .visit })
+        guard let m = messages.reversed().first(where: { $0.kind == .visit }) else { return nil }
+        // A refused / cancelled visit is over. Keeping it pinned would top the
+        // thread forever with a dead appointment, so the strip disappears —
+        // the card stays in the message list as history.
+        guard (m.visitAction ?? "REQUESTED") != "CANCELLED" else { return nil }
+        return m
+    }
+
+    /// The newest visit message per visit. Only these may carry action
+    /// buttons: an older REQUESTED card must not keep offering Accepter /
+    /// Refuser after the visit has already been answered somewhere else (the
+    /// owner's inbox, say). Superseded cards render as inert history.
+    private var liveVisitMessageIDs: Set<String> {
+        var latest: [String: ChatMessage] = [:]
+        for m in messages where m.kind == .visit {
+            latest[m.visitId ?? m.id] = m   // chronological, so last wins
+        }
+        return Set(latest.values.map(\.id))
     }
 
     private func pinnedVisitCard(_ m: ChatMessage) -> some View {
@@ -433,13 +450,24 @@ struct ChatThreadView: View {
                         ChatSkeleton()
                     }
                     ForEach(Array(messages.enumerated()), id: \.element.id) { i, m in
-                        // Visit SYSTEM messages are already summarised by the
-                        // pinned card at the top of the thread — don't render
-                        // them again inline, otherwise a stale REQUESTED card
-                        // would still show "Confirmer / Refuser" to the owner
-                        // even after they accepted from their inbox.
+                        // A visit request is part of the conversation, so it
+                        // appears inline like any other message. Only the
+                        // newest card per visit is actionable (see
+                        // `liveVisitMessageIDs`) — that is what stops a stale
+                        // REQUESTED card from still offering Accepter /
+                        // Refuser after the visit was answered elsewhere.
                         if m.kind == .visit {
-                            EmptyView()
+                            if i == 0 || messages[i - 1].day != m.day {
+                                DateSeparator(text: m.day)
+                            }
+                            VisitCardBubble(
+                                message: m,
+                                actionable: !m.visitIsMine && liveVisitMessageIDs.contains(m.id),
+                                busy: visitActionBusy,
+                                onConfirm: { performVisitAction(m, status: "CONFIRMED") },
+                                onDecline: { performVisitAction(m, status: "CANCELLED") }
+                            )
+                            .id(m.id)
                         } else {
                             if i == 0 || messages[i - 1].day != m.day {
                                 DateSeparator(text: m.day)
@@ -990,20 +1018,8 @@ struct MessageBubble: View {
             VoiceBubble(message: message)
         case .image:
             if let urlStr = message.mediaUrl, let url = URL(string: urlStr) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let img):
-                        img.resizable().scaledToFill()
-                            .frame(width: 200, height: 150)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    case .failure:
-                        imagePlaceholder
-                    default:
-                        ProgressView()
-                            .frame(width: 200, height: 150)
-                    }
-                }
-                .onTapGesture { onImageTap?(url) }
+                CachedChatImage(url: url)
+                    .onTapGesture { onImageTap?(url) }
             } else {
                 imagePlaceholder
             }
@@ -1880,65 +1896,9 @@ struct FullScreenImageViewer: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable()
-                        .scaledToFit()
-                        .scaleEffect(scale)
-                        .offset(offset)
-                        .gesture(
-                            MagnifyGesture()
-                                .onChanged { v in scale = lastScale * v.magnification }
-                                .onEnded { v in
-                                    lastScale = max(1, scale)
-                                    scale = lastScale
-                                    if scale == 1 { offset = .zero; lastOffset = .zero }
-                                }
-                        )
-                        .simultaneousGesture(
-                            DragGesture()
-                                .onChanged { v in
-                                    if scale > 1 {
-                                        offset = CGSize(
-                                            width: lastOffset.width + v.translation.width,
-                                            height: lastOffset.height + v.translation.height
-                                        )
-                                    }
-                                }
-                                .onEnded { v in
-                                    lastOffset = offset
-                                    if scale <= 1 {
-                                        let dragY = v.translation.height
-                                        if abs(dragY) > 100 {
-                                            onClose()
-                                        }
-                                    }
-                                }
-                        )
-                        .onTapGesture(count: 2) {
-                            withAnimation(.spring(response: 0.3)) {
-                                if scale > 1 {
-                                    scale = 1; lastScale = 1
-                                    offset = .zero; lastOffset = .zero
-                                } else {
-                                    scale = 2.5; lastScale = 2.5
-                                }
-                            }
-                        }
-                case .failure:
-                    VStack(spacing: 12) {
-                        Image(systemName: "photo.slash")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.white.opacity(0.5))
-                        Text("Impossible de charger l'image")
-                            .font(.moblyBody(14))
-                            .foregroundStyle(.white.opacity(0.6))
-                    }
-                default:
-                    ProgressView().tint(.white).scaleEffect(1.3)
-                }
-            }
+            CachedFullScreenImage(url: url, scale: $scale, lastScale: $lastScale,
+                                   offset: $offset, lastOffset: $lastOffset,
+                                   onClose: onClose)
 
             VStack {
                 HStack {
@@ -1956,6 +1916,111 @@ struct FullScreenImageViewer: View {
             }
         }
         .statusBarHidden()
+    }
+}
+
+// MARK: - Cached chat image (bubble thumbnail)
+
+private struct CachedChatImage: View {
+    let url: URL
+    @StateObject private var loader = CachedImageLoader()
+
+    var body: some View {
+        Group {
+            if let img = loader.image {
+                Image(uiImage: img)
+                    .resizable().scaledToFill()
+                    .frame(width: 200, height: 150)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            } else if loader.failed {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(hex: 0xF1F2F6))
+                    Image(systemName: "photo")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Color(hex: 0xC4C7D2))
+                }
+                .frame(width: 200, height: 150)
+            } else {
+                ShimmerPlaceholder()
+                    .frame(width: 200, height: 150)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+        .onAppear { loader.load(url) }
+    }
+}
+
+// MARK: - Cached full-screen image
+
+private struct CachedFullScreenImage: View {
+    let url: URL
+    @Binding var scale: CGFloat
+    @Binding var lastScale: CGFloat
+    @Binding var offset: CGSize
+    @Binding var lastOffset: CGSize
+    var onClose: () -> Void
+
+    @StateObject private var loader = CachedImageLoader()
+
+    var body: some View {
+        Group {
+            if let img = loader.image {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFit()
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .gesture(
+                        MagnifyGesture()
+                            .onChanged { v in scale = lastScale * v.magnification }
+                            .onEnded { _ in
+                                lastScale = max(1, scale)
+                                scale = lastScale
+                                if scale == 1 { offset = .zero; lastOffset = .zero }
+                            }
+                    )
+                    .simultaneousGesture(
+                        DragGesture()
+                            .onChanged { v in
+                                if scale > 1 {
+                                    offset = CGSize(
+                                        width: lastOffset.width + v.translation.width,
+                                        height: lastOffset.height + v.translation.height
+                                    )
+                                }
+                            }
+                            .onEnded { v in
+                                lastOffset = offset
+                                if scale <= 1 && abs(v.translation.height) > 100 {
+                                    onClose()
+                                }
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation(.spring(response: 0.3)) {
+                            if scale > 1 {
+                                scale = 1; lastScale = 1
+                                offset = .zero; lastOffset = .zero
+                            } else {
+                                scale = 2.5; lastScale = 2.5
+                            }
+                        }
+                    }
+            } else if loader.failed {
+                VStack(spacing: 12) {
+                    Image(systemName: "photo.slash")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.white.opacity(0.5))
+                    Text("Impossible de charger l'image")
+                        .font(.moblyBody(14))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+            } else {
+                ProgressView().tint(.white).scaleEffect(1.3)
+            }
+        }
+        .onAppear { loader.load(url) }
     }
 }
 

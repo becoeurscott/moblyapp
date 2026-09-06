@@ -1493,7 +1493,9 @@ struct VisitCardBubble: View {
                         .foregroundStyle(Color.moblyTextSecondary)
                 }
             }
-            .padding(14)
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
             .frame(maxWidth: 300)
             .background(
                 RoundedRectangle(cornerRadius: 18)

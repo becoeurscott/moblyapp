@@ -33,6 +33,14 @@ const sessionLimiter = rateLimit({
 const OPEN_STATUSES: IdentityStatus[] = ['PENDING', 'IN_REVIEW'];
 
 /**
+ * How long an unfinished session can be resumed. Past this the provider's
+ * hosted URL is abandoned and the next attempt mints a fresh (billable)
+ * session, so the app shows a countdown and warns before it lapses.
+ * Single source of truth: both the reuse check and the status endpoint read it.
+ */
+const RESUME_WINDOW_MS = 30 * 60 * 1000;
+
+/**
  * POST /api/verification/session
  * Starts a check and returns the hosted URL for the app to open.
  */
@@ -58,7 +66,7 @@ verificationRouter.post(
       where: { userId, status: { in: OPEN_STATUSES }, hostedUrl: { not: null } },
       orderBy: { createdAt: 'desc' },
     });
-    if (open && Date.now() - open.createdAt.getTime() < 30 * 60 * 1000) {
+    if (open && Date.now() - open.createdAt.getTime() < RESUME_WINDOW_MS) {
       // Confirm with the provider before reusing — the row may be stale if a
       // webhook was missed, and we must not send the user back into a flow
       // that already resolved.
@@ -114,12 +122,22 @@ verificationRouter.get(
       }
     }
 
+    const isOpen = !!check && OPEN_STATUSES.includes(check.status as IdentityStatus);
+
     res.json({
       identityVerified: user.identityVerified,
       verifiedAt: user.verifiedAt,
       status: check?.status ?? 'NONE',
       reason: check?.reason ?? null,
       updatedAt: check?.updatedAt ?? null,
+      startedAt: check?.createdAt ?? null,
+      /// When the current unfinished session stops being resumable. Null when
+      /// nothing is open. Past it, starting again creates a new session.
+      resumableUntil:
+        isOpen && check ? new Date(check.createdAt.getTime() + RESUME_WINDOW_MS) : null,
+      /// Anchor for the client countdown — a device with a wrong clock would
+      /// otherwise show a nonsense timer.
+      serverTime: new Date(),
     });
   })
 );

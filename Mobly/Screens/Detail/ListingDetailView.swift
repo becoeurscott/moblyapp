@@ -410,11 +410,11 @@ struct ListingDetailView: View {
                         Text(ownerName)
                             .font(.moblyHeading(16))
                             .foregroundStyle(Color.moblyTextPrimary)
-                        verifiedBadge
+                        if listing.ownerVerified { verifiedBadge }
                     }
-                    Text("Propriétaire vérifié")
+                    Text(listing.ownerVerified ? "Propriétaire vérifié" : "Propriétaire non vérifié")
                         .font(.moblyBody(13))
-                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                        .foregroundStyle(listing.ownerVerified ? Color(hex: 0x34A853) : Color(hex: 0x9A9DAC))
                 }
                 Spacer()
                 // Same rule as the sticky bar: you are the owner, so there is
@@ -524,8 +524,7 @@ struct ListingDetailView: View {
 
             divider
 
-            trustRow(icon: "checkmark.shield.fill", title: "Hôte vérifié",
-                     sub: "Identité et documents confirmés par Mobly.")
+            hostVerificationRow
                 .padding(.bottom, 16)
             trustRow(icon: "calendar.badge.clock",
                      title: "Visite sur place possible",
@@ -783,6 +782,25 @@ struct ListingDetailView: View {
         return "\(listing.title) est un espace \(listing.subtitle.isEmpty ? "confortable" : listing.subtitle.lowercased()) situé à \(listing.location). Lumineux, bien entretenu et proche des commerces, transports et écoles. Idéal pour un séjour longue durée. Visite sur place possible avant tout engagement." + (isOwnListing ? "" : " Contactez l'hôte directement dans l'app.")
     }
 
+    private var hostVerificationRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: listing.ownerVerified ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(listing.ownerVerified ? Color(hex: 0x34A853) : Color(hex: 0xE5950C))
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(listing.ownerVerified ? "Hôte vérifié" : "Hôte non vérifié")
+                    .font(.moblyHeading(14.5))
+                    .foregroundStyle(listing.ownerVerified ? Color(hex: 0x34A853) : Color(hex: 0xE5950C))
+                Text(listing.ownerVerified
+                     ? "Identité et documents confirmés par Mobly."
+                     : "Ce propriétaire n'a pas encore vérifié son identité.")
+                    .font(.moblyBody(12.5))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+            }
+        }
+    }
+
     private var verifiedBadge: some View {
         ZStack {
             Circle().fill(Color(hex: 0xB8CCFF))
@@ -859,7 +877,7 @@ struct ListingDetailView: View {
         // hit, so it drops to just above the indicator instead of floating on a
         // band of blur.
         // Content clears the home indicator...
-        .padding(.bottom, (isOwnListing ? 4 : 30) + safeAreaBottom)
+        .padding(.bottom, (isOwnListing ? 4 : 14) + safeAreaBottom)
         .background(
             Rectangle().fill(.ultraThinMaterial)
                 .shadow(color: Color(hex: 0x14152A).opacity(0.08), radius: 16, y: -4)

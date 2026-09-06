@@ -45,6 +45,15 @@ struct ListingDetailView: View {
     /// all 126 real properties.
     private var ownerName: String { listing.ownerName ?? "Propriétaire" }
 
+    /// True when the signed-in user is the owner of this space. There is
+    /// nobody to contact — messaging or booking a visit with yourself would
+    /// open a thread with a single participant — so the CTAs are replaced with
+    /// a plain explanation instead of being left tappable and failing.
+    private var isOwnListing: Bool {
+        guard let me = AuthStore.shared.user?.id, let owner = listing.ownerId else { return false }
+        return me == owner
+    }
+
     private func contactOwner() {
         guard auth.isSignedIn else { needsSignIn = true; return }
         // Present the chat screen immediately with a skeleton preview so the
@@ -268,6 +277,12 @@ struct ListingDetailView: View {
             .first?.windows.first?.safeAreaInsets.top) ?? 59
     }
 
+    private var safeAreaBottom: CGFloat {
+        (UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.windows.first?.safeAreaInsets.bottom) ?? 34
+    }
+
     private var heroGallery: some View {
         GeometryReader { geo in
             ScrollView(.horizontal, showsIndicators: false) {
@@ -395,10 +410,20 @@ struct ListingDetailView: View {
                         .foregroundStyle(Color(hex: 0x9A9DAC))
                 }
                 Spacer()
-                CircleIconButton(icon: "phone.fill", bg: .white,
-                                 tint: .moblyPrimary, size: 44, action: onCall)
-                CircleIconButton(icon: "bubble.left.fill", bg: .white,
-                                 tint: .moblyPrimary, size: 44, action: contactOwner)
+                // Same rule as the sticky bar: you are the owner, so there is
+                // no one on the other end of these.
+                if !isOwnListing {
+                    CircleIconButton(icon: "phone.fill", bg: .white,
+                                     tint: .moblyPrimary, size: 44, action: onCall)
+                    CircleIconButton(icon: "bubble.left.fill", bg: .white,
+                                     tint: .moblyPrimary, size: 44, action: contactOwner)
+                } else {
+                    Text("Votre espace")
+                        .font(.moblyBody(11.5, weight: .semibold))
+                        .foregroundStyle(Color.moblyPrimary)
+                        .padding(.horizontal, 11).padding(.vertical, 6)
+                        .background(Capsule().fill(Color(hex: 0xEEF0FE)))
+                }
             }
             .padding(14)
             .background(RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -769,7 +794,61 @@ struct ListingDetailView: View {
         .background(Color(hex: 0xFDEDED))
     }
 
+    /// Replaces the Message / RDV buttons when the viewer owns the space.
+    private var ownListingNotice: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "person.crop.circle.badge.checkmark")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color(hex: 0x6B6F80))
+            Text("Vous ne pouvez pas contacter votre espace")
+                .font(.moblyBody(13, weight: .medium))
+                .foregroundStyle(Color(hex: 0x6B6F80))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(hex: 0xF1F2F6)))
+    }
+
     private var stickyBar: some View {
+        Group {
+            if isOwnListing {
+                VStack(alignment: .leading, spacing: 10) {
+                    priceLabel
+                    ownListingNotice
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                stickyCTARow
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 14)
+        .padding(.bottom, 30 + safeAreaBottom)
+        .background(
+            Rectangle().fill(.ultraThinMaterial)
+                .shadow(color: Color(hex: 0x14152A).opacity(0.08), radius: 16, y: -4)
+        )
+    }
+
+    private var priceLabel: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(listing.price)
+                .font(.moblyHeading(16))
+                .foregroundStyle(Color.moblyTextPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            if !listing.priceUnit.isEmpty {
+                Text(LT(listing.priceUnit))
+                    .font(.moblyBody(11))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var stickyCTARow: some View {
         HStack(spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(listing.price)
@@ -812,14 +891,6 @@ struct ListingDetailView: View {
             .disabled(!isAvailable)
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 14)
-        .padding(.bottom, 30)
-        .background(
-            Rectangle().fill(.ultraThinMaterial)
-                .shadow(color: Color(hex: 0x14152A).opacity(0.08), radius: 16, y: -4)
-                .ignoresSafeArea(edges: .bottom)
-        )
     }
 }
 

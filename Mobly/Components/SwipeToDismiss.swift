@@ -45,9 +45,12 @@ final class SwipeDismissHostController<Content: View>: UIViewController,
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .white
+        view.backgroundColor = .clear
         addChild(hostingController)
         hostingController.view.backgroundColor = .clear
+        if ignoreTopSafeArea {
+            hostingController.safeAreaRegions = .keyboard
+        }
         view.addSubview(hostingController.view)
         hostingController.view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -66,16 +69,6 @@ final class SwipeDismissHostController<Content: View>: UIViewController,
         downGesture = UIPanGestureRecognizer(target: self, action: #selector(handleDown))
         downGesture.delegate = self
         view.addGestureRecognizer(downGesture)
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        if ignoreTopSafeArea {
-            let top = view.safeAreaInsets.top
-            if top > 0 && hostingController.additionalSafeAreaInsets.top != -top {
-                hostingController.additionalSafeAreaInsets.top = -top
-            }
-        }
     }
 
     // MARK: - UIGestureRecognizerDelegate

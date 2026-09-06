@@ -464,6 +464,7 @@ struct ChatRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+        .contentShape(Rectangle())
     }
 }
 

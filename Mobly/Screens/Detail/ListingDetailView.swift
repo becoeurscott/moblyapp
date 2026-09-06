@@ -121,6 +121,7 @@ struct ListingDetailView: View {
                     heroGallery
                     heroButtons
                 }
+                .ignoresSafeArea(edges: .top)
 
                 ScrollView(showsIndicators: false) {
                     content
@@ -312,7 +313,6 @@ struct ListingDetailView: View {
         .clipShape(UnevenRoundedRectangle(
             cornerRadii: .init(bottomLeading: 26, bottomTrailing: 26),
             style: .continuous))
-        .ignoresSafeArea(edges: .top)
     }
 
     private var heroButtons: some View {

@@ -73,6 +73,7 @@ export function serializeUser(u: User) {
     email: u.email,
     isOwner: u.isOwner,
     verified: u.verified,
+    identityVerified: u.identityVerified,
     city: u.city,
     region: u.region,
     rating: u.rating,

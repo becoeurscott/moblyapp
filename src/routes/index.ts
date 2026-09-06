@@ -15,10 +15,19 @@ import { uploadsRouter } from './uploads.routes';
 import { adminRouter } from './admin.routes';
 import { cronRouter } from './cron.routes';
 import { verificationRouter } from './verification.routes';
+import { maintenanceRouter } from './maintenance.routes';
+import { maintenanceGate } from '../middleware/maintenance';
 
 export const api = Router();
 
 api.get('/health', (_req, res) => res.json({ ok: true, service: 'mobly-backend' }));
+
+// Everything below this line is gated by the maintenance window. Must stay
+// FIRST so no route can be reached around it; /health above is deliberately
+// mounted before the gate as well as allow-listed inside it.
+api.use(maintenanceGate);
+
+api.use('/maintenance', maintenanceRouter); // public: is the app down, until when
 
 api.use('/auth', authRouter);
 api.use('/auth', oauthRouter);   // /auth/apple, /auth/google (later)

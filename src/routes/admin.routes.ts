@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
 import { requireAuth, requireAdmin } from '../middleware/auth';
+import { notifyUser, pushConfigured } from '../services/push';
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth, requireAdmin);
@@ -331,11 +332,22 @@ adminRouter.patch(
       })
       .safeParse(req.body);
     if (!body.success) throw new ApiError(400, 'Données invalides', 'VALIDATION_FAILED');
+
+    const prev = body.data.status
+      ? await prisma.listing.findUnique({ where: { id: req.params.id }, select: { status: true, ownerId: true } })
+      : null;
+
     const listing = await prisma.listing.update({
       where: { id: req.params.id },
       data: body.data,
       select: listingSummarySelect,
     });
+
+    // When a listing goes ACTIVE for the first time, notify users in the same city.
+    if (body.data.status === 'ACTIVE' && prev && prev.status !== 'ACTIVE') {
+      notifyNewListing(listing as any, prev.ownerId).catch(() => {});
+    }
+
     res.json({ listing });
   })
 );
@@ -550,6 +562,44 @@ adminRouter.get(
 );
 
 // ═════════════════════════════════════════════════════════════
+// New-listing push — fired when an admin approves a listing
+// (PENDING → ACTIVE). Notifies users in the same city who have
+// a registered device, excluding the listing owner.
+// ═════════════════════════════════════════════════════════════
+
+async function notifyNewListing(
+  listing: { id: string; title: string; city: string; neighborhood?: string | null; priceFcfa: number },
+  ownerId: string,
+) {
+  if (!pushConfigured()) return;
+
+  const price = new Intl.NumberFormat('fr-FR').format(listing.priceFcfa) + ' FCFA';
+  const where = listing.neighborhood
+    ? `${listing.neighborhood}, ${listing.city}`
+    : listing.city;
+
+  const users = await prisma.user.findMany({
+    where: {
+      id: { not: ownerId },
+      city: listing.city,
+      devices: { some: { pushToken: { not: null } } },
+    },
+    select: { id: true },
+    take: 500,
+  });
+
+  for (const u of users) {
+    await notifyUser({
+      userId: u.id,
+      type: 'new_listing',
+      title: `Nouvelle annonce à ${where} 🏠`,
+      body: `${listing.title} — ${price}. Découvrez-la maintenant !`,
+      payload: { listingId: listing.id },
+    }).catch(() => {});
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
 // Broadcast notifications — announcements, promos, incident
 // alerts. Sent to every non-suspended user; a Notification row
 // is created for each and a push is fanned out if they have a
@@ -608,5 +658,71 @@ adminRouter.post(
       payload: b.payload,
     });
     res.json({ sent: 1 });
+  })
+);
+
+// ═════════════════════════════════════════════════════════════
+// Maintenance window
+// ═════════════════════════════════════════════════════════════
+
+/**
+ * The dashboard sends a duration, not a wall-clock instant: "back in 2h30".
+ * Resolving it to `endsAt` server-side means the countdown is anchored to the
+ * server clock, so an admin whose laptop clock is off cannot publish a window
+ * that ends in the past for everyone else.
+ */
+const maintenanceBody = z.object({
+  enabled: z.boolean(),
+  message: z.string().trim().max(300).nullish(),
+  duration: z
+    .object({
+      days: z.number().int().min(0).max(365).default(0),
+      hours: z.number().int().min(0).max(23).default(0),
+      minutes: z.number().int().min(0).max(59).default(0),
+      seconds: z.number().int().min(0).max(59).default(0),
+    })
+    .nullish(),
+});
+
+/** GET /api/admin/maintenance — current window. */
+adminRouter.get(
+  '/maintenance',
+  asyncHandler(async (_req, res) => {
+    const { getMaintenance, serializeMaintenance } = await import('../services/maintenance');
+    res.json(serializeMaintenance(await getMaintenance()));
+  })
+);
+
+/** PUT /api/admin/maintenance — open, adjust or lift the window. */
+adminRouter.put(
+  '/maintenance',
+  asyncHandler(async (req, res) => {
+    const b = maintenanceBody.parse(req.body);
+    const { setMaintenance, serializeMaintenance } = await import('../services/maintenance');
+
+    let endsAt: Date | null = null;
+    if (b.enabled && b.duration) {
+      const secs =
+        b.duration.days * 86400 +
+        b.duration.hours * 3600 +
+        b.duration.minutes * 60 +
+        b.duration.seconds;
+      // A zero duration means "indefinite", not "ends immediately" — the app
+      // then shows the maintenance screen with no countdown at all.
+      if (secs > 0) endsAt = new Date(Date.now() + secs * 1000);
+    }
+
+    const state = await setMaintenance({
+      enabled: b.enabled,
+      message: b.message?.trim() ? b.message.trim() : null,
+      endsAt,
+      updatedBy: req.userId ?? null,
+    });
+
+    console.log(
+      `[maintenance] ${b.enabled ? 'OPENED' : 'LIFTED'} by ${req.userId}` +
+        (endsAt ? ` until ${endsAt.toISOString()}` : '')
+    );
+    res.json(serializeMaintenance(state));
   })
 );

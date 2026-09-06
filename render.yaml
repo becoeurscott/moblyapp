@@ -111,3 +111,18 @@ services:
         # Contents of secrets/AuthKey_<id>.p8 with real newlines replaced by
         # literal \n so it fits on one line.
         sync: false
+
+      # ---------------------------------------------------------------
+      # Didit — hosted identity verification (badge vérifié).
+      # Webhook destination must point at
+      # https://<host>/api/verification/webhook, and DIDIT_WEBHOOK_SECRET
+      # must hold the `secret_shared_key` shown once at creation time.
+      # ---------------------------------------------------------------
+      - key: DIDIT_API_KEY
+        sync: false
+      - key: DIDIT_WORKFLOW_ID
+        sync: false
+      - key: DIDIT_WEBHOOK_SECRET
+        sync: false
+      - key: DIDIT_CALLBACK_URL
+        value: moblyapp://kyc/return

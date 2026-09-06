@@ -30,6 +30,7 @@ export type ErrorCode =
   | 'OTP_LOCKED'
   | 'OWNER_REQUIRED'
   | 'CONFLICT'
+  | 'MAINTENANCE'
   | 'INTERNAL';
 
 export class ApiError extends Error {

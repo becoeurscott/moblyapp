@@ -21,7 +21,11 @@ type ClientEvent =
   | { type: 'auth'; token: string }
   | { type: 'typing'; threadId: string; typing: boolean }
   | { type: 'read'; threadId: string }
-  | { type: 'ping' };
+  | { type: 'ping' }
+  | { type: 'call:start'; callId: string; threadId: string; isVideo: boolean }
+  | { type: 'call:accept'; callId: string }
+  | { type: 'call:reject'; callId: string }
+  | { type: 'call:end'; callId: string };
 
 export type ServerEvent =
   | { type: 'ready'; userId: string }
@@ -30,7 +34,11 @@ export type ServerEvent =
   | { type: 'read'; threadId: string; userId: string; at: string }
   | { type: 'presence'; userId: string; online: boolean }
   | { type: 'pong' }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'call:incoming'; callId: string; threadId: string; from: { id: string; name: string }; isVideo: boolean }
+  | { type: 'call:accepted'; callId: string }
+  | { type: 'call:rejected'; callId: string }
+  | { type: 'call:ended'; callId: string };
 
 interface Client {
   socket: WebSocket;
@@ -42,6 +50,28 @@ interface Client {
 
 /** userId -> that user's live sockets (one per device/tab). */
 const byUser = new Map<string, Set<Client>>();
+
+// ── Active calls ──────────────────────────────────────────────
+interface ActiveCall {
+  id: string;
+  threadId: string;
+  callerId: string;
+  calleeId: string;
+  isVideo: boolean;
+  state: 'ringing' | 'connected';
+  timeout?: NodeJS.Timeout;
+}
+const activeCalls = new Map<string, ActiveCall>();
+const userToCallId = new Map<string, string>();
+
+function cleanupCall(callId: string) {
+  const call = activeCalls.get(callId);
+  if (!call) return;
+  clearTimeout(call.timeout);
+  userToCallId.delete(call.callerId);
+  if (userToCallId.get(call.calleeId) === callId) userToCallId.delete(call.calleeId);
+  activeCalls.delete(callId);
+}
 
 /** How long an unauthenticated socket may stay open. */
 const AUTH_GRACE_MS = 10_000;
@@ -120,7 +150,25 @@ export function attachRealtime(server: Server, path = '/ws') {
       client.alive = true;
     });
 
-    socket.on('message', async (raw: RawData) => {
+    socket.on('message', async (raw: RawData, isBinary: boolean) => {
+      // Binary frames = audio/video relay for active call
+      if (isBinary) {
+        if (!client.userId) return;
+        const callId = userToCallId.get(client.userId);
+        if (!callId) return;
+        const call = activeCalls.get(callId);
+        if (!call || call.state !== 'connected') return;
+        const peerId = call.callerId === client.userId ? call.calleeId : call.callerId;
+        const peerSockets = byUser.get(peerId);
+        if (!peerSockets) return;
+        for (const peer of peerSockets) {
+          if (peer.socket.readyState === WebSocket.OPEN) {
+            peer.socket.send(raw as Buffer);
+          }
+        }
+        return;
+      }
+
       let event: ClientEvent;
       try {
         event = JSON.parse(raw.toString());
@@ -221,12 +269,99 @@ export function attachRealtime(server: Server, path = '/ws') {
           );
           break;
         }
+
+        // ── Calls ──────────────────────────────────────────────
+        case 'call:start': {
+          const ev = event as Extract<ClientEvent, { type: 'call:start' }>;
+          if (userToCallId.has(client.userId)) return; // already in a call
+          const member = await prisma.threadParticipant.findUnique({
+            where: { threadId_userId: { threadId: ev.threadId, userId: client.userId } },
+            select: { id: true },
+          });
+          if (!member) return;
+          const ids = await threadParticipantIds(ev.threadId);
+          const calleeId = ids.find((id) => id !== client.userId);
+          if (!calleeId) return;
+          const caller = await prisma.user.findUnique({
+            where: { id: client.userId },
+            select: { fullName: true },
+          });
+          const callerName = caller?.fullName?.trim() || 'Utilisateur';
+
+          const call: ActiveCall = {
+            id: ev.callId,
+            threadId: ev.threadId,
+            callerId: client.userId,
+            calleeId,
+            isVideo: ev.isVideo,
+            state: 'ringing',
+            timeout: setTimeout(() => {
+              if (activeCalls.get(ev.callId)?.state === 'ringing') {
+                emitToUsers([client.userId, calleeId], { type: 'call:ended', callId: ev.callId });
+                cleanupCall(ev.callId);
+              }
+            }, 30_000),
+          };
+          activeCalls.set(ev.callId, call);
+          userToCallId.set(client.userId, ev.callId);
+          userToCallId.set(calleeId, ev.callId);
+
+          emitToUsers([calleeId], {
+            type: 'call:incoming',
+            callId: ev.callId,
+            threadId: ev.threadId,
+            from: { id: client.userId, name: callerName },
+            isVideo: ev.isVideo,
+          });
+          break;
+        }
+
+        case 'call:accept': {
+          const ev = event as Extract<ClientEvent, { type: 'call:accept' }>;
+          const call = activeCalls.get(ev.callId);
+          if (!call || call.state !== 'ringing' || call.calleeId !== client.userId) return;
+          clearTimeout(call.timeout);
+          call.state = 'connected';
+          emitToUsers([call.callerId], { type: 'call:accepted', callId: ev.callId });
+          break;
+        }
+
+        case 'call:reject': {
+          const ev = event as Extract<ClientEvent, { type: 'call:reject' }>;
+          const call = activeCalls.get(ev.callId);
+          if (!call) return;
+          emitToUsers([call.callerId], { type: 'call:rejected', callId: ev.callId });
+          cleanupCall(ev.callId);
+          break;
+        }
+
+        case 'call:end': {
+          const ev = event as Extract<ClientEvent, { type: 'call:end' }>;
+          const call = activeCalls.get(ev.callId);
+          if (!call) return;
+          const otherId = call.callerId === client.userId ? call.calleeId : call.callerId;
+          emitToUsers([otherId], { type: 'call:ended', callId: ev.callId });
+          cleanupCall(ev.callId);
+          break;
+        }
       }
     });
 
     socket.on('close', async () => {
       clearTimeout(client.authTimer);
       if (!client.userId) return;
+
+      // End any active call this socket's user is in.
+      const callId = userToCallId.get(client.userId);
+      if (callId) {
+        const call = activeCalls.get(callId);
+        if (call) {
+          const otherId = call.callerId === client.userId ? call.calleeId : call.callerId;
+          emitToUsers([otherId], { type: 'call:ended', callId });
+          cleanupCall(callId);
+        }
+      }
+
       unregister(client);
       // Only announce offline once the user's *last* socket goes — otherwise
       // closing one device would mark them away while another is still open.

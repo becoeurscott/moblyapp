@@ -734,3 +734,26 @@ model OAuthIdentity {
   @@unique([provider, providerSub])
   @@index([userId])
 }
+
+/// Global maintenance window. A single row (id `singleton`) that gates the
+/// whole public API: while `enabled`, every client-facing route answers 503
+/// `MAINTENANCE` and the iOS app swaps to a blocking screen counting down to
+/// `endsAt`. Admins bypass the gate so the window can be lifted from the
+/// dashboard while it is in force.
+///
+/// `endsAt` is only ever a *promise to the user* — nothing expires the window
+/// automatically on the server, because a maintenance job overrunning its
+/// estimate must not silently reopen a half-migrated API. The countdown
+/// hitting zero makes the app show "bientôt de retour" and keep polling.
+model MaintenanceWindow {
+  id        String    @id @default("singleton")
+  enabled   Boolean   @default(false)
+  /// Optional French prose shown under the title. Null = app's default copy.
+  message   String?
+  /// When the app is expected back. Null = no countdown, indefinite window.
+  endsAt    DateTime?
+  startedAt DateTime?
+  updatedAt DateTime  @updatedAt
+  /// User id of the admin who last flipped the switch, for the audit trail.
+  updatedBy String?
+}

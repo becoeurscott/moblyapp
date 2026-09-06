@@ -121,7 +121,6 @@ struct ListingDetailView: View {
                     heroGallery
                     heroButtons
                 }
-                .ignoresSafeArea(edges: .top)
 
                 ScrollView(showsIndicators: false) {
                     content
@@ -130,6 +129,7 @@ struct ListingDetailView: View {
                         .padding(.bottom, 120)
                 }
             }
+            .ignoresSafeArea(edges: .top)
 
             VStack(spacing: 0) {
                 if !isAvailable { unavailableBanner }
@@ -308,7 +308,7 @@ struct ListingDetailView: View {
             .background(Capsule().fill(.black.opacity(0.28)))
             .padding(.bottom, 16)
         }
-        .frame(height: heroHeight)
+        .frame(height: heroHeight + safeAreaTop)
         .clipped()
         .clipShape(UnevenRoundedRectangle(
             cornerRadii: .init(bottomLeading: 26, bottomTrailing: 26),

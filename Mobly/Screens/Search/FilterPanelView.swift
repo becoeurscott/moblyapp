@@ -747,9 +747,9 @@ struct FilterPanelView: View {
         SavedSearchStore.shared.add(label: bestLabel(for: draft),
                                     query: "", filters: draft)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        withAnimation(.easeInOut(duration: 0.25)) { saveConfirm = true }
+        withAnimation(Motion.quick) { saveConfirm = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            withAnimation(.easeInOut(duration: 0.25)) { saveConfirm = false }
+            withAnimation(Motion.quick) { saveConfirm = false }
         }
     }
     private func bestLabel(for s: FilterState) -> String {

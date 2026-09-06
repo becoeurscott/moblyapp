@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Combine
 
 // MARK: - Wire types (match backend/src/routes/chat.routes.ts)
@@ -164,10 +165,15 @@ final class ChatStore: ObservableObject {
 
     // MARK: - Loading
 
-    func loadThreads() async {
-        isLoadingThreads = true
-        isOffline = false
-        defer { isLoadingThreads = false }
+    /// `silent` = a foreground/background re-sync: the inbox is already on
+    /// screen from the disk cache, so raising the skeleton would flash a
+    /// loading state over content the user is reading.
+    func loadThreads(silent: Bool = false) async {
+        if !silent {
+            isLoadingThreads = true
+            isOffline = false
+        }
+        defer { if !silent { isLoadingThreads = false } }
         do {
             struct Wrap: Decodable { let items: [ThreadDTO] }
             let w: Wrap = try await api.request("threads", authorized: true)
@@ -175,7 +181,7 @@ final class ChatStore: ObservableObject {
             // mark-read POST is still in flight — but only when the server's
             // newest message is exactly the one we've already seen. If it's
             // a different id, a real new message arrived and the badge stays.
-            threads = w.items.map { dto in
+            let fresh = w.items.map { dto -> ThreadDTO in
                 var t = dto
                 if let readId = lastReadMessageId[dto.id],
                    dto.lastMessage?.id == readId {
@@ -183,10 +189,17 @@ final class ChatStore: ObservableObject {
                 }
                 return t
             }
+            let changed = fresh.map { "\($0.id)\($0.lastMessage?.id ?? "")\($0.unread)" }
+                != threads.map { "\($0.id)\($0.lastMessage?.id ?? "")\($0.unread)" }
+            if changed {
+                withAnimation(Motion.content) { threads = fresh }
+            } else {
+                threads = fresh
+            }
             saveToDisk()
         } catch let e as MoblyAPI.APIError {
             // Cached threads stay on screen; only the banner changes.
-            if e.isOffline { isOffline = true }
+            if e.isOffline && !silent { isOffline = true }
         } catch {}
     }
 

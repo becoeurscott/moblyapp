@@ -18,7 +18,11 @@ struct IdentityVerificationView: View {
                 if store.status == .declined, let reason = store.reason {
                     refusalCard(reason)
                 }
-                if !store.isVerified { stepsCard; startButton }
+                if store.incomplete { incompleteCard }
+                if !store.isVerified {
+                    stepsCard
+                    if store.unavailable { unavailableBanner } else { startButton }
+                }
                 privacyNote
             }
         }
@@ -71,8 +75,19 @@ struct IdentityVerificationView: View {
                     .font(.moblyBody(14, weight: .medium))
                     .foregroundStyle(Color.moblyTextPrimary)
                 Spacer()
-                if store.status.isOpen {
+                if store.isRefreshing {
                     ProgressView().tint(Color.moblyPrimary)
+                } else if store.status.isOpen && !store.incomplete {
+                    ProgressView().tint(Color.moblyPrimary)
+                }
+                if store.status.isOpen {
+                    Button { Task { await store.recheck() } } label: {
+                        Text(LT("Actualiser"))
+                            .font(.moblyBody(12.5, weight: .semibold))
+                            .foregroundStyle(Color.moblyPrimary)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(store.isRefreshing)
                 }
             }
         }
@@ -118,13 +133,53 @@ struct IdentityVerificationView: View {
         }
     }
 
+    /// Shown when the hosted flow closed without a decision. Explains what
+    /// happened instead of leaving a spinner running, and the CTA below turns
+    /// back on so the user can pick up where they left off.
+    private var incompleteCard: some View {
+        cardBox {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Color(hex: 0xF5A524))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LT("Vérification non terminée"))
+                        .font(.moblyBody(14, weight: .semibold))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                    Text(LT(store.resumeExpired
+                            ? "La session précédente a expiré. Une nouvelle vérification sera lancée."
+                            : "La vérification n'a pas été finalisée. Reprenez-la pour obtenir votre badge — vous reprendrez là où vous vous êtes arrêté."))
+                        .font(.moblyBody(12.5))
+                        .foregroundStyle(Color(hex: 0x666666))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let left = store.resumeSecondsLeft, left > 0 {
+                        HStack(spacing: 6) {
+                            Image(systemName: "clock.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(LT("Reprise possible encore ") + Self.mmss(left))
+                                .font(.moblyBody(12, weight: .semibold))
+                                .monospacedDigit()
+                        }
+                        .foregroundStyle(Color(hex: 0xC24E10))
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(Capsule().fill(Color(hex: 0xFFF3EC)))
+                        .padding(.top, 2)
+                        .accessibilityLabel(Text("Reprise possible encore \(Int(left) / 60) minutes"))
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
     private var startButton: some View {
         Button {
             Task { await store.start() }
         } label: {
             HStack(spacing: 8) {
                 if store.isBusy { ProgressView().tint(.white) }
-                Text(LT(store.status == .declined ? "Réessayer" : "Commencer la vérification"))
+                Text(LT(startLabel))
                     .font(.moblyBody(15.5, weight: .semibold))
             }
             .frame(maxWidth: .infinity)
@@ -133,8 +188,31 @@ struct IdentityVerificationView: View {
             .foregroundStyle(.white)
         }
         .buttonStyle(.plain)
-        .disabled(store.isBusy || store.status.isOpen)
-        .opacity(store.isBusy || store.status.isOpen ? 0.55 : 1)
+        // Never permanently disabled. Any open check must stay actionable —
+        // that was the dead end. Retrying is safe: the server hands back the
+        // same in-flight session for 30 minutes rather than billing a new one.
+        .disabled(store.isBusy)
+        .opacity(store.isBusy ? 0.55 : 1)
+    }
+
+    private var unavailableBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "clock.badge.exclamationmark")
+                .font(.system(size: 22))
+                .foregroundStyle(Color(hex: 0xF5A524))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(LT("Bientôt disponible"))
+                    .font(.moblyBody(14, weight: .semibold))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                Text(LT("La vérification d'identité sera activée prochainement."))
+                    .font(.moblyBody(12.5))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(hex: 0xFFF8EC)))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(hex: 0xF5A524).opacity(0.3)))
     }
 
     private var privacyNote: some View {
@@ -155,6 +233,21 @@ struct IdentityVerificationView: View {
 
     // MARK: Status copy
 
+    /// "24:31" — the resume window is always under an hour.
+    static func mmss(_ interval: TimeInterval) -> String {
+        let t = max(0, Int(interval.rounded(.down)))
+        return String(format: "%02d:%02d", t / 60, t % 60)
+    }
+
+    private var startLabel: String {
+        if store.resumeExpired { return "Recommencer la vérification" }
+        if store.incomplete { return "Reprendre la vérification" }
+        if store.status == .declined { return "Réessayer" }
+        if store.status == .abandoned { return "Relancer la vérification" }
+        if store.status == .inReview { return "Recommencer la vérification" }
+        return "Commencer la vérification"
+    }
+
     private var statusTint: Color {
         switch store.status {
         case .approved: return Color(hex: 0x1F8A5B)
@@ -169,6 +262,11 @@ struct IdentityVerificationView: View {
     }
 
     private var statusSubtitle: String {
+        // A stalled check must not claim to be running — that is the message
+        // that made the screen look like it was stuck loading.
+        if store.incomplete {
+            return "Vous avez quitté avant la fin.\nReprenez pour obtenir votre badge."
+        }
         switch store.status {
         case .approved:
             return "Votre profil affiche le badge vérifié.\nCela renforce la confiance des hôtes."
@@ -184,6 +282,7 @@ struct IdentityVerificationView: View {
     }
 
     private var statusRowLabel: String {
+        if store.incomplete { return "Vérification non terminée" }
         switch store.status {
         case .approved: return "Pièce d'identité et selfie vérifiés"
         case .pending: return "Vérification en cours"

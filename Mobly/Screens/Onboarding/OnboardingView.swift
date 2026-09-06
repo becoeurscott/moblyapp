@@ -23,7 +23,7 @@ struct OnboardingView: View {
                 }
             }
             .ignoresSafeArea()
-            .animation(.easeInOut(duration: 0.55), value: index)
+            .animation(Motion.gentle, value: index)
 
             TabView(selection: $index) {
                 OnboardingSlide1MapView(
@@ -47,18 +47,18 @@ struct OnboardingView: View {
                 .tag(2)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .animation(.easeInOut(duration: 0.55), value: index)
+            .animation(Motion.gentle, value: index)
         }
     }
 
     private func advance() {
         let next = min(index + 1, slideCount - 1)
-        withAnimation(.easeInOut(duration: 0.55)) { index = next }
+        withAnimation(Motion.gentle) { index = next }
     }
 
     private func retreat() {
         let prev = max(index - 1, 0)
-        withAnimation(.easeInOut(duration: 0.55)) { index = prev }
+        withAnimation(Motion.gentle) { index = prev }
     }
 }
 

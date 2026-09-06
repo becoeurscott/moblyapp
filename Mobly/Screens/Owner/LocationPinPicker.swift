@@ -61,7 +61,7 @@ struct LocationPinPicker: View {
             )
             .ignoresSafeArea()
             .opacity(didFirstReveal ? 1 : 0.35)
-            .animation(.easeInOut(duration: 0.35), value: didFirstReveal)
+            .animation(Motion.standard, value: didFirstReveal)
 
             // Fixed centered pin — the map moves under it, giving the same
             // familiar "drag the map to move the pin" behaviour Apple Maps
@@ -98,7 +98,7 @@ struct LocationPinPicker: View {
             // Reveal even if the geocoder failed — the veil is a "we're
             // pointing the camera at the right thing" moment, not a hard
             // requirement to have a resolved pin.
-            withAnimation(.easeInOut(duration: 0.35)) { didFirstReveal = true }
+            withAnimation(Motion.standard) { didFirstReveal = true }
         }
     }
 

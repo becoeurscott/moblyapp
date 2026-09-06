@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftUI
 
 /// Fetches listings from the backend and caches them so a relaunch paints
 /// instantly. Surfaces load/offline/error state for the UI to render.
@@ -19,35 +20,63 @@ final class ListingStore: ObservableObject {
 
     init() {
         loadCached()
-        Task { await fetch() }
+        // First launch paints from cache, so even this one can be silent when
+        // the cache had something to show.
+        let hadCache = !listings.isEmpty
+        Task { await fetch(silent: hadCache) }
     }
 
     // MARK: - Public
 
-    func fetch(city: String? = nil, category: String? = nil) async {
-        isLoading = true
-        isOffline = false
-        lastError = nil
+    /// - Parameter silent: a background refresh nobody asked for. It never
+    ///   raises `isLoading` and never replaces a good screen with an error
+    ///   banner, so the UI shows no sign a fetch happened — the data just
+    ///   becomes current. Only user-initiated loads (first launch,
+    ///   pull-to-refresh, retry) pass `false`.
+    func fetch(city: String? = nil, category: String? = nil, silent: Bool = false) async {
+        if !silent {
+            isLoading = true
+            isOffline = false
+            lastError = nil
+        }
         do {
             let dtos = try await MoblyAPI.shared.searchListings(category: category, city: city)
-            listings = dtos.map { $0.asListing }
-            saveCached(dtos)
-            prefetchCovers(for: listings)
+            let fresh = dtos.map { $0.asListing }
+            // Assigning an identical array would still publish and rebuild
+            // every card — on a 30s poll that is a visible hitch for nothing.
+            if fresh != listings {
+                withAnimation(Motion.content) { listings = fresh }
+                saveCached(dtos)
+                prefetchCovers(for: fresh)
+            }
+            if silent {
+                // A silent success clears a stale banner from an earlier failure.
+                if isOffline { isOffline = false }
+                if lastError != nil { lastError = nil }
+            }
         } catch let apiError as MoblyAPI.APIError {
             // Whatever the cache gave us stays on screen; only the banner changes.
-            if apiError.isOffline {
-                isOffline = true
-            } else {
-                lastError = apiError.message
+            // A silent poll failing is not news — the user asked for nothing, so
+            // they get told nothing and the next tick tries again.
+            if !silent {
+                if apiError.isOffline {
+                    isOffline = true
+                } else {
+                    lastError = apiError.message
+                }
             }
         } catch {
-            lastError = "Impossible de charger les annonces."
+            if !silent { lastError = "Impossible de charger les annonces." }
         }
-        isLoading = false
+        if !silent { isLoading = false }
     }
 
-    /// Pull-to-refresh / retry entry point.
+    /// Pull-to-refresh / retry entry point — the one place a spinner is
+    /// legitimate, because the user pulled it themselves.
     func refresh() async { await fetch() }
+
+    /// Background poll. See `fetch(silent:)`.
+    func refreshSilently() async { await fetch(silent: true) }
 
     // MARK: - Prefetch
 
@@ -102,6 +131,7 @@ extension ListingDTO {
             imageName: imageName ?? "ListingGreen",
             coverUrl: coverUrl,
             photos: photos ?? [],
+            ownerId: owner?.id,
             ownerName: owner?.fullName,
             ownerVerified: owner?.verified ?? false,
             category: category,

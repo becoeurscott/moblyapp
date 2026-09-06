@@ -90,7 +90,7 @@ struct IdentifierField: View {
                 RoundedRectangle(cornerRadius: 14)
                     .stroke(errorMessage == nil ? .clear : Color.moblyAccent, lineWidth: 1)
             )
-            .animation(.easeInOut(duration: 0.18), value: kind)
+            .animation(Motion.instant, value: kind)
 
             if let errorMessage {
                 Text(errorMessage)

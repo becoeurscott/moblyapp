@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Required for APNs. Without it iOS calls
+	  didFailToRegisterForRemoteNotifications and no token is ever issued.
+	  "development" targets the sandbox gateway (Xcode builds); Xcode rewrites
+	  this to "production" for TestFlight/App Store archives, which must match
+	  APNS_PRODUCTION on the server.
+	-->
+	<key>aps-environment</key>
+	<string>development</string>
+	<!--
+	  Sign in with Apple. Enabled via Xcode → Signing & Capabilities so the
+	  provisioning profile carries the same entitlement; adding it only here
+	  builds fine locally but sign-in fails with `AKAuthenticationError -7003`
+	  on a real device / TestFlight.
+	-->
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+</dict>
+</plist>

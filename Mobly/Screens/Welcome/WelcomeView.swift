@@ -108,10 +108,10 @@ struct WelcomeView: View {
         withAnimation(.easeOut(duration: 6).repeatForever(autoreverses: true)) {
             heroZoom = 1.16
         }
-        withAnimation(.spring(response: 0.7, dampingFraction: 0.85).delay(0.15)) {
+        withAnimation(Motion.gentle.delay(0.15)) {
             chipsIn = true
         }
-        withAnimation(.spring(response: 0.7, dampingFraction: 0.82).delay(0.3)) {
+        withAnimation(Motion.gentle.delay(0.3)) {
             cardIn = true
         }
     }

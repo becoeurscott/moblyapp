@@ -30,7 +30,7 @@ struct ChatOpeningView: View {
                     .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: resolvedThread?.id)
+        .animation(Motion.instant, value: resolvedThread?.id)
         .swipeToDismiss(onDismiss: onBack)
         .task { await open() }
         .alert("Impossible d'ouvrir la conversation", isPresented: $openFailed) {

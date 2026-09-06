@@ -76,7 +76,7 @@ struct SplashView: View {
             glowOpacity = 1
             glowScale = 1
         } else {
-            withAnimation(.easeOut(duration: 0.55)) {
+            withAnimation(Motion.gentle) {
                 wordmarkOpacity = 1
             }
             withAnimation(.interpolatingSpring(stiffness: 180, damping: 18).delay(0.05)) {
@@ -105,7 +105,7 @@ private struct LoaderDots: View {
                     .scaleEffect(animating ? 1.0 : 0.5)
                     .opacity(animating ? 1.0 : 0.3)
                     .animation(
-                        .easeInOut(duration: 0.6)
+                        Motion.gentle
                         .repeatForever()
                         .delay(Double(i) * 0.15),
                         value: animating

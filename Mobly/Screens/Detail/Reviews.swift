@@ -1,16 +1,41 @@
 import SwiftUI
 
-struct Review: Identifiable {
-    let id = UUID()
+struct Review: Identifiable, Equatable {
+    let id: String
     let author: String
     let initial: String
     let stars: Int
     let timeAgo: String
     let text: String
 
-    /// Empty. Seeded reviews rendered on *every* listing, attributing praise to
-    /// real properties from people who never wrote it.
     static let samples: [Review] = []
+}
+
+extension MoblyAPI.ReviewDTO {
+    func toReview() -> Review {
+        let name = user?.fullName ?? "Utilisateur"
+        let initial = String(name.prefix(1)).uppercased()
+        let ago = Self.relativeTime(from: createdAt)
+        return Review(id: id, author: name, initial: initial, stars: rating,
+                      timeAgo: ago, text: text ?? "")
+    }
+
+    private static func relativeTime(from iso: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = formatter.date(from: iso) ?? ISO8601DateFormatter().date(from: iso) else {
+            return ""
+        }
+        let seconds = -date.timeIntervalSinceNow
+        if seconds < 60 { return "À l'instant" }
+        if seconds < 3600 { return "Il y a \(Int(seconds / 60)) min" }
+        if seconds < 86400 { return "Il y a \(Int(seconds / 3600)) h" }
+        let days = Int(seconds / 86400)
+        if days == 1 { return "Hier" }
+        if days < 30 { return "Il y a \(days) j" }
+        if days < 365 { return "Il y a \(days / 30) mois" }
+        return "Il y a \(days / 365) an\(days / 365 > 1 ? "s" : "")"
+    }
 }
 
 struct StarRow: View {
@@ -148,7 +173,7 @@ struct LeaveReviewSheet: View {
                             .font(.system(size: 32))
                             .foregroundStyle(i <= stars ? Color.moblyPrimary : Color(hex: 0xD5D8E2))
                             .scaleEffect(i == stars ? 1.15 : 1)
-                            .animation(.spring(response: 0.3, dampingFraction: 0.5), value: stars)
+                            .animation(Motion.pop, value: stars)
                     }
                     .buttonStyle(.plain)
                 }

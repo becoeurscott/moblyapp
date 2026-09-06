@@ -23,7 +23,7 @@ struct FeaturedHeroCarousel: View {
             .frame(height: 210)
             .onReceive(timer) { _ in
                 guard listings.count > 1 else { return }
-                withAnimation(.easeInOut(duration: 0.6)) {
+                withAnimation(Motion.gentle) {
                     index = (index + 1) % listings.count
                 }
             }
@@ -34,7 +34,7 @@ struct FeaturedHeroCarousel: View {
                     Capsule()
                         .fill(i == index ? Color.moblyPrimary : Color(hex: 0xD5D8E2))
                         .frame(width: i == index ? 20 : 7, height: 7)
-                        .animation(.easeInOut(duration: 0.25), value: index)
+                        .animation(Motion.quick, value: index)
                 }
             }
         }
@@ -110,7 +110,7 @@ private struct HeroCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .shadow(color: Color(hex: 0x14152A).opacity(0.18), radius: 16, y: 10)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
     }
 }
 
@@ -174,7 +174,7 @@ struct RecommendedCard: View {
             .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color(hex: 0xE2E4EC), lineWidth: 1.5))
             .shadow(color: Color(hex: 0x14152A).opacity(0.05), radius: 10, y: 4)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
     }
 }
 
@@ -206,7 +206,7 @@ struct HeartButton: View {
                 .background(Circle().fill(.white))
                 .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
                 .scaleEffect(liked ? 1.1 : 1.0)
-                .animation(.spring(response: 0.3, dampingFraction: 0.5), value: liked)
+                .animation(Motion.pop, value: liked)
         }
         .buttonStyle(.plain)
         .alert("Connexion requise", isPresented: $needsSignIn) {

@@ -12,7 +12,7 @@ struct PageIndicator: View {
                 Capsule()
                     .fill(i == current ? activeColor : inactiveColor)
                     .frame(width: i == current ? 22 : 6, height: 6)
-                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: current)
+                    .animation(Motion.quick, value: current)
             }
         }
     }

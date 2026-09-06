@@ -300,7 +300,7 @@ struct ManageListingView: View {
             saving = false
             if ok {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) { showSaveSuccess = true }
+                withAnimation(Motion.panel) { showSaveSuccess = true }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                     showSaveSuccess = false
                     onClose()

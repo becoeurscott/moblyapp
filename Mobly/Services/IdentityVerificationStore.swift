@@ -28,10 +28,41 @@ final class IdentityVerificationStore: ObservableObject {
     @Published private(set) var reason: String?
     @Published var errorMessage: String?
 
+    /// The backend reports the service as not configured (503 / INTERNAL).
+    @Published private(set) var unavailable = false
+
+    /// The hosted sheet was closed with the check still open and polling never
+    /// resolved it — i.e. the user abandoned the flow (or the provider is slow).
+    /// Without this the screen sat on a spinner forever with the start button
+    /// disabled, and there was no way back into the flow.
+    @Published private(set) var incomplete = false
+
+    /// A user-initiated status re-check is running.
+    @Published private(set) var isRefreshing = false
+
+    /// Seconds left to resume the SAME provider session. Past zero, starting
+    /// again mints a new one, so the screen warns before it lapses.
+    /// Nil when nothing is open.
+    @Published private(set) var resumeSecondsLeft: TimeInterval?
+
+    /// The resume window has lapsed on an unfinished check.
+    var resumeExpired: Bool { incomplete && (resumeSecondsLeft ?? 1) <= 0 }
+
     /// Set when a session is ready; presenting this opens the Safari sheet.
     @Published var hostedFlow: HostedFlowLink?
 
     private let api = MoblyAPI.shared
+
+    /// True only for the few seconds right after the hosted sheet closes, while
+    /// we wait for the webhook. Without it a check would be branded "non
+    /// terminée" one second after the user finished it.
+    private var isPollingAfterFlow = false
+
+    /// Absolute deadline, plus the server/device clock offset it is measured
+    /// against so a wrong device clock cannot skew the countdown.
+    private var resumeDeadline: Date?
+    private var clockSkew: TimeInterval = 0
+    private var ticker: Task<Void, Never>?
 
     /// True once the account carries the badge, from the server.
     @Published private(set) var isVerified = false
@@ -43,6 +74,7 @@ final class IdentityVerificationStore: ObservableObject {
         guard !isBusy else { return }
         isBusy = true
         errorMessage = nil
+        incomplete = false
         defer { isBusy = false }
 
         do {
@@ -54,10 +86,10 @@ final class IdentityVerificationStore: ObservableObject {
             status = .pending
             hostedFlow = HostedFlowLink(url: url)
         } catch let err as MoblyAPI.APIError {
-            // A 409 means the badge is already granted — reconcile rather than
-            // showing an error for something that is really good news.
             if err.status == 409 {
                 await refresh()
+            } else if err.status == 503 || err.code == .internalError {
+                unavailable = true
             } else {
                 errorMessage = err.message
             }
@@ -67,7 +99,7 @@ final class IdentityVerificationStore: ObservableObject {
     }
 
     /// Re-read the status from the server.
-    func refresh() async {
+    func refresh(surfaceErrors: Bool = false) async {
         do {
             let dto = try await api.identityVerificationStatus()
             status = Status(rawValue: dto.status) ?? .none
@@ -79,20 +111,94 @@ final class IdentityVerificationStore: ObservableObject {
             let justVerified = dto.identityVerified && !isVerified
             isVerified = dto.identityVerified
             if justVerified { await AuthStore.shared.bootstrap() }
+
+            // PENDING means a session exists that the user never carried to the
+            // end — Didit only leaves it here while the flow is unfinished.
+            // Deriving it from the status (rather than from a flag set once,
+            // in-session, by pollAfterFlow) is what lets someone come back
+            // hours later and still be offered a resume instead of a spinner.
+            // IN_REVIEW is different: that one really is being decided, so it
+            // keeps its progress indicator.
+            if status == .pending, !isPollingAfterFlow, !isBusy {
+                incomplete = true
+            } else if !status.isOpen {
+                incomplete = false
+            }
+
+            if let serverTime = MoblyDate.parse(dto.serverTime) {
+                clockSkew = serverTime.timeIntervalSinceNow
+            }
+            resumeDeadline = MoblyDate.parse(dto.resumableUntil)
+            tick()
+            if status.isOpen { startTicker() } else { stopTicker() }
+        } catch let err as MoblyAPI.APIError {
+            // Silent on the automatic paths (screen appear, post-sheet polling),
+            // where a transient failure should not raise an alert. Loud when the
+            // user asked, otherwise "Actualiser" looks like it does nothing.
+            if surfaceErrors {
+                errorMessage = err.code == .offline
+                    ? "Pas de connexion. Vérifiez votre réseau."
+                    : err.message
+            }
         } catch {
-            // Silent: this runs on screen appear and after the sheet closes,
-            // where a transient failure should not raise an alert.
+            if surfaceErrors { errorMessage = "Impossible de récupérer le statut. Réessayez." }
         }
+    }
+
+    private func startTicker() {
+        guard ticker == nil else { return }
+        ticker = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                await self?.tick()
+            }
+        }
+    }
+
+    private func stopTicker() {
+        ticker?.cancel(); ticker = nil
+        resumeSecondsLeft = nil
+    }
+
+    private func tick() {
+        guard let deadline = resumeDeadline else {
+            resumeSecondsLeft = nil
+            return
+        }
+        resumeSecondsLeft = max(0, deadline.timeIntervalSinceNow - clockSkew)
+    }
+
+    /// "Actualiser" — user asked for the current status.
+    func recheck() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        await refresh(surfaceErrors: true)
+        // Resolved in the meantime: drop the stalled state so the screen stops
+        // offering to resume a check that is finished.
+        if !status.isOpen { incomplete = false }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        isRefreshing = false
     }
 
     /// Called when the hosted sheet is dismissed. The webhook usually lands
     /// within a couple of seconds, so poll a few times before giving up and
     /// leaving the user on "en cours de vérification".
     func pollAfterFlow() async {
+        isPollingAfterFlow = true
+        defer { isPollingAfterFlow = false }
         for delay in [1.0, 3.0, 6.0] {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             await refresh()
-            if !status.isOpen { return }
+            if !status.isOpen {
+                incomplete = false
+                return
+            }
         }
+        // Still open after ~10s. Either the user backed out of the provider's
+        // flow or the decision is genuinely slow; both are indistinguishable
+        // from here, so say so honestly and let them resume. Resuming is cheap:
+        // the server hands back the same in-flight session rather than minting
+        // (and billing) a new one.
+        incomplete = true
     }
 }

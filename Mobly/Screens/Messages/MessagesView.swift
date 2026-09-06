@@ -171,6 +171,10 @@ struct MessagesView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Color.white)
+            // A message landing over the socket, or a thread reordering after
+            // a silent re-sync, animates the row into its new position rather
+            // than teleporting it under the user's thumb.
+            .animation(Motion.content, value: chat.threads)
         }
         .background(Color.white)
         .refreshable { await chat.loadThreads() }
@@ -186,7 +190,9 @@ struct MessagesView: View {
                 }
             }
             guard auth.isSignedIn else { return }
-            await chat.loadThreads()
+            // Threads paint from the disk cache first; re-syncing behind them
+            // should leave no trace.
+            await chat.loadThreads(silent: !chat.threads.isEmpty)
             if wantsVisit {
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 let match = chat.threads.first(where: { $0.lastMessage?.visitAction == "REQUESTED" })
@@ -199,7 +205,7 @@ struct MessagesView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NetworkMonitor.didReconnect)) { _ in
             guard auth.isSignedIn else { return }
-            Task { await chat.loadThreads() }
+            Task { await chat.loadThreads(silent: true) }
             chat.reconnectSocket()
         }
         .fullScreenCover(item: $openThread) { thread in
@@ -214,7 +220,7 @@ struct MessagesView: View {
                 openThread = ChatThread.from(dto, myUserId: auth.user?.id)
             } else {
                 Task {
-                    await chat.loadThreads()
+                    await chat.loadThreads(silent: true)
                     if let dto = chat.threads.first(where: { $0.id == threadId }) {
                         chat.markRead(threadId: threadId)
                         await chat.loadMessages(threadId: threadId)

@@ -38,7 +38,7 @@ struct OwnerVisitsView: View {
         .background(Color.moblySurface)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .task { await store.refresh() }
+        .task { await store.refresh(silent: !store.items.isEmpty) }
         .sheet(item: $proposeFor) { visit in
             ProposeTimeSheet(visit: visit) { newDate in
                 Task {
@@ -414,7 +414,7 @@ private struct VisitCard: View {
         }
         .buttonStyle(.plain)
         .disabled(loading || busy)
-        .animation(.easeInOut(duration: 0.15), value: loading)
+        .animation(Motion.instant, value: loading)
     }
 
     // MARK: Date formatting

@@ -29,11 +29,16 @@ struct MoblyApp: App {
                     // Analytics session first so events during bootstrap
                     // (auth restore, first screen view) attach to it.
                     await SessionTracker.shared.start()
+                    // Ask whether the app is in a maintenance window before
+                    // anything else fans out — a user opening during a window
+                    // should meet the maintenance screen, not a home feed that
+                    // fails to load piece by piece.
+                    await MaintenanceStore.shared.checkAtLaunch()
                     // Fetch listings early so the onboarding slides can render
                     // real properties from the DB instead of the bundled
                     // sample cards. Detached so it doesn't get cancelled with
                     // the SwiftUI .task if the user navigates away.
-                    Task.detached { await ListingStore.shared.refresh() }
+                    Task.detached { await ListingStore.shared.fetch(silent: true) }
                     await AuthStore.shared.bootstrap()
                     // If bootstrap surfaced a signed-in user, promote the
                     // anonymous session to their account.
@@ -45,6 +50,9 @@ struct MoblyApp: App {
                     ])
                     LocationService.shared.requestIfNeeded()
                     await PushService.shared.refreshStatus()
+                    // From here on the app keeps itself current on its own:
+                    // silent polls + foreground + reconnect, no spinners.
+                    LiveRefresh.shared.start()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     // Coming back to the foreground: re-sync the inbox and
@@ -53,9 +61,15 @@ struct MoblyApp: App {
                     // fresh, so this is cheap on rapid switches. Also refresh
                     // notifications so the bell dot reflects any broadcast /
                     // event that landed while the app was in the background.
+                    // Re-check maintenance on every foreground, signed in or
+                    // not: a window may have opened (or been lifted) while the
+                    // app sat in the background.
+                    if phase == .active {
+                        Task { await MaintenanceStore.shared.checkAtLaunch() }
+                    }
                     if phase == .active, AuthStore.shared.isSignedIn {
                         Task {
-                            await ChatStore.shared.loadThreads()
+                            await ChatStore.shared.loadThreads(silent: true)
                             await ChatStore.shared.prewarmAllThreads()
                             await UserDataStore.shared.loadNotifications()
                         }

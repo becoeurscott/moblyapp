@@ -68,6 +68,11 @@ struct FavoritesView: View {
                     }
                 }
                 .padding(.bottom, 110)
+                // A favourite removed on the detail screen, or one arriving
+                // from a silent sync, slides the list instead of jumping it.
+                .animation(Motion.content, value: userData.favorites)
+                .animation(Motion.standard, value: tab)
+                .animation(Motion.standard, value: sort)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -76,7 +81,9 @@ struct FavoritesView: View {
         .refreshable { await userData.loadFavorites() }
         .task {
             guard auth.isSignedIn else { return }
-            await userData.loadFavorites()
+            // Only the very first load may show itself; every return to the
+            // tab re-syncs invisibly.
+            await userData.loadFavorites(silent: !userData.favorites.isEmpty)
         }
     }
 
@@ -158,7 +165,7 @@ struct FavoritesView: View {
 
     private func segment(_ title: String, _ i: Int) -> some View {
         Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { tab = i }
+            withAnimation(Motion.quick) { tab = i }
             UISelectionFeedbackGenerator().selectionChanged()
         } label: {
             Text(LT(title))
@@ -381,11 +388,11 @@ struct FavoriteRow: View {
                         }
                         .onEnded { v in
                             if v.translation.width < -80 {
-                                withAnimation(.easeIn(duration: 0.2)) { offsetX = -450 }
+                                withAnimation(Motion.instant) { offsetX = -450 }
                                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { onUnfav() }
                             } else {
-                                withAnimation(.spring()) { offsetX = 0 }
+                                withAnimation(Motion.panel) { offsetX = 0 }
                             }
                         }
                 )

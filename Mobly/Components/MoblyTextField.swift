@@ -67,7 +67,7 @@ struct MoblyTextField: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(focused ? Color.moblyPrimary : .clear, lineWidth: 1.6)
             )
-            .animation(.easeOut(duration: 0.18), value: focused)
+            .animation(Motion.instant, value: focused)
         }
     }
 }

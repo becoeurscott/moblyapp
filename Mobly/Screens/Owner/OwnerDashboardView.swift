@@ -38,7 +38,7 @@ struct OwnerDashboardView: View {
                             AnnonceCard(
                                 annonce: annonce,
                                 onToggleAvailability: {
-                                    withAnimation(.easeInOut(duration: 0.4)) { store.toggleAvailability(annonce) }
+                                    withAnimation(Motion.standard) { store.toggleAvailability(annonce) }
                                 },
                                 onBoost: { boostAnnonce = annonce },
                                 onStats: { statsAnnonce = annonce },
@@ -271,7 +271,7 @@ struct OwnerDashboardView: View {
                 ForEach(Filter.allCases, id: \.self) { f in
                     Button {
                         UISelectionFeedbackGenerator().selectionChanged()
-                        withAnimation(.easeInOut(duration: 0.2)) { filter = f }
+                        withAnimation(Motion.instant) { filter = f }
                     } label: {
                         Text("\(f.title) (\(count(f)))")
                             .font(.moblyHeading(13.5))
@@ -326,7 +326,7 @@ private struct AnnonceCard: View {
             .shadow(color: Color(hex: 0x14152A).opacity(dimmed ? 0.03 : 0.06), radius: 12, y: 4))
         .overlay(RoundedRectangle(cornerRadius: 20)
             .stroke(Color(hex: 0xE2E4EC), lineWidth: dimmed ? 1 : 0))
-        .animation(.easeInOut(duration: 0.4), value: annonce.available)
+        .animation(Motion.standard, value: annonce.available)
         .contextMenu {
             Button(role: .destructive, action: onDelete) {
                 Label("Supprimer l'annonce", systemImage: "trash")
@@ -335,7 +335,7 @@ private struct AnnonceCard: View {
         .confirmationDialog("Supprimer « \(annonce.listing.title) » ?",
                             isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Supprimer l'annonce", role: .destructive) {
-                withAnimation(.easeInOut(duration: 0.3)) { onDelete() }
+                withAnimation(Motion.quick) { onDelete() }
             }
             Button("Annuler", role: .cancel) {}
         } message: {

@@ -26,6 +26,7 @@ final class ChatSocket: NSObject, ObservableObject {
         case callRejected(callId: String)
         case callEnded(callId: String)
         case callAudio(Data)
+        case review(listingId: String, review: MoblyAPI.ReviewDTO)
     }
 
     var onEvent: ((Event) -> Void)?
@@ -196,9 +197,11 @@ final class ChatSocket: NSObject, ObservableObject {
             if let callId = envelope.callId { onEvent?(.callRejected(callId: callId)) }
         case "call:ended":
             if let callId = envelope.callId { onEvent?(.callEnded(callId: callId)) }
+        case "review":
+            if let listingId = envelope.listingId, let review = envelope.review {
+                onEvent?(.review(listingId: listingId, review: review))
+            }
         case "error":
-            // The server refused the token — a reconnect loop would just spam
-            // it, so wait for the app to re-authenticate.
             disconnect()
         default:
             break
@@ -220,6 +223,8 @@ final class ChatSocket: NSObject, ObservableObject {
         let callId: String?
         let isVideo: Bool?
         let from: CallPeer?
+        let listingId: String?
+        let review: MoblyAPI.ReviewDTO?
     }
 
     // MARK: - Keepalive & reconnect

@@ -235,7 +235,7 @@ struct AddListingView: View {
             }
         }
         .frame(height: 5).padding(.horizontal, 20)
-        .animation(.easeInOut(duration: 0.25), value: stepIndex)
+        .animation(Motion.quick, value: stepIndex)
     }
 
     @ViewBuilder private var stepBody: some View {
@@ -329,12 +329,12 @@ struct AddListingView: View {
             stepHeader("Où se trouve l'espace ?", "Choisissez la région, puis la ville, puis le quartier.")
             sectionLabel("RÉGION")
             chipGrid(CameroonGeo.regions.map(\.name), selection: region) { r in
-                if r != region { withAnimation(.easeInOut(duration: 0.25)) { region = r; city = ""; neighborhood = "" } }
+                if r != region { withAnimation(Motion.quick) { region = r; city = ""; neighborhood = "" } }
             }
             if let reg = CameroonGeo.regions.first(where: { $0.name == region }) {
                 sectionLabel("VILLE")
                 chipGrid(reg.cities, selection: city) { c in
-                    if c != city { withAnimation(.easeInOut(duration: 0.25)) { city = c; neighborhood = "" } }
+                    if c != city { withAnimation(Motion.quick) { city = c; neighborhood = "" } }
                 }
             }
             if !city.isEmpty {
@@ -468,7 +468,7 @@ struct AddListingView: View {
                 HStack {
                     Text("Terrasse / Véranda").font(.moblyHeading(15)).foregroundStyle(Color.moblyTextPrimary)
                     Spacer()
-                    Button { withAnimation(.easeInOut(duration: 0.2)) { hasTerrace.toggle() } } label: {
+                    Button { withAnimation(Motion.instant) { hasTerrace.toggle() } } label: {
                         Image(systemName: hasTerrace ? "checkmark.circle.fill" : "circle")
                             .font(.system(size: 24))
                             .foregroundStyle(hasTerrace ? Color.moblyPrimary : Color(hex: 0xD5D8E2))
@@ -512,7 +512,7 @@ struct AddListingView: View {
                 HStack {
                     Text("Vitrine").font(.moblyHeading(15)).foregroundStyle(Color.moblyTextPrimary)
                     Spacer()
-                    Button { withAnimation(.easeInOut(duration: 0.2)) { hasVitrine.toggle() } } label: {
+                    Button { withAnimation(Motion.instant) { hasVitrine.toggle() } } label: {
                         Image(systemName: hasVitrine ? "checkmark.circle.fill" : "circle")
                             .font(.system(size: 24))
                             .foregroundStyle(hasVitrine ? Color.moblyPrimary : Color(hex: 0xD5D8E2))
@@ -521,7 +521,7 @@ struct AddListingView: View {
                 HStack {
                     Text("Réserve / Stock").font(.moblyHeading(15)).foregroundStyle(Color.moblyTextPrimary)
                     Spacer()
-                    Button { withAnimation(.easeInOut(duration: 0.2)) { hasReserve.toggle() } } label: {
+                    Button { withAnimation(Motion.instant) { hasReserve.toggle() } } label: {
                         Image(systemName: hasReserve ? "checkmark.circle.fill" : "circle")
                             .font(.system(size: 24))
                             .foregroundStyle(hasReserve ? Color.moblyPrimary : Color(hex: 0xD5D8E2))
@@ -542,7 +542,7 @@ struct AddListingView: View {
                 HStack {
                     Text("Vitrine").font(.moblyHeading(15)).foregroundStyle(Color.moblyTextPrimary)
                     Spacer()
-                    Button { withAnimation(.easeInOut(duration: 0.2)) { hasVitrine.toggle() } } label: {
+                    Button { withAnimation(Motion.instant) { hasVitrine.toggle() } } label: {
                         Image(systemName: hasVitrine ? "checkmark.circle.fill" : "circle")
                             .font(.system(size: 24))
                             .foregroundStyle(hasVitrine ? Color.moblyPrimary : Color(hex: 0xD5D8E2))
@@ -668,8 +668,8 @@ struct AddListingView: View {
                         }
                     }
                 }
-                .animation(.easeInOut(duration: 0.22), value: uploadedPhotos.count)
-                .animation(.easeInOut(duration: 0.22), value: coverIndex)
+                .animation(Motion.quick, value: uploadedPhotos.count)
+                .animation(Motion.quick, value: coverIndex)
             }
         }
     }
@@ -728,10 +728,10 @@ struct AddListingView: View {
         .contentShape(RoundedRectangle(cornerRadius: 12))
         .scaleEffect(draggingIndex == i ? 1.05 : 1)
         .opacity(draggingIndex == i ? 0.9 : 1)
-        .animation(.easeInOut(duration: 0.18), value: draggingIndex)
+        .animation(Motion.instant, value: draggingIndex)
         .onTapGesture {
             UISelectionFeedbackGenerator().selectionChanged()
-            withAnimation(.easeInOut(duration: 0.2)) { coverIndex = i }
+            withAnimation(Motion.instant) { coverIndex = i }
         }
         .onDrag {
             draggingIndex = i
@@ -754,7 +754,7 @@ struct AddListingView: View {
               uploadedPhotos.indices.contains(from),
               (0...uploadedPhotos.count).contains(to)
         else { return }
-        withAnimation(.easeInOut(duration: 0.25)) {
+        withAnimation(Motion.quick) {
             let item = uploadedPhotos.remove(at: from)
             let insertAt = to > from ? to - 1 : to
             uploadedPhotos.insert(item, at: insertAt)
@@ -908,7 +908,7 @@ struct AddListingView: View {
         }.buttonStyle(.plain)
     }
     private func optionCard(title: String, subtitle: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button { UISelectionFeedbackGenerator().selectionChanged(); withAnimation(.easeInOut(duration: 0.2)) { action() } } label: {
+        Button { UISelectionFeedbackGenerator().selectionChanged(); withAnimation(Motion.instant) { action() } } label: {
             HStack(spacing: 14) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12).fill(selected ? Color.moblyPrimary : Color(hex: 0xEEF0FE))
@@ -990,11 +990,11 @@ struct AddListingView: View {
     private func next() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         if step == .review { publish(); return }
-        withAnimation(.easeInOut(duration: 0.28)) { stepIndex = min(stepIndex + 1, steps.count - 1) }
+        withAnimation(Motion.quick) { stepIndex = min(stepIndex + 1, steps.count - 1) }
     }
     private func back() {
         if stepIndex == 0 { dismiss(); return }
-        withAnimation(.easeInOut(duration: 0.28)) { stepIndex = max(stepIndex - 1, 0) }
+        withAnimation(Motion.quick) { stepIndex = max(stepIndex - 1, 0) }
     }
 
     /// Load the freshly picked items and *append* them to the existing set,

@@ -56,7 +56,7 @@ struct ConnexionView: View {
             case .resetPassword: resetPasswordView.transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.35), value: phase)
+        .animation(Motion.standard, value: phase)
         // Flag a taken number/e-mail while the user is still typing rather than
         // after they submit. Debounced so each keystroke isn't a request.
         .task(id: availabilityKey) {
@@ -646,7 +646,7 @@ struct ConnexionView: View {
         // An error from the other mode would otherwise stay pinned to a form
         // it no longer applies to.
         auth.errorMessage = nil
-        withAnimation(.easeInOut(duration: 0.28)) { mode = newMode }
+        withAnimation(Motion.quick) { mode = newMode }
     }
 
     // MARK: Real auth calls
@@ -904,8 +904,8 @@ struct AuthWelcomeBackView: View {
         if reduceMotion {
             appear = true; avatarPop = true; ringProgress = 1
         } else {
-            withAnimation(.easeOut(duration: 0.6)) { appear = true }
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.6)) { avatarPop = true }
+            withAnimation(Motion.gentle) { appear = true }
+            withAnimation(Motion.pop) { avatarPop = true }
             withAnimation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true)) {
                 glowPulse = true
             }

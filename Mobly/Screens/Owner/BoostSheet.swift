@@ -43,7 +43,7 @@ struct BoostSheet: View {
             case .done:       doneView.transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: phase)
+        .animation(Motion.quick, value: phase)
     }
 
     // MARK: Choose

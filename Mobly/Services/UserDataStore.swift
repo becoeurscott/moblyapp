@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftUI
 
 /// Everything that belongs to the signed-in user: favourites, notifications,
 /// and the owner's own listings.
@@ -45,26 +46,34 @@ final class UserDataStore: ObservableObject {
         myListings = []
     }
 
-    func loadAll() async {
+    func loadAll(silent: Bool = false) async {
         guard api.isAuthenticated else { return clear() }
-        async let f: Void = loadFavorites()
+        async let f: Void = loadFavorites(silent: silent)
         async let n: Void = loadNotifications()
         _ = await (f, n)
     }
 
     // MARK: - Favourites
 
-    func loadFavorites() async {
+    /// `silent` = a background poll: no spinner, no offline banner, and the
+    /// list only re-publishes when it actually changed.
+    func loadFavorites(silent: Bool = false) async {
         guard api.isAuthenticated else { return }
-        loadingFavorites = true
-        defer { loadingFavorites = false }
+        if !silent { loadingFavorites = true }
+        defer { if !silent { loadingFavorites = false } }
         do {
             let dtos = try await api.favorites()
-            favorites = dtos.map { $0.asListing }
-            favoriteIds = Set(dtos.map(\.id))
+            let fresh = dtos.map { $0.asListing }
+            let ids = Set(dtos.map(\.id))
+            if fresh != favorites || ids != favoriteIds {
+                withAnimation(Motion.content) {
+                    favorites = fresh
+                    favoriteIds = ids
+                }
+            }
             isOffline = false
         } catch let e as MoblyAPI.APIError {
-            if e.isOffline { isOffline = true }
+            if e.isOffline && !silent { isOffline = true }
         } catch {}
     }
 
@@ -112,8 +121,15 @@ final class UserDataStore: ObservableObject {
         do {
             struct Wrap: Decodable { let items: [NotificationDTO] }
             let w: Wrap = try await api.request("notifications", authorized: true)
-            notifications = w.items
-            unreadNotifications = w.items.filter { !$0.read }.count
+            let unread = w.items.filter { !$0.read }.count
+            // Only animate when something really arrived — a poll that returns
+            // the same list must leave the screen untouched.
+            if w.items.map(\.id) != notifications.map(\.id) || unread != unreadNotifications {
+                withAnimation(Motion.content) {
+                    notifications = w.items
+                    unreadNotifications = unread
+                }
+            }
         } catch {}
     }
 
@@ -129,7 +145,12 @@ final class UserDataStore: ObservableObject {
     func loadMyListings() async {
         guard api.isAuthenticated else { return }
         do {
-            myListings = try await api.myAnnonces()
+            let fresh = try await api.myAnnonces()
+            if fresh.map(\.id) != myListings.map(\.id) {
+                withAnimation(Motion.content) { myListings = fresh }
+            } else {
+                myListings = fresh
+            }
         } catch {}
     }
 }

@@ -307,8 +307,8 @@ struct EditProfileView: View {
                 .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: isSaving)
-        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: savedSuccess)
+        .animation(Motion.quick, value: isSaving)
+        .animation(Motion.panel, value: savedSuccess)
     }
 
     /// Row of preset colour bubbles. Tap to select — the change is committed
@@ -327,7 +327,7 @@ struct EditProfileView: View {
                 ForEach(AvatarPalette.presets, id: \.self) { hex in
                     Button {
                         UISelectionFeedbackGenerator().selectionChanged()
-                        withAnimation(.easeInOut(duration: 0.18)) {
+                        withAnimation(Motion.instant) {
                             avatarColor = hex
                         }
                     } label: {
@@ -507,14 +507,14 @@ struct LanguageView: View {
         guard code != lang.code, !switching else { return }
         UISelectionFeedbackGenerator().selectionChanged()
         pendingCode = code
-        withAnimation(.easeInOut(duration: 0.2)) { switching = true }
+        withAnimation(Motion.instant) { switching = true }
         // Flip the shared flag so RootView shows its app-wide overlay while
         // the switch propagates. Short delay lets the spinner render.
         lang.switching = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
             lang.code = code
             pendingCode = nil
-            withAnimation(.easeInOut(duration: 0.25)) { switching = false }
+            withAnimation(Motion.quick) { switching = false }
             // Give the .id(lang.code) subtree rebuild a beat to paint,
             // then drop the overlay.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -964,6 +964,7 @@ struct BecomeOwnerView: View {
     var onClose: () -> Void = {}
 
     @ObservedObject private var listingStore = ListingStore.shared
+    @ObservedObject private var auth = AuthStore.shared
 
     @State private var step: Int = {
         if let s = ProcessInfo.processInfo.environment["BECOME_OWNER_STEP"], let i = Int(s) {
@@ -973,8 +974,11 @@ struct BecomeOwnerView: View {
     }()
     @State private var showCelebration = false
     @State private var showAddListing = false
+    @State private var showVerification = false
 
     private let totalSteps = 5
+
+    private var isIdentityVerified: Bool { auth.user?.identityVerified == true }
 
     private var listingsCount: Int { max(listingStore.listings.count, 126) }
     private var citiesCount: Int {
@@ -1034,6 +1038,27 @@ struct BecomeOwnerView: View {
                 onClose()
             }
         }
+        .fullScreenCover(isPresented: $showVerification) {
+            NavigationStack {
+                IdentityVerificationView()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button {
+                                showVerification = false
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(Color.moblyTextPrimary)
+                            }
+                        }
+                    }
+            }
+        }
+        .onChange(of: showVerification) { showing in
+            if !showing {
+                Task { await auth.bootstrap() }
+            }
+        }
     }
 
     // MARK: - Header
@@ -1043,7 +1068,7 @@ struct BecomeOwnerView: View {
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 if step == 0 { onClose() }
-                else { withAnimation(.easeInOut(duration: 0.28)) { step -= 1 } }
+                else { withAnimation(Motion.quick) { step -= 1 } }
             } label: {
                 Image(systemName: step == 0 ? "xmark" : "chevron.left")
                     .font(.system(size: 15, weight: .semibold))
@@ -1058,14 +1083,14 @@ struct BecomeOwnerView: View {
                     Capsule()
                         .fill(i <= step ? Color.moblyAccent : Color(hex: 0xE2E4EC))
                         .frame(height: 5)
-                        .animation(.easeInOut(duration: 0.3), value: step)
+                        .animation(Motion.quick, value: step)
                 }
             }
             .frame(maxWidth: .infinity)
 
             if step < totalSteps - 1 {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.28)) { step = totalSteps - 1 }
+                    withAnimation(Motion.quick) { step = totalSteps - 1 }
                 } label: {
                     Text("Passer")
                         .font(.moblyBody(13, weight: .semibold))
@@ -1097,29 +1122,29 @@ struct BecomeOwnerView: View {
             Button {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 if step < totalSteps - 1 {
-                    withAnimation(.easeInOut(duration: 0.28)) { step += 1 }
+                    withAnimation(Motion.quick) { step += 1 }
+                } else if !isIdentityVerified {
+                    showVerification = true
                 } else {
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     SessionTracker.shared.log("owner.upgrade", [:])
-                    // Flip the role NOW, at the moment the user commits — not
-                    // in the celebration's `onDone`, which only fires if they
-                    // tap the button. Any exit from here on (celebration
-                    // dismissed, AddListing skipped or closed) still leaves
-                    // them as an owner in Profile.
                     Session.shared.upgradeToOwner()
-                    // Persist the role to the backend too — otherwise
-                    // `POST /listings` and every other owner-only route return
-                    // 403 (the user's DB row still has isOwner=false) and the
-                    // annonce is never actually saved online.
                     Task { await AuthStore.shared.becomeOwnerOnServer() }
                     showCelebration = true
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Text(step == totalSteps - 1 ? "Publier mon premier espace" : "Suivant")
-                        .font(.moblyHeading(15.5))
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 13, weight: .bold))
+                    if step == totalSteps - 1 && !isIdentityVerified {
+                        Text("Vérifier mon identité")
+                            .font(.moblyHeading(15.5))
+                        Image(systemName: "checkmark.shield.fill")
+                            .font(.system(size: 13, weight: .bold))
+                    } else {
+                        Text(step == totalSteps - 1 ? "Publier mon premier espace" : "Suivant")
+                            .font(.moblyHeading(15.5))
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 13, weight: .bold))
+                    }
                 }
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity).frame(height: 56)
@@ -1135,9 +1160,15 @@ struct BecomeOwnerView: View {
             .buttonStyle(.plain)
 
             if step == totalSteps - 1 {
-                Text("Publication gratuite · aucune commission")
-                    .font(.moblyBody(11))
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
+                if !isIdentityVerified {
+                    Text("La vérification d'identité est obligatoire pour publier")
+                        .font(.moblyBody(11))
+                        .foregroundStyle(Color(hex: 0xE5950C))
+                } else {
+                    Text("Publication gratuite · aucune commission")
+                        .font(.moblyBody(11))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                }
             }
         }
     }
@@ -1205,7 +1236,7 @@ private struct StepIntro: View {
             Spacer(minLength: 20)
         }
         .onAppear {
-            withAnimation(.easeOut(duration: 0.6)) { appear = true }
+            withAnimation(Motion.gentle) { appear = true }
             withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { float = true }
         }
     }
@@ -1282,7 +1313,7 @@ private struct StepBenefits: View {
                     .shadow(color: Color(hex: 0x14152A).opacity(0.04), radius: 6, y: 2)
                     .opacity(appear ? 1 : 0)
                     .offset(y: appear ? 0 : 12)
-                    .animation(.easeOut(duration: 0.45).delay(Double(i) * 0.08), value: appear)
+                    .animation(Motion.standard.delay(Double(i) * 0.08), value: appear)
                 }
             }
             .padding(.horizontal, 20)
@@ -1354,7 +1385,7 @@ private struct StepHowItWorks: View {
                     .shadow(color: Color(hex: 0x14152A).opacity(0.04), radius: 6, y: 2)
                     .opacity(appear ? 1 : 0)
                     .offset(x: appear ? 0 : -20)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.85).delay(Double(i) * 0.12), value: appear)
+                    .animation(Motion.panel.delay(Double(i) * 0.12), value: appear)
                 }
             }
             .padding(.horizontal, 20)
@@ -1431,12 +1462,12 @@ private struct StepSocialProof: View {
             .padding(.horizontal, 20)
             .opacity(appear ? 1 : 0)
             .offset(y: appear ? 0 : 12)
-            .animation(.easeOut(duration: 0.5).delay(0.2), value: appear)
+            .animation(Motion.gentle.delay(0.2), value: appear)
 
             AutoSwipeTestimonials(testimonials: Self.testimonials)
                 .opacity(appear ? 1 : 0)
                 .offset(y: appear ? 0 : 20)
-                .animation(.easeOut(duration: 0.55).delay(0.35), value: appear)
+                .animation(Motion.gentle.delay(0.35), value: appear)
 
             Spacer(minLength: 10)
         }
@@ -1505,7 +1536,7 @@ private struct AutoSwipeTestimonials: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(height: currentHeight)
-            .animation(.easeInOut(duration: 0.35), value: currentHeight)
+            .animation(Motion.standard, value: currentHeight)
             // Detect manual swipe — pause auto-advance briefly so we don't
             // trip over the user in the middle of their drag.
             .simultaneousGesture(
@@ -1525,15 +1556,15 @@ private struct AutoSwipeTestimonials: View {
                         .frame(width: i == index ? 18 : 6, height: 6)
                         .onTapGesture {
                             timerTick = 0
-                            withAnimation(.easeInOut(duration: 0.35)) { index = i }
+                            withAnimation(Motion.standard) { index = i }
                         }
                 }
             }
-            .animation(.easeInOut(duration: 0.3), value: index)
+            .animation(Motion.quick, value: index)
         }
         .onReceive(advanceTimer) { _ in
             guard !isUserSwiping else { return }
-            withAnimation(.easeInOut(duration: 0.4)) {
+            withAnimation(Motion.standard) {
                 index = (index + 1) % testimonials.count
             }
         }
@@ -1595,7 +1626,10 @@ private struct TestimonialCard: View {
 // MARK: - Step 5: Confirm
 
 private struct StepConfirm: View {
+    @ObservedObject private var auth = AuthStore.shared
     @State private var appear = false
+
+    private var isIdentityVerified: Bool { auth.user?.identityVerified == true }
 
     private let promises: [(icon: String, text: String)] = [
         ("checkmark.circle.fill", "Publication 100 % gratuite"),
@@ -1618,20 +1652,25 @@ private struct StepConfirm: View {
                     .fill(.white)
                     .frame(width: 110, height: 110)
                     .shadow(color: Color.moblyAccent.opacity(0.3), radius: 20, y: 10)
-                Image(systemName: "sparkles")
+                Image(systemName: isIdentityVerified ? "sparkles" : "checkmark.shield.fill")
                     .font(.system(size: 42, weight: .semibold))
                     .foregroundStyle(
-                        LinearGradient(colors: [Color.moblyAccent, Color(hex: 0xE85A1A)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                        isIdentityVerified
+                            ? LinearGradient(colors: [Color.moblyAccent, Color(hex: 0xE85A1A)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing)
+                            : LinearGradient(colors: [Color(hex: 0xE5950C), Color(hex: 0xC27A00)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing)
                     )
             }
 
             VStack(spacing: 10) {
-                Text("Vous êtes prêt.")
+                Text(isIdentityVerified ? "Vous êtes prêt." : "Vérification requise")
                     .font(.moblyHeading(28))
                     .foregroundStyle(Color.moblyTextPrimary)
                     .multilineTextAlignment(.center)
-                Text("Voici ce que vous obtenez en activant\nvotre espace propriétaire.")
+                Text(isIdentityVerified
+                     ? "Voici ce que vous obtenez en activant\nvotre espace propriétaire."
+                     : "Pour la sécurité de tous, vérifiez\nvotre identité avant de publier.")
                     .font(.moblyBody(14))
                     .foregroundStyle(Color(hex: 0x666F80))
                     .multilineTextAlignment(.center)
@@ -1655,7 +1694,7 @@ private struct StepConfirm: View {
                     .shadow(color: Color(hex: 0x14152A).opacity(0.03), radius: 5, y: 2)
                     .opacity(appear ? 1 : 0)
                     .offset(y: appear ? 0 : 8)
-                    .animation(.easeOut(duration: 0.35).delay(Double(i) * 0.06), value: appear)
+                    .animation(Motion.standard.delay(Double(i) * 0.06), value: appear)
                 }
             }
             .padding(.horizontal, 20)
@@ -1749,7 +1788,7 @@ private struct CelebrationView: View {
             }
         }
         .onAppear {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) { appear = true }
+            withAnimation(Motion.gentle) { appear = true }
             withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { pulse = true }
         }
     }

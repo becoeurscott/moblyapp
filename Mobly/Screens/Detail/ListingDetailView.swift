@@ -155,12 +155,20 @@ struct ListingDetailView: View {
             // (views counter, per-day chart, "Origine des vues"). Fire and
             // forget: the detail page must never wait on this.
             isAvailable = listing.available
+            // Three independent calls, fired in parallel. They used to run in
+            // sequence, so the avis waited behind a view-tracking POST and an
+            // availability GET — on a cold backend that meant a page showing
+            // "4.2" next to "0 avis" for as long as those took.
             Task {
                 _ = try? await MoblyAPI.shared.trackListingView(
                     id: listing.id, source: source ?? "detail")
+            }
+            Task {
                 if let fresh = try? await MoblyAPI.shared.listing(id: listing.id) {
                     await MainActor.run { isAvailable = fresh.available }
                 }
+            }
+            Task {
                 if let fetched = try? await MoblyAPI.shared.reviews(listingId: listing.id) {
                     let mapped = fetched.map { $0.toReview() }
                     await MainActor.run {
@@ -384,7 +392,7 @@ struct ListingDetailView: View {
                     Text(listing.rating)
                         .font(.moblyBody(13, weight: .semibold))
                         .foregroundStyle(Color.moblyTextPrimary)
-                    Text("(\(reviews.count) avis)")
+                    Text("(\(reviews.isEmpty ? listing.reviewCount : reviews.count) avis)")
                         .font(.moblyBody(13))
                         .foregroundStyle(Color(hex: 0x9A9DAC))
                 }

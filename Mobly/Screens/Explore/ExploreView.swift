@@ -251,7 +251,7 @@ struct ExploreView: View {
         // Track the new camera so the +/– buttons zoom from here.
         currentCenter = coord
         currentSpan = span
-        withAnimation(.easeInOut(duration: 0.6)) {
+        withAnimation(Motion.gentle) {
             position = .region(MKCoordinateRegion(center: coord, span: span))
         }
     }
@@ -268,7 +268,7 @@ struct ExploreView: View {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         searchText = ""
         committedLocation = ""
-        withAnimation(.easeOut(duration: 0.15)) { searchActive = false }
+        withAnimation(Motion.instant) { searchActive = false }
     }
 
     /// Coordinate for a listing on the map.
@@ -331,7 +331,7 @@ struct ExploreView: View {
         // One tap handler for the whole map: hitting a pin selects it,
         // hitting anywhere else clears the selection.
         .onTapGesture { pt in
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+            withAnimation(Motion.panel) {
                 selected = listingID(atScreenPoint: pt, proxy: proxy)
             }
         }
@@ -417,7 +417,7 @@ struct ExploreView: View {
             }
             Spacer()
             Button {
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(Motion.quick) {
                     activeChip = "Tous"
                     filters = FilterState()
                 }
@@ -481,7 +481,7 @@ struct ExploreView: View {
                                minSpan.longitudeDelta), maxSpan.longitudeDelta)
         let span = MKCoordinateSpan(latitudeDelta: latDelta, longitudeDelta: lonDelta)
         currentSpan = span
-        withAnimation(.easeInOut(duration: 0.35)) {
+        withAnimation(Motion.standard) {
             position = .region(MKCoordinateRegion(center: currentCenter, span: span))
         }
     }
@@ -493,7 +493,7 @@ struct ExploreView: View {
             ? (LocationService.shared.city.map(locationCoordinate) ?? center)
             : locationCoordinate(committedLocation)
         currentSpan = MKCoordinateSpan(latitudeDelta: 0.06, longitudeDelta: 0.06)
-        withAnimation(.easeInOut(duration: 0.45)) {
+        withAnimation(Motion.standard) {
             position = .region(MKCoordinateRegion(center: currentCenter, span: currentSpan))
         }
     }
@@ -501,7 +501,7 @@ struct ExploreView: View {
     private func fitCountry() {
         currentCenter = cameroonCenter
         currentSpan = maxSpan
-        withAnimation(.easeInOut(duration: 0.55)) {
+        withAnimation(Motion.gentle) {
             position = .region(MKCoordinateRegion(center: cameroonCenter, span: maxSpan))
         }
     }
@@ -635,7 +635,7 @@ struct ExploreView: View {
                         span: MKCoordinateSpan = MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)) {
         currentCenter = coord
         currentSpan = span
-        withAnimation(.easeInOut(duration: 0.55)) {
+        withAnimation(Motion.gentle) {
             position = .region(MKCoordinateRegion(center: coord, span: span))
         }
     }
@@ -648,7 +648,7 @@ struct ExploreView: View {
                 Button {
                     searchText = ""
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                    withAnimation(.easeOut(duration: 0.15)) { searchActive = false }
+                    withAnimation(Motion.instant) { searchActive = false }
                 } label: {
                     Image(systemName: "arrow.left")
                         .font(.system(size: 16, weight: .semibold))
@@ -742,7 +742,7 @@ struct ExploreView: View {
                 ForEach(chips, id: \.self) { chip in
                     let active = chip == activeChip
                     Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        withAnimation(Motion.quick) {
                             activeChip = chip
                             selected = nil
                         }
@@ -858,7 +858,7 @@ struct ExploreView: View {
         .padding(10)
 
             Button {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { selected = nil }
+                withAnimation(Motion.panel) { selected = nil }
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))
@@ -893,7 +893,7 @@ struct ExploreView: View {
                         }
                         .id(l.id)
                         .onTapGesture {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                            withAnimation(Motion.panel) {
                                 selected = l.id
                             }
                         }
@@ -903,7 +903,7 @@ struct ExploreView: View {
             }
             .onChange(of: selected) { _, new in
                 guard let new else { return }
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                withAnimation(Motion.panel) {
                     proxy.scrollTo(new, anchor: .center)
                 }
             }

@@ -134,6 +134,9 @@ struct MainTabView: View {
                 .allowsHitTesting(tab == .profile)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Tabs cross-fade rather than cutting. Short enough that it still
+            // reads as instant, long enough that the eye isn't jolted.
+            .animation(Motion.instant, value: tab)
 
             if !chrome.hideTabBar {
                 MoblyTabBar(tab: $tab)
@@ -141,7 +144,7 @@ struct MainTabView: View {
             }
         }
         .overlay(alignment: .top) { ConnectionBanner() }
-        .animation(.easeInOut(duration: 0.22), value: chrome.hideTabBar)
+        .animation(Motion.quick, value: chrome.hideTabBar)
         .ignoresSafeArea(.keyboard)
         .onAppear { SessionTracker.shared.log("screen.view", ["screen": "\(tab)"]) }
         .onChange(of: tab) { _, new in
@@ -177,7 +180,7 @@ struct MainTabView: View {
         }
         .onChange(of: push.pendingThreadId) { _, threadId in
             guard threadId != nil else { return }
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { tab = .messages }
+            withAnimation(Motion.quick) { tab = .messages }
         }
         .fullScreenCover(isPresented: Binding(
             get: { callService.state == .incoming },
@@ -227,7 +230,7 @@ struct MoblyTabBar: View {
             ForEach(MoblyTab.allCases, id: \.self) { t in
                 let active = t == tab
                 Button {
-                    withAnimation(.easeInOut(duration: 0.22)) { tab = t }
+                    withAnimation(Motion.quick) { tab = t }
                     UISelectionFeedbackGenerator().selectionChanged()
                 } label: {
                     HStack(spacing: 7) {
@@ -241,6 +244,10 @@ struct MoblyTabBar: View {
                                     .frame(width: 20, height: 20)
                                     .background(Color(hex: 0xEF4444), in: Circle())
                                     .offset(x: 8, y: -8)
+                                    // The badge now appears on its own, from a
+                                    // silent poll or the socket — it pops so
+                                    // the change is noticed without a reload.
+                                    .transition(.scale.combined(with: .opacity))
                             }
                         }
                         if active {
@@ -266,6 +273,7 @@ struct MoblyTabBar: View {
                 .buttonStyle(.plain)
             }
         }
+        .animation(Motion.pop, value: unreadCount)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .modifier(LiquidGlassBar(cornerRadius: 30))

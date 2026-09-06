@@ -132,7 +132,9 @@ final class MoblyAPI {
         case otpExpired       = "OTP_EXPIRED"
         case otpLocked        = "OTP_LOCKED"
         case ownerRequired    = "OWNER_REQUIRED"
+        case identityRequired = "IDENTITY_REQUIRED"
         case conflict         = "CONFLICT"
+        case maintenance      = "MAINTENANCE"
         case internalError    = "INTERNAL"
         case offline          = "OFFLINE"
         case unknown          = "UNKNOWN"
@@ -162,6 +164,22 @@ final class MoblyAPI {
         let code: String?
         let requestId: String?
         let fields: [String: String]?
+        /// Present only on a 503 MAINTENANCE, so a client that was mid-session
+        /// can render the countdown without a second round-trip.
+        let maintenance: MaintenanceInfo?
+    }
+
+    /// Maintenance window as the server describes it. `serverTime` is what the
+    /// countdown is anchored to — a device with a wrong clock would otherwise
+    /// show a nonsense timer.
+    struct MaintenanceInfo: Decodable {
+        let enabled: Bool
+        let message: String?
+        /// Kept as raw strings and parsed by `MoblyDate.parse`: the decoder's
+        /// `.iso8601` strategy rejects the fractional seconds that
+        /// `Date.toISOString()` emits, which would fail the whole payload.
+        let endsAt: String?
+        let serverTime: String?
     }
 
     // MARK: - Request
@@ -238,6 +256,22 @@ final class MoblyAPI {
                 return try await request(path, method: method, query: query, body: body,
                                          authorized: authorized, retries: retries - 1)
             }
+        }
+
+        // Maintenance is a deliberate, sustained state, not a transient fault:
+        // retrying only burns battery and data behind a wall that will not move
+        // for minutes or hours. Flip the app into maintenance mode and fail
+        // fast — MaintenanceStore takes over the polling from here.
+        if code == .maintenance {
+            let info = parsed?.maintenance
+            Task { @MainActor in MaintenanceStore.shared.activate(with: info) }
+            throw APIError(
+                status: http.statusCode,
+                code: .maintenance,
+                message: parsed?.error ?? "Mobly est en maintenance.",
+                requestId: parsed?.requestId,
+                fields: [:]
+            )
         }
 
         // Server faults are usually transient — back off and retry.
@@ -663,6 +697,40 @@ final class MoblyAPI {
                               authorized: true) as EmptyResponse
     }
 
+    // MARK: - Reviews
+
+    struct ReviewAuthorDTO: Decodable {
+        let id: String
+        let fullName: String
+        let avatarUrl: String?
+    }
+
+    struct ReviewDTO: Decodable {
+        let id: String
+        let listingId: String
+        let userId: String
+        let rating: Int
+        let text: String?
+        let createdAt: String
+        let user: ReviewAuthorDTO?
+    }
+
+    func reviews(listingId: String) async throws -> [ReviewDTO] {
+        struct Wrap: Decodable { let items: [ReviewDTO] }
+        let w: Wrap = try await request("listings/\(listingId)/reviews")
+        return w.items
+    }
+
+    func postReview(listingId: String, rating: Int, text: String) async throws -> ReviewDTO {
+        struct Body: Encodable { let rating: Int; let text: String }
+        struct Wrap: Decodable { let review: ReviewDTO }
+        let w: Wrap = try await request(
+            "listings/\(listingId)/reviews", method: "POST",
+            body: Body(rating: rating, text: text), authorized: true
+        )
+        return w.review
+    }
+
     // MARK: - Photo uploads
 
     struct UploadedPhoto: Decodable {
@@ -885,6 +953,12 @@ struct IdentityStatusDTO: Decodable {
     let status: String
     /// Why a check was refused, when the provider says. Shown to the user.
     let reason: String?
+    /// When the unfinished session stops being resumable, and the server clock
+    /// to measure it against. Strings, not `Date`: the decoder's `.iso8601`
+    /// strategy rejects the fractional seconds `toISOString()` emits and would
+    /// fail the whole payload — see `MoblyDate.parse`.
+    let resumableUntil: String?
+    let serverTime: String?
 }
 
 struct ListingDTO: Codable, Identifiable {

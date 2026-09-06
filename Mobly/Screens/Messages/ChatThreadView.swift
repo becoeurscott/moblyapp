@@ -504,7 +504,7 @@ struct ChatThreadView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
-                .animation(.spring(response: 0.4, dampingFraction: 0.75), value: messages.count)
+                .animation(Motion.panel, value: messages.count)
             }
             .onChange(of: messages.count) { _, _ in scrollDown(proxy) }
             .onChange(of: partnerTyping) { _, _ in scrollDown(proxy) }
@@ -514,7 +514,7 @@ struct ChatThreadView: View {
     }
 
     private func scrollDown(_ proxy: ScrollViewProxy) {
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) { proxy.scrollTo("bottom", anchor: .bottom) }
+        withAnimation(Motion.panel) { proxy.scrollTo("bottom", anchor: .bottom) }
     }
 
     // MARK: Upload preview bubble
@@ -637,8 +637,8 @@ struct ChatThreadView: View {
             .padding(.top, 8)
             .padding(.bottom, 28)
         }
-        .animation(.easeInOut(duration: 0.2), value: showMicHint)
-        .animation(.easeInOut(duration: 0.2), value: linkPreview.preview?.url)
+        .animation(Motion.instant, value: showMicHint)
+        .animation(Motion.instant, value: linkPreview.preview?.url)
         .background(Color.white)
         .onChange(of: draft) { _, newValue in
             linkPreviewDismissed = false
@@ -678,9 +678,9 @@ struct ChatThreadView: View {
                         recorder.requestPermissionIfNeeded()
                         return
                     }
-                    withAnimation(.easeInOut(duration: 0.2)) { showMicHint = true }
+                    withAnimation(Motion.instant) { showMicHint = true }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                        withAnimation(.easeInOut(duration: 0.2)) { showMicHint = false }
+                        withAnimation(Motion.instant) { showMicHint = false }
                     }
                 }
             } label: {
@@ -689,7 +689,7 @@ struct ChatThreadView: View {
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.2).onEnded { _ in
                     guard !canSend else { return }
-                    withAnimation(.easeInOut(duration: 0.2)) { showMicHint = false }
+                    withAnimation(Motion.instant) { showMicHint = false }
                     let permission = AVAudioSession.sharedInstance().recordPermission
                     guard permission == .granted else {
                         if permission == .denied { showMicPermissionAlert = true }
@@ -843,7 +843,7 @@ struct ChatThreadView: View {
         guard let me = auth.user?.id else { return }
         let jpegs = images.compactMap { $0.jpegData(compressionQuality: 0.8) }
         guard !jpegs.isEmpty else { return }
-        withAnimation(.easeInOut(duration: 0.25)) { uploadingPreview = images.first }
+        withAnimation(Motion.quick) { uploadingPreview = images.first }
         isUploading = true
         Task {
             do {
@@ -859,7 +859,7 @@ struct ChatThreadView: View {
                                     myUserId: me, kind: "IMAGE", mediaUrl: localUrl)
                 }
             }
-            withAnimation(.easeInOut(duration: 0.25)) { uploadingPreview = nil }
+            withAnimation(Motion.quick) { uploadingPreview = nil }
             isUploading = false
         }
     }
@@ -1089,7 +1089,7 @@ struct MessageBubble: View {
             }
             .onEnded { v in
                 if v.translation.width > 45 { onReply(); UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-                withAnimation(.spring()) { dragOffset = 0 }
+                withAnimation(Motion.panel) { dragOffset = 0 }
             }
     }
 }
@@ -1358,7 +1358,7 @@ struct TypingIndicator: View {
                         .frame(width: 8, height: 8)
                         .offset(y: phase ? -6 : 2)
                         .animation(
-                            .easeInOut(duration: 0.45)
+                            Motion.standard
                                 .repeatForever(autoreverses: true)
                                 .delay(Double(i) * 0.18),
                             value: phase

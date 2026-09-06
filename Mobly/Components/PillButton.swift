@@ -36,7 +36,7 @@ struct PillButton: View {
             .overlay(Capsule().stroke(strokeColor, lineWidth: strokeWidth))
             .shadow(color: shadowColor, radius: 14, x: 0, y: 10)
             .scaleEffect(pressed ? 0.97 : 1.0)
-            .animation(.easeOut(duration: 0.12), value: pressed)
+            .animation(Motion.instant, value: pressed)
         }
         .buttonStyle(PressReporterStyle(pressed: $pressed))
     }
@@ -96,7 +96,7 @@ struct CircleBackButton: View {
                 .frame(width: 56, height: 56)
                 .background(Circle().fill(Color(hex: 0xF4F5F8)))
                 .scaleEffect(pressed ? 0.94 : 1.0)
-                .animation(.easeOut(duration: 0.12), value: pressed)
+                .animation(Motion.instant, value: pressed)
         }
         .buttonStyle(PressReporterStyle(pressed: $pressed))
     }

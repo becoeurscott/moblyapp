@@ -148,6 +148,9 @@ struct SearchResultsView: View {
                 .padding(.horizontal, 22)
                 .padding(.top, 8)
                 .padding(.bottom, 120)
+                // Filter/chip changes and silently-refreshed listings reflow
+                // the results instead of cutting to a new list.
+                .animation(Motion.content, value: results)
             }
         }
         .background(Color.white)
@@ -224,7 +227,7 @@ struct SearchResultsView: View {
                 ForEach(chips, id: \.self) { chip in
                     let active = chip == activeChip
                     Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        withAnimation(Motion.quick) {
                             activeChip = chip
                         }
                         UISelectionFeedbackGenerator().selectionChanged()

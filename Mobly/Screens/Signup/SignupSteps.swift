@@ -150,7 +150,7 @@ struct SignupPhoneStep: View {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(focused ? Color.moblyPrimary : .clear, lineWidth: 1.6)
                 )
-                .animation(.easeOut(duration: 0.18), value: focused)
+                .animation(Motion.instant, value: focused)
             }
 
             HStack(alignment: .top, spacing: 8) {
@@ -336,8 +336,8 @@ private struct OTPCell: View {
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(strokeColor, lineWidth: 2)
             )
-            .animation(.easeOut(duration: 0.15), value: active)
-            .animation(.easeOut(duration: 0.15), value: error)
+            .animation(Motion.instant, value: active)
+            .animation(Motion.instant, value: error)
     }
 }
 
@@ -407,7 +407,7 @@ struct SignupSuccessStep: View {
         .padding(.top, 120)
         .onAppear {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) { pop = true }
+            withAnimation(Motion.pop) { pop = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { onDone() }
         }
     }
@@ -450,7 +450,7 @@ struct SignupWelcomeStep: View {
         .padding(.top, 80)
         .opacity(appear ? 1 : 0)
         .onAppear {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) { appear = true }
+            withAnimation(Motion.gentle) { appear = true }
         }
     }
 }

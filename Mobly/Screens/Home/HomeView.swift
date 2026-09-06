@@ -59,6 +59,11 @@ struct HomeView: View {
                 ScrollView(showsIndicators: false) {
                     feed
                         .padding(.bottom, 100)
+                        // Listings arriving from a silent poll cross-fade into
+                        // place instead of snapping.
+                        .animation(Motion.content, value: store.listings)
+                        .animation(Motion.standard, value: store.isOffline)
+                        .animation(Motion.standard, value: store.lastError)
                 }
                 .refreshable {
                     await store.refresh()
@@ -76,13 +81,15 @@ struct HomeView: View {
                         .transition(.opacity)
                 }
             }
-            .animation(.easeInOut(duration: 0.2), value: searching)
+            .animation(Motion.instant, value: searching)
         }
         .background(Color.white)
         .opacity(appeared ? 1 : 0)
-        .onAppear { withAnimation(.easeOut(duration: 0.4)) { appeared = true } }
+        .onAppear { withAnimation(Motion.standard) { appeared = true } }
         .onReceive(NotificationCenter.default.publisher(for: NetworkMonitor.didReconnect)) { _ in
-            Task { await store.refresh() }
+            // Silent: the feed is already on screen from cache. Catching up
+            // must not swap it for skeletons.
+            Task { await store.fetch(silent: true) }
         }
     }
 
@@ -114,6 +121,7 @@ struct HomeView: View {
                     .padding(.horizontal, 22)
                     .padding(.top, 8)
                     .padding(.bottom, 12)
+                    .transition(.moblyAppear)
             } else if let err = store.lastError {
                 // A server-side failure is not a connectivity problem — telling
                 // the user to check their network would send them chasing the
@@ -122,6 +130,7 @@ struct HomeView: View {
                     .padding(.horizontal, 22)
                     .padding(.top, 8)
                     .padding(.bottom, 12)
+                    .transition(.moblyAppear)
             }
 
             if store.isLoading && store.listings.isEmpty {
@@ -134,7 +143,8 @@ struct HomeView: View {
                     .padding(.bottom, 24)
             }
 
-            sectionHeader(L("Villes populaires"), action: { onOpenCityMap("") })
+            sectionHeader(L("Villes populaires"), actionLabel: "Explorer plus",
+                          action: { onOpenCityMap("") })
                 .padding(.horizontal, 22)
                 .padding(.bottom, 14)
             popularRow
@@ -423,7 +433,7 @@ struct HomeView: View {
                 ForEach(chips, id: \.chip.id) { entry in
                     let sel = selectedQuickFilter == entry.chip.id
                     Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        withAnimation(Motion.quick) {
                             selectedQuickFilter = sel ? nil : entry.chip.id
                         }
                         UISelectionFeedbackGenerator().selectionChanged()
@@ -554,7 +564,7 @@ struct HomeView: View {
             .padding(.horizontal, 22)
             .padding(.bottom, 4)
         }
-        .animation(.easeInOut(duration: 0.25), value: selectedQuickFilter)
+        .animation(Motion.quick, value: selectedQuickFilter)
     }
 
     // MARK: Categories row (circular icons)
@@ -631,14 +641,16 @@ struct HomeView: View {
 
     // MARK: Section header
 
-    private func sectionHeader(_ title: String, action: @escaping () -> Void = {}) -> some View {
+    private func sectionHeader(_ title: String,
+                               actionLabel: String = "Voir tout",
+                               action: @escaping () -> Void = {}) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(LT(title))
                 .font(.moblyHeading(17))
                 .foregroundStyle(Color.moblyTextPrimary)
             Spacer()
             Button(action: action) {
-                Text("Voir tout")
+                Text(LT(actionLabel))
                     .font(.moblyBody(12.5, weight: .semibold))
                     .foregroundStyle(Color.moblyPrimary)
             }

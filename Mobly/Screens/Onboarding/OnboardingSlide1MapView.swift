@@ -48,7 +48,7 @@ struct OnboardingSlide1MapView: View {
             .padding(.bottom, 40)
         }
         .onAppear {
-            withAnimation(.spring(response: 0.7, dampingFraction: 0.8).delay(0.1)) {
+            withAnimation(Motion.gentle.delay(0.1)) {
                 appeared = true
             }
         }
@@ -137,12 +137,12 @@ private struct ListingDeck: View {
             .frame(width: w, height: geo.size.height)
             .scaleEffect(appeared ? 1 : 0.9)
             .opacity(appeared ? 1 : 0)
-            .animation(.spring(response: 0.6, dampingFraction: 0.78), value: appeared)
+            .animation(Motion.gentle, value: appeared)
         }
         .aspectRatio(0.86, contentMode: .fit)
         .onAppear { float = true }
         .onReceive(timer) { _ in
-            withAnimation(.easeInOut(duration: 0.5)) { top = (top + 1) % cards.count }
+            withAnimation(Motion.gentle) { top = (top + 1) % cards.count }
         }
     }
 

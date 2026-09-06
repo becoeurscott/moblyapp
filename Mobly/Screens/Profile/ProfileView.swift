@@ -32,7 +32,6 @@ struct ProfileView: View {
     private let account: [MenuItem] = [
         MenuItem(label: "Modifier le profil", icon: "square.and.pencil", iconBg: 0xEEF0FE, iconColor: 0x3A4FF0, route: .editProfile),
         MenuItem(label: "Vérification d'identité", icon: "checkmark.shield.fill", iconBg: 0xE9F9EF, iconColor: 0x1F8A5B, value: "Vérifié", route: .identity),
-        MenuItem(label: "Mes préférés", icon: "heart.fill", iconBg: 0xFDEDED, iconColor: 0xE5484D, value: "5"),
     ]
     /// Computed so the Langue row can show the language the user is actually
     /// on — and so it can be hidden entirely while `selectionEnabled` is off.
@@ -75,8 +74,8 @@ struct ProfileView: View {
 
             if loggingOut || saidGoodbye { logoutOverlay }
         }
-        .animation(.easeInOut(duration: 0.25), value: loggingOut)
-        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: saidGoodbye)
+        .animation(Motion.quick, value: loggingOut)
+        .animation(Motion.panel, value: saidGoodbye)
         .confirmationDialog("Se déconnecter de Mobly ?",
                             isPresented: $confirmLogout,
                             titleVisibility: .visible) {
@@ -136,7 +135,7 @@ struct ProfileView: View {
         }
         .refreshable {
             await AuthStore.shared.bootstrap()
-            await UserDataStore.shared.loadFavorites()
+            await UserDataStore.shared.loadFavorites(silent: true)
         }
         .background(Color.moblySurface)
     }

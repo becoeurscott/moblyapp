@@ -11,6 +11,10 @@ struct Listing: Identifiable, Hashable {
     var coverUrl: String? = nil
     /// All photos (remote URLs) shown in the detail gallery.
     var photos: [String] = []
+    /// Owner's account id, from the server. Nil for locally-built listings.
+    /// Compared against the signed-in user to spot "this is my own space",
+    /// which suppresses the contact CTAs on the detail screen.
+    var ownerId: String? = nil
     /// Owner's display name, from the server. Nil for locally-built listings.
     var ownerName: String? = nil
     var ownerVerified: Bool = false

@@ -44,7 +44,7 @@ struct OnboardingSlide3ChatView: View {
             .padding(.bottom, 40)
         }
         .onAppear {
-            withAnimation(.spring(response: 0.55, dampingFraction: 0.8).delay(0.15)) { entered = true }
+            withAnimation(Motion.gentle.delay(0.15)) { entered = true }
         }
         .onDisappear { entered = false }
     }
@@ -67,7 +67,7 @@ private struct ChatHero: View {
                     .frame(width: w * 0.84)
                     .scaleEffect(entered ? 1 : 0.92)
                     .opacity(entered ? 1 : 0)
-                    .animation(.spring(response: 0.6, dampingFraction: 0.82), value: entered)
+                    .animation(Motion.gentle, value: entered)
 
                 // Privacy chip (top-left)
                 chip("lock.fill", "Numéro masqué")
@@ -80,7 +80,7 @@ private struct ChatHero: View {
                     .position(x: w * 0.70, y: w * 1.02)
                     .scaleEffect(entered ? 1 : 0.4)
                     .opacity(entered ? 1 : 0)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.9), value: entered)
+                    .animation(Motion.pop.delay(0.9), value: entered)
             }
             .frame(width: w, height: geo.size.height)
         }
@@ -152,7 +152,7 @@ private struct ChatCard: View {
                            style: .incoming, delay: 0.15, show: show)
                 listingPill
                     .opacity(show ? 1 : 0).offset(y: show ? 0 : 6)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.85).delay(0.3), value: show)
+                    .animation(Motion.panel.delay(0.3), value: show)
                 ChatBubble(text: "Oui ! Vous pouvez visiter demain 🙂",
                            style: .outgoing, delay: 0.5, show: show, time: "09:42")
                 TypingBubble()
@@ -301,7 +301,7 @@ private struct ChatBubble: View {
         }
         .opacity(show ? 1 : 0)
         .offset(y: show ? 0 : 6)
-        .animation(.spring(response: 0.5, dampingFraction: 0.85).delay(delay), value: show)
+        .animation(Motion.panel.delay(delay), value: show)
     }
 
     private var bubbleShape: some Shape {

@@ -13,8 +13,8 @@ struct ConnectionBanner: View {
                        color: Color(hex: 0xFF6B35))
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: net.isConnected)
-        .animation(.easeInOut(duration: 0.3), value: net.isSlow)
+        .animation(Motion.quick, value: net.isConnected)
+        .animation(Motion.quick, value: net.isSlow)
     }
 
     private func banner(icon: String, text: String, color: Color) -> some View {

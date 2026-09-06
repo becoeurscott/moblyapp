@@ -85,7 +85,7 @@ final class CachedImageLoader: ObservableObject {
                 let (data, response) = try await URLSession.shared.data(for: request)
                 guard !Task.isCancelled else { return }
                 if let img = UIImage(data: data) {
-                    withAnimation(.easeIn(duration: 0.2)) { image = img }
+                    withAnimation(Motion.instant) { image = img }
                     let cached = CachedURLResponse(response: response, data: data)
                     URLCache.shared.storeCachedResponse(cached, for: request)
                 } else {

@@ -194,7 +194,7 @@ struct NotificationsView: View {
 
     private func markAllRead() {
         Task { await userData.markAllNotificationsRead() }
-        withAnimation(.easeOut(duration: 0.25)) {
+        withAnimation(Motion.quick) {
         }
     }
 }

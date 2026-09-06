@@ -27,6 +27,7 @@ private let hasSeenOnboardingKey = "hasSeenOnboarding"
 struct RootView: View {
     @ObservedObject private var lang = AppLang.shared
     @ObservedObject private var listingStore = ListingStore.shared
+    @ObservedObject private var maintenance = MaintenanceStore.shared
     @State private var route: AppRoute = {
         // Allow launch arg to skip splash for screenshotting: -skipSplash 1
         if ProcessInfo.processInfo.environment["START_AT"] == "welcome" {
@@ -88,7 +89,7 @@ struct RootView: View {
             switch route {
             case .splash:
                 SplashView {
-                    withAnimation(.easeInOut(duration: 0.45)) {
+                    withAnimation(Motion.standard) {
                         // A token in the Keychain means this user was signed in
                         // last time, so go straight to the tab bar rather than
                         // replaying onboarding + welcome on every cold launch.
@@ -123,7 +124,7 @@ struct RootView: View {
             case .onboarding:
                 OnboardingView {
                     UserDefaults.standard.set(true, forKey: hasSeenOnboardingKey)
-                    withAnimation(.easeInOut(duration: 0.4)) {
+                    withAnimation(Motion.standard) {
                         route = .welcome
                     }
                 }
@@ -132,10 +133,10 @@ struct RootView: View {
             case .welcome:
                 WelcomeView(
                     onSignUp: {
-                        withAnimation(.easeInOut(duration: 0.4)) { route = .signup }
+                        withAnimation(Motion.standard) { route = .signup }
                     },
                     onSignIn: {
-                        withAnimation(.easeInOut(duration: 0.4)) { route = .connexion }
+                        withAnimation(Motion.standard) { route = .connexion }
                     }
                 )
                 .transition(.opacity)
@@ -148,10 +149,10 @@ struct RootView: View {
                 ConnexionView(
                     initialMode: .signup,
                     onExit: {
-                        withAnimation(.easeInOut(duration: 0.4)) { route = .welcome }
+                        withAnimation(Motion.standard) { route = .welcome }
                     },
                     onFinish: {
-                        withAnimation(.easeInOut(duration: 0.4)) { route = .placeholder }
+                        withAnimation(Motion.standard) { route = .placeholder }
                     }
                 )
                 .id("auth-signup")
@@ -161,10 +162,10 @@ struct RootView: View {
                 ConnexionView(
                     initialMode: .signin,
                     onExit: {
-                        withAnimation(.easeInOut(duration: 0.4)) { route = .welcome }
+                        withAnimation(Motion.standard) { route = .welcome }
                     },
                     onFinish: {
-                        withAnimation(.easeInOut(duration: 0.4)) { route = .placeholder }
+                        withAnimation(Motion.standard) { route = .placeholder }
                     }
                 )
                 .id("auth-signin")
@@ -252,7 +253,7 @@ struct RootView: View {
 
             case .placeholder:
                 MainTabView(onLogout: {
-                    withAnimation(.easeInOut(duration: 0.4)) { route = .welcome }
+                    withAnimation(Motion.standard) { route = .welcome }
                 })
                 .transition(.opacity)
             }
@@ -272,6 +273,22 @@ struct RootView: View {
         .overlay {
             if AppLang.shared.switching { languageSwitchingOverlay }
         }
+        // Maintenance sits ABOVE everything, including the language scrim and
+        // any presented sheet or cover: while the window is open every request
+        // behind it is refused, so there is nothing useful left to interact
+        // with. It clears itself when MaintenanceStore sees the window lifted.
+        .overlay {
+            if maintenance.isActive {
+                MaintenanceView()
+                    // The overlay is attached OUTSIDE the .environment(\.locale)
+                    // above, so it does not inherit it — without this the
+                    // String Catalog resolves against the device language and
+                    // the screen comes out in English in a French-only app.
+                    .environment(\.locale, Locale(identifier: lang.code))
+                    .transition(.opacity)
+                    .zIndex(100)
+            }
+        }
         // A refresh the server refuses (revoked family, reuse detection, or a
         // 30-day-old token) posts `sessionExpired`. AuthStore nils the user
         // and ChatStore stops, but nothing moved the UI — the user was left
@@ -279,7 +296,7 @@ struct RootView: View {
         // them to Welcome so they can sign in again.
         .onReceive(NotificationCenter.default.publisher(for: MoblyAPI.sessionExpired)) { _ in
             guard route == .placeholder else { return }
-            withAnimation(.easeInOut(duration: 0.4)) { route = .welcome }
+            withAnimation(Motion.standard) { route = .welcome }
         }
     }
 

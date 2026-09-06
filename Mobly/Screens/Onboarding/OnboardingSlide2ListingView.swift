@@ -74,7 +74,7 @@ private struct BoostHero: View {
                     .frame(width: w * 0.84)
                     .scaleEffect(entered ? 1 : 0.92)
                     .opacity(entered ? 1 : 0)
-                    .animation(.spring(response: 0.6, dampingFraction: 0.82), value: entered)
+                    .animation(Motion.gentle, value: entered)
 
                 // Floating cues: publish (free) + boost (×3 views)
                 publishPill
@@ -92,7 +92,7 @@ private struct BoostHero: View {
                     .position(x: w * 0.82, y: w * 0.10)
                     .scaleEffect(entered ? (pulse ? 1.06 : 1) : 0.3)
                     .opacity(entered ? 1 : 0)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.55).delay(0.4), value: entered)
+                    .animation(Motion.pop.delay(0.4), value: entered)
             }
             .frame(width: w, height: geo.size.height)
         }

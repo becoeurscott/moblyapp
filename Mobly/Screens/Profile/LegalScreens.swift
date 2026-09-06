@@ -162,7 +162,7 @@ struct LegalDocumentView: View {
             }
             .opacity(appeared ? 1 : 0)
             .offset(y: appeared ? 0 : 8)
-            .animation(.easeOut(duration: 0.35), value: appeared)
+            .animation(Motion.standard, value: appeared)
             .onAppear { appeared = true }
         }
     }

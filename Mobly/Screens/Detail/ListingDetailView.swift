@@ -117,7 +117,10 @@ struct ListingDetailView: View {
             Color.white.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                heroGallery
+                ZStack(alignment: .top) {
+                    heroGallery
+                    heroButtons
+                }
 
                 ScrollView(showsIndicators: false) {
                     content
@@ -155,6 +158,7 @@ struct ListingDetailView: View {
         }
         .fullScreenCover(isPresented: $showViewer) {
             ImageViewer(images: gallery, index: $photoIndex)
+                .swipeToDismiss(onDismiss: { showViewer = false })
         }
         .fullScreenCover(isPresented: $showGrid) {
             PhotoGridView(images: gallery) { i in
@@ -162,6 +166,7 @@ struct ListingDetailView: View {
                 showGrid = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showViewer = true }
             } onClose: { showGrid = false }
+                .swipeToDismiss(onDismiss: { showGrid = false })
         }
         .fullScreenCover(item: $openedThread) { thread in
             ChatThreadView(thread: thread, onBack: { openedThread = nil })
@@ -265,62 +270,42 @@ struct ListingDetailView: View {
     }
 
     private var heroGallery: some View {
-        ZStack(alignment: .top) {
-            TabView(selection: $photoIndex) {
-                ForEach(Array(gallery.enumerated()), id: \.offset) { i, name in
-                    RemoteImage(source: name, width: ImageSlot.hero, contentMode: .fill)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                        .contentShape(Rectangle())
-                        .onTapGesture { showViewer = true }
-                        .tag(i)
-                }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .onReceive(autoSlide) { _ in
-                guard !reduceMotion, !showViewer else { return }
-                withAnimation(.easeInOut(duration: 0.6)) {
-                    photoIndex = (photoIndex + 1) % gallery.count
-                }
-            }
-
-            HStack {
-                CircleIconButton(icon: "xmark", action: onClose)
-                Spacer()
-                HStack(spacing: 10) {
-                    CircleIconButton(icon: "square.and.arrow.up") {}
-                    CircleIconButton(icon: liked ? "heart.fill" : "heart",
-                                     tint: liked ? .moblyAccent : .moblyTextPrimary) {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        guard auth.isSignedIn else { needsSignIn = true; return }
-                        Task {
-                            _ = await userData.toggleFavorite(listing)
-                            SessionTracker.shared.log("favorite.toggle", [
-                                "listingId": listing.id,
-                                "favorited": userData.isFavorite(listing.id),
-                                "source": "listing_detail"
-                            ])
-                        }
+        GeometryReader { geo in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(Array(gallery.enumerated()), id: \.offset) { i, name in
+                        RemoteImage(source: name, width: ImageSlot.hero, contentMode: .fill)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
+                            .id(i)
                     }
                 }
+                .scrollTargetLayout()
             }
-            .padding(.horizontal, 18)
-            .padding(.top, safeAreaTop + 8)
-
-            VStack {
-                Spacer()
-                HStack(spacing: 6) {
-                    ForEach(gallery.indices, id: \.self) { i in
-                        Capsule()
-                            .fill(i == photoIndex ? .white : .white.opacity(0.5))
-                            .frame(width: i == photoIndex ? 16 : 6, height: 6)
-                            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: photoIndex)
-                    }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: Binding(
+                get: { photoIndex },
+                set: { if let v = $0 { photoIndex = v } }
+            ))
+        }
+        .onReceive(autoSlide) { _ in
+            guard !reduceMotion, !showViewer else { return }
+            withAnimation(.easeInOut(duration: 0.6)) {
+                photoIndex = (photoIndex + 1) % gallery.count
+            }
+        }
+        .overlay(alignment: .bottom) {
+            HStack(spacing: 6) {
+                ForEach(gallery.indices, id: \.self) { i in
+                    Capsule()
+                        .fill(i == photoIndex ? .white : .white.opacity(0.5))
+                        .frame(width: i == photoIndex ? 16 : 6, height: 6)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: photoIndex)
                 }
-                .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(Capsule().fill(.black.opacity(0.28)))
-                .padding(.bottom, 16)
             }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(Capsule().fill(.black.opacity(0.28)))
+            .padding(.bottom, 16)
         }
         .frame(height: heroHeight)
         .clipped()
@@ -328,6 +313,31 @@ struct ListingDetailView: View {
             cornerRadii: .init(bottomLeading: 26, bottomTrailing: 26),
             style: .continuous))
         .ignoresSafeArea(edges: .top)
+    }
+
+    private var heroButtons: some View {
+        HStack {
+            CircleIconButton(icon: "xmark", action: onClose)
+            Spacer()
+            HStack(spacing: 10) {
+                CircleIconButton(icon: "square.and.arrow.up") {}
+                CircleIconButton(icon: liked ? "heart.fill" : "heart",
+                                 tint: liked ? .moblyAccent : .moblyTextPrimary) {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    guard auth.isSignedIn else { needsSignIn = true; return }
+                    Task {
+                        _ = await userData.toggleFavorite(listing)
+                        SessionTracker.shared.log("favorite.toggle", [
+                            "listingId": listing.id,
+                            "favorited": userData.isFavorite(listing.id),
+                            "source": "listing_detail"
+                        ])
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, safeAreaTop + 8)
     }
 
     // MARK: Content
@@ -339,14 +349,23 @@ struct ListingDetailView: View {
                 .foregroundStyle(Color.moblyTextPrimary)
 
             HStack(spacing: 6) {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 12)).foregroundStyle(Color.moblyPrimary)
-                Text(listing.rating)
-                    .font(.moblyBody(13, weight: .semibold))
-                    .foregroundStyle(Color.moblyTextPrimary)
-                Text("(128 avis)")
-                    .font(.moblyBody(13))
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
+                if listing.rating.isEmpty {
+                    Text("Nouveau")
+                        .font(.moblyBody(13, weight: .semibold))
+                        .foregroundStyle(Color.moblyPrimary)
+                    Text("· Aucun avis")
+                        .font(.moblyBody(13))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                } else {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 12)).foregroundStyle(Color.moblyPrimary)
+                    Text(listing.rating)
+                        .font(.moblyBody(13, weight: .semibold))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                    Text("(\(reviews.count) avis)")
+                        .font(.moblyBody(13))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                }
                 Text("·").foregroundStyle(Color(hex: 0x9A9DAC))
                 Image(systemName: "mappin.and.ellipse")
                     .font(.system(size: 11, weight: .medium))
@@ -599,53 +618,82 @@ struct ListingDetailView: View {
                 Text("Avis")
                     .font(.moblyHeading(17))
                     .foregroundStyle(Color.moblyTextPrimary)
-                Image(systemName: "star.fill")
-                    .font(.system(size: 12)).foregroundStyle(Color.moblyPrimary)
-                Text(String(format: "%.1f", averageRating))
-                    .font(.moblyBody(13, weight: .semibold))
-                    .foregroundStyle(Color.moblyTextPrimary)
-                Text("· \(reviews.count) avis")
-                    .font(.moblyBody(13))
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
+                if reviews.isEmpty {
+                    Text("· Aucun avis")
+                        .font(.moblyBody(13))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                } else {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 12)).foregroundStyle(Color.moblyPrimary)
+                    Text(String(format: "%.1f", averageRating))
+                        .font(.moblyBody(13, weight: .semibold))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                    Text("· \(reviews.count) avis")
+                        .font(.moblyBody(13))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                }
                 Spacer()
+                if !reviews.isEmpty {
+                    Button {
+                        showAllReviewsSheet = true
+                    } label: {
+                        Text("Voir tout")
+                            .font(.moblyBody(12.5, weight: .semibold))
+                            .foregroundStyle(Color.moblyPrimary)
+                    }
+                }
                 Button {
                     showReviewSheet = true
                 } label: {
                     Text("Laisser un avis")
                         .font(.moblyBody(12.5, weight: .semibold))
                         .foregroundStyle(Color.moblyPrimary)
+                        .padding(.leading, reviews.isEmpty ? 0 : 12)
                 }
             }
             .padding(.bottom, 16)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
-                    ForEach(Array(reviews.prefix(5))) { review in
-                        ReviewCard(review: review)
-                    }
-                    if reviews.count > 5 {
-                        Button {
-                            showAllReviewsSheet = true
-                        } label: {
-                            VStack(spacing: 8) {
-                                ZStack {
-                                    Circle().fill(Color.moblySurfaceTint).frame(width: 44, height: 44)
-                                    Image(systemName: "arrow.right")
-                                        .font(.system(size: 16, weight: .semibold))
+            if reviews.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "star.bubble")
+                        .font(.system(size: 32, weight: .medium))
+                        .foregroundStyle(Color(hex: 0xD5D8E2))
+                    Text("Soyez le premier à laisser un avis")
+                        .font(.moblyBody(14, weight: .medium))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 14) {
+                        ForEach(Array(reviews.prefix(5))) { review in
+                            ReviewCard(review: review)
+                        }
+                        if reviews.count > 5 {
+                            Button {
+                                showAllReviewsSheet = true
+                            } label: {
+                                VStack(spacing: 8) {
+                                    ZStack {
+                                        Circle().fill(Color.moblySurfaceTint).frame(width: 44, height: 44)
+                                        Image(systemName: "arrow.right")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundStyle(Color.moblyPrimary)
+                                    }
+                                    Text("Voir tout")
+                                        .font(.moblyBody(12.5, weight: .semibold))
                                         .foregroundStyle(Color.moblyPrimary)
                                 }
-                                Text("Voir tout")
-                                    .font(.moblyBody(12.5, weight: .semibold))
-                                    .foregroundStyle(Color.moblyPrimary)
+                                .frame(width: 100)
                             }
-                            .frame(width: 100)
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .padding(.horizontal, 22)
                 }
-                .padding(.horizontal, 22)
+                .padding(.horizontal, -22)
             }
-            .padding(.horizontal, -22)
         }
         .sheet(isPresented: $showReviewSheet) {
             LeaveReviewSheet { stars, text in
@@ -839,8 +887,21 @@ struct ImageViewer: View {
     @State private var zoom: CGFloat = 1
 
     var body: some View {
-        ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+        VStack(spacing: 0) {
+            HStack {
+                CircleIconButton(icon: "xmark", bg: .white.opacity(0.15), tint: .white) {
+                    dismiss()
+                }
+                Spacer()
+                Text("\(index + 1)/\(images.count)")
+                    .font(.moblyBody(13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Capsule().fill(.white.opacity(0.15)))
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
 
             TabView(selection: $index) {
                 ForEach(Array(images.enumerated()), id: \.offset) { i, name in
@@ -855,22 +916,8 @@ struct ImageViewer: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .always))
-            .ignoresSafeArea()
-
-            HStack {
-                CircleIconButton(icon: "xmark", bg: .white.opacity(0.15), tint: .white) {
-                    dismiss()
-                }
-                Spacer()
-                Text("\(index + 1)/\(images.count)")
-                    .font(.moblyBody(13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Capsule().fill(.white.opacity(0.15)))
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 56)
         }
+        .background(Color.black.ignoresSafeArea())
     }
 }
 
@@ -891,7 +938,10 @@ struct CircleIconButton: View {
                 .frame(width: size, height: size)
                 .background(Circle().fill(bg))
                 .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                .contentShape(Circle())
         }
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(Circle())
         .buttonStyle(.plain)
     }
 }

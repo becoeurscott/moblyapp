@@ -267,16 +267,24 @@ struct ResultCard: View {
                         .foregroundStyle(Color.moblyTextPrimary)
                         .lineLimit(1)
                     Spacer()
-                    HStack(spacing: 3) {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 10)).foregroundStyle(Color.moblyPrimary)
-                        Text(listing.rating)
-                            .font(.moblyBody(11.5, weight: .semibold))
-                            .foregroundStyle(Color.moblyTextPrimary)
+                    if listing.rating.isEmpty {
+                        Text("Nouveau")
+                            .font(.moblyBody(11, weight: .semibold))
+                            .foregroundStyle(Color.moblyPrimary)
+                    } else {
+                        HStack(spacing: 3) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 10)).foregroundStyle(Color.moblyPrimary)
+                            Text(listing.rating)
+                                .font(.moblyBody(11.5, weight: .semibold))
+                                .foregroundStyle(Color.moblyTextPrimary)
+                        }
                     }
                 }
 
-                Text("\(listing.location) · \(listing.reviewCount) avis")
+                Text(listing.reviewCount > 0
+                     ? "\(listing.location) · \(listing.reviewCount) avis"
+                     : listing.location)
                     .font(.moblyBody(11.5))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
                     .lineLimit(1)

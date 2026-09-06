@@ -134,6 +134,10 @@ struct ProfileView: View {
             .padding(.top, 8)
             .padding(.bottom, 110)
         }
+        .refreshable {
+            await AuthStore.shared.bootstrap()
+            await UserDataStore.shared.loadFavorites()
+        }
         .background(Color.moblySurface)
     }
 

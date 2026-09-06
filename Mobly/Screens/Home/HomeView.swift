@@ -51,8 +51,9 @@ struct HomeView: View {
 
             searchBar
                 .padding(.horizontal, 22)
-                .padding(.top, 18)
-                .padding(.bottom, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
+                .zIndex(1)
 
             ZStack(alignment: .top) {
                 ScrollView(showsIndicators: false) {
@@ -72,15 +73,17 @@ struct HomeView: View {
 
                     suggestionsCard
                         .padding(.horizontal, 22)
-                        .padding(.top, 6)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .transition(.opacity)
                 }
             }
+            .animation(.easeInOut(duration: 0.2), value: searching)
         }
         .background(Color.white)
         .opacity(appeared ? 1 : 0)
-        .animation(.easeInOut(duration: 0.2), value: searching)
         .onAppear { withAnimation(.easeOut(duration: 0.4)) { appeared = true } }
+        .onReceive(NotificationCenter.default.publisher(for: NetworkMonitor.didReconnect)) { _ in
+            Task { await store.refresh() }
+        }
     }
 
     // MARK: Feed helpers
@@ -202,10 +205,9 @@ struct HomeView: View {
         }
         .padding(.vertical, 4)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(hex: 0xF4F5F8))
         )
-        .shadow(color: Color(hex: 0x14152A).opacity(0.12), radius: 16, y: 8)
-        // Sizes to the number of rows shown — no whitespace below the last one.
         .fixedSize(horizontal: false, vertical: true)
         .onChange(of: searchText) { _, q in placeCompleter.update(query: q) }
     }
@@ -310,6 +312,8 @@ struct HomeView: View {
             .padding(.trailing, 14)
             .frame(height: 52)
             .background(RoundedRectangle(cornerRadius: 16).fill(Color(hex: 0xF4F5F8)))
+            .contentShape(Rectangle())
+            .onTapGesture { searchActive = true }
 
             if searching {
                 Button("Annuler") { dismissSearch() }
@@ -619,14 +623,10 @@ struct HomeView: View {
     // MARK: Loading skeleton (placeholder before first fetch)
 
     private var skeletonCarousel: some View {
-        RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .fill(Color(hex: 0xF4F5F8))
-            .frame(height: 210)
-            .padding(.horizontal, 22)
-            .overlay(
-                ProgressView()
-                    .tint(Color(hex: 0xC4C7D2))
-            )
+        VStack(alignment: .leading, spacing: 20) {
+            FeaturedCardSkeleton()
+            RecommendedRowSkeleton()
+        }
     }
 
     // MARK: Section header

@@ -257,9 +257,10 @@ struct ExploreView: View {
     }
 
     private func clearSearch() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         searchText = ""
         committedLocation = ""
-        searchActive = false
+        withAnimation(.easeOut(duration: 0.15)) { searchActive = false }
     }
 
     /// Coordinate for a listing on the map.
@@ -319,7 +320,7 @@ struct ExploreView: View {
                     searchDropdown
                         .padding(.horizontal, 18)
                         .padding(.top, 6)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .transition(.opacity)
                 }
                 if !searchActive {
                     chipRow.padding(.top, 10)
@@ -486,14 +487,13 @@ struct ExploreView: View {
 
     private var searchDropdown: some View {
         VStack(spacing: 0) {
-            if placeCompleter.suggestions.isEmpty && searchText.isEmpty {
-                // Nothing typed yet — surface popular Cameroonian cities.
+            if searchText.isEmpty {
                 ForEach(Array(MoblyData.searchableLocations.prefix(6)), id: \.name) { s in
                     suggestionRow(title: s.name,
                                   subtitle: "\(s.region), Cameroun",
                                   action: { goTo("\(s.name), \(s.region)") })
                 }
-            } else if placeCompleter.suggestions.isEmpty {
+            } else {
                 let local = locationSuggestions
                 if !local.isEmpty {
                     ForEach(local, id: \.name) { s in
@@ -501,7 +501,14 @@ struct ExploreView: View {
                                       subtitle: "\(s.region), Cameroun",
                                       action: { goTo("\(s.name), \(s.region)") })
                     }
-                } else {
+                }
+                let localNames = Set(local.map { $0.name.lowercased() })
+                ForEach(placeCompleter.suggestions.filter { !localNames.contains($0.title.lowercased()) }) { s in
+                    suggestionRow(title: s.title,
+                                  subtitle: s.subtitle.isEmpty ? "Cameroun" : s.subtitle,
+                                  action: { pickPlaceSuggestion(s) })
+                }
+                if local.isEmpty && placeCompleter.suggestions.isEmpty {
                     HStack(spacing: 10) {
                         Image(systemName: "magnifyingglass").foregroundStyle(Color(hex: 0x9A9DAC))
                         Text("Aucun résultat pour \"\(searchText)\"")
@@ -509,12 +516,6 @@ struct ExploreView: View {
                             .foregroundStyle(Color(hex: 0x9A9DAC))
                     }
                     .padding(.horizontal, 16).padding(.vertical, 14)
-                }
-            } else {
-                ForEach(placeCompleter.suggestions) { s in
-                    suggestionRow(title: s.title,
-                                  subtitle: s.subtitle.isEmpty ? "Cameroun" : s.subtitle,
-                                  action: { pickPlaceSuggestion(s) })
                 }
             }
         }
@@ -616,7 +617,10 @@ struct ExploreView: View {
     private var topBar: some View {
         HStack(spacing: 12) {
             if searchActive {
-                Button { searchActive = false } label: {
+                Button {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    withAnimation(.easeOut(duration: 0.15)) { searchActive = false }
+                } label: {
                     Image(systemName: "arrow.left")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(Color.moblyTextPrimary)
@@ -925,12 +929,18 @@ private struct ExploreCard: View {
                         .font(.moblyBody(11))
                         .foregroundStyle(Color(hex: 0x9A9DAC))
                         .lineLimit(1)
-                    HStack(spacing: 3) {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 9)).foregroundStyle(Color.moblyPrimary)
-                        Text(listing.rating)
-                            .font(.moblyBody(10.5, weight: .semibold))
-                            .foregroundStyle(Color.moblyTextPrimary)
+                    if listing.rating.isEmpty {
+                        Text("Nouveau")
+                            .font(.moblyBody(10, weight: .semibold))
+                            .foregroundStyle(Color.moblyPrimary)
+                    } else {
+                        HStack(spacing: 3) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 9)).foregroundStyle(Color.moblyPrimary)
+                            Text(listing.rating)
+                                .font(.moblyBody(10.5, weight: .semibold))
+                                .foregroundStyle(Color.moblyTextPrimary)
+                        }
                     }
                     Spacer(minLength: 0)
                     HStack(spacing: 2) {

@@ -140,6 +140,7 @@ struct MainTabView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .overlay(alignment: .top) { ConnectionBanner() }
         .animation(.easeInOut(duration: 0.22), value: chrome.hideTabBar)
         .ignoresSafeArea(.keyboard)
         .onAppear { SessionTracker.shared.log("screen.view", ["screen": "\(tab)"]) }
@@ -152,6 +153,7 @@ struct MainTabView: View {
         }
         .fullScreenCover(isPresented: $showNotifications) {
             NotificationsView(onClose: { showNotifications = false })
+                .swipeToDismiss(onDismiss: { showNotifications = false })
         }
         .fullScreenCover(isPresented: $showExplore) {
             ExploreSearchView(
@@ -163,6 +165,7 @@ struct MainTabView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showSearch = true }
                 }
             )
+            .swipeToDismiss(onDismiss: { showExplore = false })
         }
         .fullScreenCover(isPresented: $showSearch) {
             SearchResultsView(
@@ -170,6 +173,7 @@ struct MainTabView: View {
                 initialQuery: searchQuery,
                 onClose: { showSearch = false }
             )
+            .swipeToDismiss(onDismiss: { showSearch = false })
         }
         .onChange(of: push.pendingThreadId) { _, threadId in
             guard threadId != nil else { return }

@@ -33,7 +33,7 @@ struct Listing: Identifiable, Hashable {
     var available: Bool = true
     var boosted: Bool = false
     var tags: [String] = ["Meublé", "Wifi", "Parking"]
-    var reviewCount: Int = 128
+    var reviewCount: Int = 0
     /// Transaction / furnishing filters this listing matches
     /// (e.g. "À louer", "Acheter", "Meublé", "Non meublé", "Court séjour").
     var deals: [String] = ["À louer", "Meublé"]

@@ -90,8 +90,8 @@ extension ListingDTO {
 
     var asListing: Listing {
         let ratingStr: String
-        if let r = rating { ratingStr = String(format: "%.1f", min(5.0, r)) }
-        else { ratingStr = "4.5" }
+        if let r = rating, reviewCount > 0 { ratingStr = String(format: "%.1f", min(5.0, r)) }
+        else { ratingStr = "" }
 
         return Listing(
             id: id,

@@ -63,14 +63,21 @@ private struct HeroCard: View {
                 // Top overlays
                 VStack {
                     HStack(alignment: .top) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 11)).foregroundStyle(Color.moblyPrimary)
-                            Text(listing.rating)
-                                .font(.moblyHeading(12)).foregroundStyle(Color(hex: 0x14152A))
+                        if listing.rating.isEmpty {
+                            Text("Nouveau")
+                                .font(.moblyHeading(11)).foregroundStyle(Color.moblyPrimary)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(Capsule().fill(.white))
+                        } else {
+                            HStack(spacing: 4) {
+                                Image(systemName: "star.fill")
+                                    .font(.system(size: 11)).foregroundStyle(Color.moblyPrimary)
+                                Text(listing.rating)
+                                    .font(.moblyHeading(12)).foregroundStyle(Color(hex: 0x14152A))
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(Capsule().fill(.white))
                         }
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(Capsule().fill(.white))
                         Spacer()
                         HeartButton(listing: listing)
                     }
@@ -131,9 +138,15 @@ struct RecommendedCard: View {
                             .font(.moblyHeading(14.5)).foregroundStyle(Color.moblyTextPrimary)
                             .lineLimit(1)
                         Spacer(minLength: 6)
-                        HStack(spacing: 3) {
-                            Image(systemName: "star.fill").font(.system(size: 10)).foregroundStyle(Color.moblyAccent)
-                            Text(listing.rating).font(.moblyBody(12, weight: .semibold)).foregroundStyle(Color.moblyTextPrimary)
+                        if listing.rating.isEmpty {
+                            Text("Nouveau")
+                                .font(.moblyBody(11, weight: .semibold))
+                                .foregroundStyle(Color.moblyPrimary)
+                        } else {
+                            HStack(spacing: 3) {
+                                Image(systemName: "star.fill").font(.system(size: 10)).foregroundStyle(Color.moblyAccent)
+                                Text(listing.rating).font(.moblyBody(12, weight: .semibold)).foregroundStyle(Color.moblyTextPrimary)
+                            }
                         }
                     }
                     HStack(spacing: 4) {

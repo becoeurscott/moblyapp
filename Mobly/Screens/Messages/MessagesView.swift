@@ -81,7 +81,11 @@ struct MessagesView: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: 14, bottom: 0, trailing: 14))
                 }
 
-                if filtered.isEmpty {
+                if chat.isLoadingThreads && filtered.isEmpty {
+                    ThreadListSkeleton()
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                } else if filtered.isEmpty {
                     emptyState
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 4, leading: 14, bottom: 4, trailing: 14))
@@ -192,6 +196,11 @@ struct MessagesView: View {
                     openThread = ChatThread.from(dto, myUserId: auth.user?.id)
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NetworkMonitor.didReconnect)) { _ in
+            guard auth.isSignedIn else { return }
+            Task { await chat.loadThreads() }
+            chat.reconnectSocket()
         }
         .fullScreenCover(item: $openThread) { thread in
             ChatThreadView(thread: thread, onBack: { openThread = nil })

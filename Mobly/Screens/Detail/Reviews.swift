@@ -200,12 +200,29 @@ struct LeaveReviewSheet: View {
 struct AllReviewsView: View {
     let reviews: [Review]
 
+    enum SortOption: String, CaseIterable {
+        case recent = "Récents"
+        case highToLow = "Meilleures"
+        case lowToHigh = "Moins bonnes"
+    }
+
     @Environment(\.dismiss) private var dismiss
     @State private var selectedFilter: Int? = nil
+    @State private var sortOption: SortOption = .recent
 
     private var filtered: [Review] {
-        guard let star = selectedFilter else { return reviews }
-        return reviews.filter { $0.stars == star }
+        var result: [Review]
+        if let star = selectedFilter {
+            result = reviews.filter { $0.stars == star }
+        } else {
+            result = reviews
+        }
+        switch sortOption {
+        case .recent: break
+        case .highToLow: result.sort { $0.stars > $1.stars }
+        case .lowToHigh: result.sort { $0.stars < $1.stars }
+        }
+        return result
     }
 
     private var averageRating: Double {
@@ -302,7 +319,43 @@ struct AllReviewsView: View {
                 .padding(.horizontal, 22)
             }
             .padding(.top, 16)
-            .padding(.bottom, 12)
+            .padding(.bottom, 8)
+
+            // Sort picker
+            HStack {
+                Text("Trier par")
+                    .font(.moblyBody(12))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+                Menu {
+                    ForEach(SortOption.allCases, id: \.self) { opt in
+                        Button {
+                            sortOption = opt
+                        } label: {
+                            HStack {
+                                Text(opt.rawValue)
+                                if sortOption == opt {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(sortOption.rawValue)
+                            .font(.moblyBody(12.5, weight: .semibold))
+                            .foregroundStyle(Color.moblyTextPrimary)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Color(hex: 0x9A9DAC))
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: 0xF4F5F8)))
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 22)
+            .padding(.bottom, 8)
 
             // Review list
             if filtered.isEmpty {

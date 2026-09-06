@@ -426,12 +426,20 @@ struct FavoriteRow: View {
                     HStack(alignment: .top) {
                         Text(fav.listing.title).font(.moblyHeading(15)).foregroundStyle(Color.moblyTextPrimary)
                         Spacer()
-                        HStack(spacing: 3) {
-                            Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(Color.moblyPrimary)
-                            Text(fav.listing.rating).font(.moblyBody(10.5, weight: .bold)).foregroundStyle(Color.moblyTextPrimary)
+                        if fav.listing.rating.isEmpty {
+                            Text("Nouveau")
+                                .font(.moblyBody(10, weight: .semibold))
+                                .foregroundStyle(Color.moblyPrimary)
+                                .padding(.horizontal, 6).padding(.vertical, 3)
+                                .background(RoundedRectangle(cornerRadius: 8).fill(Color.moblySurfaceTint))
+                        } else {
+                            HStack(spacing: 3) {
+                                Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(Color.moblyPrimary)
+                                Text(fav.listing.rating).font(.moblyBody(10.5, weight: .bold)).foregroundStyle(Color.moblyTextPrimary)
+                            }
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.moblySurfaceTint))
                         }
-                        .padding(.horizontal, 6).padding(.vertical, 3)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.moblySurfaceTint))
                     }
                     HStack(spacing: 4) {
                         Image(systemName: "mappin.and.ellipse").font(.system(size: 11, weight: .medium))

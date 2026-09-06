@@ -156,6 +156,12 @@ final class ChatStore: ObservableObject {
 
     func stop() { socket.disconnect() }
 
+    func reconnectSocket() {
+        guard api.isAuthenticated else { return }
+        socket.disconnect()
+        socket.connect()
+    }
+
     // MARK: - Loading
 
     func loadThreads() async {

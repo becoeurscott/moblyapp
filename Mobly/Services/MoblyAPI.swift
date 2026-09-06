@@ -193,7 +193,10 @@ final class MoblyAPI {
         let data: Data
         let http: HTTPURLResponse
         do {
+            let start = CFAbsoluteTimeGetCurrent()
             let (d, resp) = try await session.data(for: req)
+            let elapsed = CFAbsoluteTimeGetCurrent() - start
+            Task { @MainActor in NetworkMonitor.shared.recordLatency(elapsed) }
             data = d
             http = resp as? HTTPURLResponse ?? HTTPURLResponse()
         } catch let urlError as URLError {

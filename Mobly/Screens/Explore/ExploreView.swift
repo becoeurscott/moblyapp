@@ -256,6 +256,14 @@ struct ExploreView: View {
         }
     }
 
+    /// The "x" inside the search field. It only empties the text box: it does
+    /// NOT drop `committedLocation`, so the map keeps showing the city the user
+    /// already searched instead of silently snapping back to every listing in
+    /// the country. Focus is kept so they can type a new query straight away.
+    private func clearSearchTextOnly() {
+        searchText = ""
+    }
+
     private func clearSearch() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         searchText = ""
@@ -288,16 +296,28 @@ struct ExploreView: View {
                                       longitude: cityCoord.longitude + r * sin(angle))
     }
 
+    /// Nearest pin to a tap, in screen space. `nil` when the tap landed on
+    /// bare map, which is what clears the selection.
+    private func listingID(atScreenPoint pt: CGPoint, proxy: MapProxy) -> String? {
+        let hitRadius: CGFloat = 34
+        var best: (id: String, dist: CGFloat)?
+        for (i, l) in listings.enumerated() {
+            guard let p = proxy.convert(coord(i), to: .local) else { continue }
+            let d = hypot(p.x - pt.x, p.y - pt.y)
+            if d <= hitRadius, d < (best?.dist ?? .greatestFiniteMagnitude) {
+                best = (l.id, d)
+            }
+        }
+        return best?.id
+    }
+
     var body: some View {
+        MapReader { proxy in
         Map(position: $position) {
             ForEach(Array(listings.enumerated()), id: \.element.id) { i, l in
                 Annotation("", coordinate: coord(i)) {
                     PricePin(price: shortPrice(l.price), selected: selected == l.id)
-                        .onTapGesture {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                                selected = l.id
-                            }
-                        }
+                        .allowsHitTesting(false)
                 }
             }
             UserAnnotation()
@@ -307,6 +327,13 @@ struct ExploreView: View {
         .mapControls {
             MapCompass()
             MapScaleView()
+        }
+        // One tap handler for the whole map: hitting a pin selects it,
+        // hitting anywhere else clears the selection.
+        .onTapGesture { pt in
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                selected = listingID(atScreenPoint: pt, proxy: proxy)
+            }
         }
         .onMapCameraChange { ctx in
             currentSpan = ctx.region.span
@@ -368,6 +395,7 @@ struct ExploreView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Connectez-vous pour contacter le propriétaire.")
+        }
         }
     }
 
@@ -618,6 +646,7 @@ struct ExploreView: View {
         HStack(spacing: 12) {
             if searchActive {
                 Button {
+                    searchText = ""
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     withAnimation(.easeOut(duration: 0.15)) { searchActive = false }
                 } label: {
@@ -655,7 +684,7 @@ struct ExploreView: View {
                                                             filters: filters)
                             }
                         if !searchText.isEmpty {
-                            Button(action: clearSearch) {
+                            Button(action: clearSearchTextOnly) {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 15))
                                     .foregroundStyle(Color(hex: 0xC4C7D2))

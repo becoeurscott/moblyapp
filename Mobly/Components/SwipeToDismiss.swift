@@ -7,10 +7,13 @@ import UIKit
 /// handed back to SwiftUI's fullScreenCover so the native animation plays.
 struct SwipeToDismissContainer<Content: View>: UIViewControllerRepresentable {
     let onDismiss: () -> Void
+    var ignoreTopSafeArea: Bool = false
     @ViewBuilder let content: () -> Content
 
     func makeUIViewController(context: Context) -> SwipeDismissHostController<Content> {
-        SwipeDismissHostController(rootView: content(), onDismiss: onDismiss)
+        let vc = SwipeDismissHostController(rootView: content(), onDismiss: onDismiss)
+        vc.ignoreTopSafeArea = ignoreTopSafeArea
+        return vc
     }
 
     func updateUIViewController(_ vc: SwipeDismissHostController<Content>, context: Context) {
@@ -23,6 +26,7 @@ final class SwipeDismissHostController<Content: View>: UIViewController,
     UIGestureRecognizerDelegate {
     private let hostingController: UIHostingController<Content>
     var onDismiss: () -> Void
+    var ignoreTopSafeArea = false
     private var edgeGesture: UIScreenEdgePanGestureRecognizer!
     private var downGesture: UIPanGestureRecognizer!
     private var isDismissing = false
@@ -43,6 +47,9 @@ final class SwipeDismissHostController<Content: View>: UIViewController,
         super.viewDidLoad()
         addChild(hostingController)
         hostingController.view.backgroundColor = .clear
+        if ignoreTopSafeArea {
+            hostingController.safeAreaRegions = .keyboard
+        }
         view.addSubview(hostingController.view)
         hostingController.view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -151,7 +158,8 @@ final class SwipeDismissHostController<Content: View>: UIViewController,
 }
 
 extension View {
-    func swipeToDismiss(onDismiss: @escaping () -> Void) -> some View {
-        SwipeToDismissContainer(onDismiss: onDismiss) { self }
+    func swipeToDismiss(onDismiss: @escaping () -> Void, ignoreTopSafeArea: Bool = false) -> some View {
+        SwipeToDismissContainer(onDismiss: onDismiss, ignoreTopSafeArea: ignoreTopSafeArea) { self }
+            .ignoresSafeArea(edges: ignoreTopSafeArea ? .top : [])
     }
 }

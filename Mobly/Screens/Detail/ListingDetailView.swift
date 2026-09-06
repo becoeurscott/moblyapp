@@ -129,15 +129,13 @@ struct ListingDetailView: View {
                         .padding(.bottom, 120)
                 }
             }
-            .ignoresSafeArea(edges: .top)
 
             VStack(spacing: 0) {
                 if !isAvailable { unavailableBanner }
                 stickyBar
             }
         }
-        .ignoresSafeArea(edges: .top)
-        .swipeToDismiss(onDismiss: onClose)
+        .swipeToDismiss(onDismiss: onClose, ignoreTopSafeArea: true)
         .onAppear {
             SessionTracker.shared.log("listing.view", [
                 "listingId": listing.id,

@@ -409,6 +409,8 @@ final class ChatStore: ObservableObject {
             CallService.shared.handleEnded()
         case .callAudio(let data):
             CallService.shared.handleAudioData(data)
+        case .review:
+            break
         }
     }
 

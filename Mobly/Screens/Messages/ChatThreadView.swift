@@ -239,9 +239,6 @@ struct ChatThreadView: View {
             VStack(spacing: 0) {
                 header
                 listingPill
-                if let pinned = latestVisitMessage {
-                    pinnedVisitCard(pinned)
-                }
                 messagesList
                 if replyingTo != nil { replyPreview }
                 // if !recorder.isRecording { quickReplies } // DEBUG: hidden to test mic tap

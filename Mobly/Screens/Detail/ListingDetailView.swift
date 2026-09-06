@@ -21,7 +21,8 @@ struct ListingDetailView: View {
     @State private var showReviewSheet = false
     @State private var descExpanded = false
     @State private var showAllReviewsSheet = false
-    @State private var reviews: [Review] = Review.samples
+    @State private var reviews: [Review] = []
+    @State private var hasPostedReview = false
 
     @ObservedObject private var chat = ChatStore.shared
     @ObservedObject private var auth = AuthStore.shared
@@ -134,7 +135,7 @@ struct ListingDetailView: View {
                 ScrollView(showsIndicators: false) {
                     content
                         .padding(.horizontal, 22)
-                        .padding(.top, 14)
+                        .padding(.top, isOwnListing ? 9 : 14)
                         .padding(.bottom, 120)
                 }
             }
@@ -157,12 +158,18 @@ struct ListingDetailView: View {
             Task {
                 _ = try? await MoblyAPI.shared.trackListingView(
                     id: listing.id, source: source ?? "detail")
-                // Authoritative check — an owner may have pulled the space
-                // offline since this listing was cached.
                 if let fresh = try? await MoblyAPI.shared.listing(id: listing.id) {
                     await MainActor.run { isAvailable = fresh.available }
                 }
+                if let fetched = try? await MoblyAPI.shared.reviews(listingId: listing.id) {
+                    let mapped = fetched.map { $0.toReview() }
+                    await MainActor.run {
+                        reviews = mapped
+                        hasPostedReview = fetched.contains { $0.userId == AuthStore.shared.user?.id }
+                    }
+                }
             }
+            listenForReviews()
         }
         .fullScreenCover(isPresented: $showViewer) {
             ImageViewer(images: gallery, index: $photoIndex)
@@ -520,8 +527,11 @@ struct ListingDetailView: View {
             trustRow(icon: "checkmark.shield.fill", title: "Hôte vérifié",
                      sub: "Identité et documents confirmés par Mobly.")
                 .padding(.bottom, 16)
-            trustRow(icon: "calendar.badge.clock", title: "Visite sur place possible",
-                     sub: "Planifiez une visite avant de vous engager.")
+            trustRow(icon: "calendar.badge.clock",
+                     title: "Visite sur place possible",
+                     sub: isOwnListing
+                          ? "Les visiteurs peuvent demander une visite de cet espace."
+                          : "Planifiez une visite avant de vous engager.")
 
             divider
 
@@ -665,13 +675,17 @@ struct ListingDetailView: View {
                             .foregroundStyle(Color.moblyPrimary)
                     }
                 }
-                Button {
-                    showReviewSheet = true
-                } label: {
-                    Text("Laisser un avis")
-                        .font(.moblyBody(12.5, weight: .semibold))
-                        .foregroundStyle(Color.moblyPrimary)
-                        .padding(.leading, reviews.isEmpty ? 0 : 12)
+                // An owner reviewing their own space would be self-dealing,
+                // so the CTA is theirs to lose.
+                if !isOwnListing && !hasPostedReview && auth.isSignedIn {
+                    Button {
+                        showReviewSheet = true
+                    } label: {
+                        Text("Laisser un avis")
+                            .font(.moblyBody(12.5, weight: .semibold))
+                            .foregroundStyle(Color.moblyPrimary)
+                            .padding(.leading, reviews.isEmpty ? 0 : 12)
+                    }
                 }
             }
             .padding(.bottom, 16)
@@ -681,9 +695,12 @@ struct ListingDetailView: View {
                     Image(systemName: "star.bubble")
                         .font(.system(size: 32, weight: .medium))
                         .foregroundStyle(Color(hex: 0xD5D8E2))
-                    Text("Soyez le premier à laisser un avis")
+                    Text(isOwnListing
+                         ? "Vos visiteurs pourront laisser un avis ici"
+                         : "Soyez le premier à laisser un avis")
                         .font(.moblyBody(14, weight: .medium))
                         .foregroundStyle(Color(hex: 0x9A9DAC))
+                        .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 24)
@@ -720,8 +737,16 @@ struct ListingDetailView: View {
         }
         .sheet(isPresented: $showReviewSheet) {
             LeaveReviewSheet { stars, text in
-                reviews.insert(Review(author: "Vous", initial: "V", stars: stars,
-                                      timeAgo: "À l'instant", text: text), at: 0)
+                Task {
+                    if let dto = try? await MoblyAPI.shared.postReview(
+                        listingId: listing.id, rating: stars, text: text
+                    ) {
+                        await MainActor.run {
+                            reviews.insert(dto.toReview(), at: 0)
+                            hasPostedReview = true
+                        }
+                    }
+                }
             }
             .presentationDetents([.medium, .large])
         }
@@ -747,12 +772,15 @@ struct ListingDetailView: View {
         }
     }
 
+    private func listenForReviews() {
+    }
+
     private var descriptionText: String {
         // Prefer the owner's own description; fall back to a generated blurb.
         if !listing.about.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return listing.about
         }
-        return "\(listing.title) est un espace \(listing.subtitle.isEmpty ? "confortable" : listing.subtitle.lowercased()) situé à \(listing.location). Lumineux, bien entretenu et proche des commerces, transports et écoles. Idéal pour un séjour longue durée. Visite sur place possible avant tout engagement — contactez l'hôte directement dans l'app."
+        return "\(listing.title) est un espace \(listing.subtitle.isEmpty ? "confortable" : listing.subtitle.lowercased()) situé à \(listing.location). Lumineux, bien entretenu et proche des commerces, transports et écoles. Idéal pour un séjour longue durée. Visite sur place possible avant tout engagement." + (isOwnListing ? "" : " Contactez l'hôte directement dans l'app.")
     }
 
     private var verifiedBadge: some View {
@@ -807,45 +835,41 @@ struct ListingDetailView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14).padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color(hex: 0xF1F2F6)))
+        .padding(.horizontal, 13)
+        .frame(height: 38)
+        .background(RoundedRectangle(cornerRadius: 13).fill(Color(hex: 0xF1F2F6)))
     }
 
     private var stickyBar: some View {
         Group {
             if isOwnListing {
-                VStack(alignment: .leading, spacing: 10) {
-                    priceLabel
-                    ownListingNotice
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                ownListingNotice
             } else {
                 stickyCTARow
             }
         }
         .padding(.horizontal, 22)
-        .padding(.top, 14)
-        .padding(.bottom, 30 + safeAreaBottom)
+        .padding(.top, isOwnListing ? 9 : 14)
+        // The CTA row keeps a comfortable 30pt above the home indicator so the
+        // buttons are not mis-tapped. The own-listing notice is a passive
+        // label with nothing to hit, so it drops to the safe-area inset alone
+        // and sits at the bottom edge instead of floating on a band of blur.
+        // CTA row keeps 30pt clear of the home indicator so the buttons are not
+        // mis-tapped. The own-listing notice is a passive label with nothing to
+        // hit, so it drops to just above the indicator instead of floating on a
+        // band of blur.
+        // Content clears the home indicator...
+        .padding(.bottom, (isOwnListing ? 4 : 30) + safeAreaBottom)
         .background(
             Rectangle().fill(.ultraThinMaterial)
                 .shadow(color: Color(hex: 0x14152A).opacity(0.08), radius: 16, y: -4)
+                // ...and the material is drawn past the bottom of its own frame
+                // to cover the inset. `ignoresSafeArea` does not work here:
+                // inside this fullScreenCover nothing — not even a plain Color —
+                // can expand into the bottom inset, so the strip is painted by
+                // overdrawing instead.
+                .padding(.bottom, -safeAreaBottom)
         )
-    }
-
-    private var priceLabel: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 3) {
-            Text(listing.price)
-                .font(.moblyHeading(16))
-                .foregroundStyle(Color.moblyTextPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            if !listing.priceUnit.isEmpty {
-                Text(LT(listing.priceUnit))
-                    .font(.moblyBody(11))
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
-                    .lineLimit(1)
-            }
-        }
     }
 
     private var stickyCTARow: some View {

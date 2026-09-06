@@ -164,7 +164,9 @@ struct ListingDetailView: View {
                 if let fetched = try? await MoblyAPI.shared.reviews(listingId: listing.id) {
                     let mapped = fetched.map { $0.toReview() }
                     await MainActor.run {
-                        reviews = mapped
+                        // The avis land after the page is already up, so they
+                        // ease in rather than popping the layout.
+                        withAnimation(Motion.content) { reviews = mapped }
                         hasPostedReview = fetched.contains { $0.userId == AuthStore.shared.user?.id }
                     }
                 }
@@ -311,7 +313,7 @@ struct ListingDetailView: View {
         }
         .onReceive(autoSlide) { _ in
             guard !reduceMotion, !showViewer else { return }
-            withAnimation(.easeInOut(duration: 0.6)) {
+            withAnimation(Motion.gentle) {
                 photoIndex = (photoIndex + 1) % gallery.count
             }
         }
@@ -321,7 +323,7 @@ struct ListingDetailView: View {
                     Capsule()
                         .fill(i == photoIndex ? .white : .white.opacity(0.5))
                         .frame(width: i == photoIndex ? 16 : 6, height: 6)
-                        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: photoIndex)
+                        .animation(Motion.quick, value: photoIndex)
                 }
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
@@ -451,7 +453,7 @@ struct ListingDetailView: View {
                 .lineLimit(descExpanded ? nil : 4)
             if !descExpanded && descriptionText.count > 120 {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.25)) { descExpanded = true }
+                    withAnimation(Motion.quick) { descExpanded = true }
                 } label: {
                     Text("Lire tout")
                         .font(.moblyBody(13, weight: .semibold))
@@ -732,8 +734,10 @@ struct ListingDetailView: View {
                     .padding(.horizontal, 22)
                 }
                 .padding(.horizontal, -22)
+                .transition(.moblyAppear)
             }
         }
+        .animation(Motion.content, value: reviews)
         .sheet(isPresented: $showReviewSheet) {
             LeaveReviewSheet { stars, text in
                 Task {
@@ -741,7 +745,7 @@ struct ListingDetailView: View {
                         listingId: listing.id, rating: stars, text: text
                     ) {
                         await MainActor.run {
-                            reviews.insert(dto.toReview(), at: 0)
+                            withAnimation(Motion.pop) { reviews.insert(dto.toReview(), at: 0) }
                             hasPostedReview = true
                         }
                     }
@@ -877,7 +881,7 @@ struct ListingDetailView: View {
         // hit, so it drops to just above the indicator instead of floating on a
         // band of blur.
         // Content clears the home indicator...
-        .padding(.bottom, (isOwnListing ? 4 : 14) + safeAreaBottom)
+        .padding(.bottom, (isOwnListing ? 4 : 6) + safeAreaBottom)
         .background(
             Rectangle().fill(.ultraThinMaterial)
                 .shadow(color: Color(hex: 0x14152A).opacity(0.08), radius: 16, y: -4)
@@ -1021,7 +1025,7 @@ struct ImageViewer: View {
                         .gesture(
                             MagnificationGesture()
                                 .onChanged { zoom = max(1, min($0, 4)) }
-                                .onEnded { _ in withAnimation(.spring()) { zoom = 1 } }
+                                .onEnded { _ in withAnimation(Motion.panel) { zoom = 1 } }
                         )
                         .tag(i)
                 }

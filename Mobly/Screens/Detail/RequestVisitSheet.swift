@@ -32,7 +32,7 @@ struct RequestVisitSheet: View {
                     .foregroundStyle(Color.moblyTextPrimary)
                 Spacer()
             }
-            .padding(.top, 12)
+            .padding(.top, 24)
 
             listingChip
 

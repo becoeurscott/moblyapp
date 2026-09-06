@@ -160,11 +160,21 @@ struct ChatThreadView: View {
     /// thread so both parties always see the current appointment state.
     private var latestVisitMessage: ChatMessage? {
         guard let m = messages.reversed().first(where: { $0.kind == .visit }) else { return nil }
-        // A refused / cancelled visit is over. Keeping it pinned would top the
-        // thread forever with a dead appointment, so the strip disappears —
-        // the card stays in the message list as history.
-        guard (m.visitAction ?? "REQUESTED") != "CANCELLED" else { return nil }
+        let action = m.visitAction ?? "REQUESTED"
+        if ["CANCELLED", "COMPLETED", "NO_SHOW"].contains(action) { return nil }
+        if let scheduled = Self.visitScheduledDate(from: m.text), scheduled < .now { return nil }
         return m
+    }
+
+    private static func visitScheduledDate(from text: String) -> Date? {
+        let parts = text.components(separatedBy: " · ")
+        guard parts.count >= 3 else { return nil }
+        let combined = parts[1] + " · " + parts[2]
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "fr_FR")
+        df.defaultDate = Date()
+        df.dateFormat = "EEEE d MMM · HH'h'mm"
+        return df.date(from: combined)
     }
 
     /// The newest visit message per visit. Only these may carry action
@@ -1675,7 +1685,7 @@ struct ProposeVisitFromChatSheet: View {
                     .foregroundStyle(Color.moblyTextPrimary)
                 Spacer()
             }
-            .padding(.top, 12)
+            .padding(.top, 24)
 
             HStack(spacing: 12) {
                 ZStack {

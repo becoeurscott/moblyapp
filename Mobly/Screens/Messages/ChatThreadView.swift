@@ -477,6 +477,7 @@ struct ChatThreadView: View {
                                 onConfirm: { performVisitAction(m, status: "CONFIRMED") },
                                 onDecline: { performVisitAction(m, status: "CANCELLED") }
                             )
+                            .transition(.scale(scale: 0.85, anchor: .bottom).combined(with: .opacity))
                             .id(m.id)
                         } else {
                             if i == 0 || messages[i - 1].day != m.day {
@@ -489,6 +490,7 @@ struct ChatThreadView: View {
                                 onDelete: { },   // TODO: DELETE /threads/:id/messages/:mid
                                 onImageTap: { url in fullScreenImageURL = url }
                             )
+                            .transition(.scale(scale: 0.85, anchor: m.fromMe ? .bottomTrailing : .bottomLeading).combined(with: .opacity))
                             .id(m.id)
                         }
                     }
@@ -505,6 +507,7 @@ struct ChatThreadView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
+                .animation(.spring(response: 0.4, dampingFraction: 0.75), value: messages.count)
             }
             .onChange(of: messages.count) { _, _ in scrollDown(proxy) }
             .onChange(of: partnerTyping) { _, _ in scrollDown(proxy) }
@@ -514,7 +517,7 @@ struct ChatThreadView: View {
     }
 
     private func scrollDown(_ proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("bottom", anchor: .bottom) }
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) { proxy.scrollTo("bottom", anchor: .bottom) }
     }
 
     // MARK: Upload preview bubble

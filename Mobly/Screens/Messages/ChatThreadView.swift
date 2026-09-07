@@ -850,20 +850,29 @@ struct ChatThreadView: View {
         withAnimation(Motion.quick) { uploadingPreview = images.first }
         isUploading = true
         Task {
+            // The preview only has to cover the UPLOAD window. `chat.send`
+            // inserts its own optimistic bubble synchronously, before it awaits
+            // anything — so the preview has to go the moment sending starts.
+            // Clearing it after the sends finished left both on screen and the
+            // photo appeared twice until the upload completed.
+            func handOffToOptimisticBubble() {
+                withAnimation(Motion.quick) { uploadingPreview = nil }
+            }
             do {
                 let uploaded = try await MoblyAPI.shared.uploadOwnerPhotos(jpegs)
+                handOffToOptimisticBubble()
                 for photo in uploaded {
                     await chat.send(threadId: thread.id, text: "📷 Photo",
                                     myUserId: me, kind: "IMAGE", mediaUrl: photo.url)
                 }
             } catch {
+                handOffToOptimisticBubble()
                 for jpeg in jpegs {
                     let localUrl = Self.saveToLocalCache(jpeg)
                     await chat.send(threadId: thread.id, text: "📷 Photo",
                                     myUserId: me, kind: "IMAGE", mediaUrl: localUrl)
                 }
             }
-            withAnimation(Motion.quick) { uploadingPreview = nil }
             isUploading = false
         }
     }
@@ -1002,10 +1011,18 @@ struct MessageBubble: View {
                     .foregroundStyle(message.fromMe ? Color.white.opacity(0.7) : Color(hex: 0xB4B7C2))
                 if message.fromMe { statusTicks }
             }
+            .padding(.horizontal, message.kind == .image ? 10 : 0)
+            .padding(.bottom, message.kind == .image ? 6 : 0)
+            .padding(.top, message.kind == .image ? 4 : 0)
         }
-        .padding(.horizontal, message.kind == .image ? 6 : 12)
-        .padding(.vertical, message.kind == .image ? 6 : 9)
+        // An image fills its bubble edge to edge. The old 6pt inset let the
+        // bubble fill show around the photo, which read as a border/frame.
+        .padding(.horizontal, message.kind == .image ? 0 : 12)
+        .padding(.vertical, message.kind == .image ? 0 : 9)
         .background(bubbleShape.fill(message.fromMe ? Color.moblyPrimary : .white))
+        // Clip to the bubble so the photo's corners follow the tail, instead of
+        // its own 12pt radius sitting inside an 18pt one.
+        .clipShape(bubbleShape)
         .shadow(color: message.fromMe ? .clear : Color(hex: 0x14152A).opacity(0.05), radius: 8, y: 2)
         .overlay(alignment: message.fromMe ? .bottomLeading : .bottomTrailing) {
             if let r = message.reaction {
@@ -1967,7 +1984,7 @@ private struct CachedChatImage: View {
                 Image(uiImage: img)
                     .resizable().scaledToFill()
                     .frame(width: 200, height: 150)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .clipped()
             } else if loader.failed {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)

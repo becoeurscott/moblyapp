@@ -1,4 +1,3 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '../lib/prisma';
 import { cacheBust } from '../lib/cache';
 import { createSession } from './didit';
@@ -38,77 +37,89 @@ export interface ToolContext {
   threadId: string;
 }
 
-export const supportTools: Anthropic.Tool[] = [
-  {
-    name: 'get_account_status',
-    description:
-      "L'état du compte de la personne : identité vérifiée ou non, propriétaire ou non, " +
-      'restrictions actives, nombre d\'annonces et de visites. À appeler AVANT de répondre à ' +
-      '« pourquoi je ne peux pas… » — la réponse dépend presque toujours de cet état.',
-    input_schema: { type: 'object', properties: {} },
+/**
+ * Tool definitions in the OpenAI "function" shape, which is what OpenRouter
+ * speaks whichever model you point it at. Changing model — Claude, GPT, Llama
+ * — is then a config change rather than a code change.
+ */
+export interface SupportTool {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: {
+      type: 'object';
+      properties: Record<string, unknown>;
+      required?: string[];
+    };
+  };
+}
+
+const tool = (
+  name: string,
+  description: string,
+  properties: Record<string, unknown> = {},
+  required: string[] = []
+): SupportTool => ({
+  type: 'function',
+  function: {
+    name,
+    description,
+    parameters: { type: 'object', properties, ...(required.length ? { required } : {}) },
   },
-  {
-    name: 'list_my_listings',
-    description:
-      "Les annonces de la personne avec leur statut (PENDING = en attente de validation, " +
-      'ACTIVE, REJECTED, PAUSED…). Utile pour expliquer pourquoi une annonce n\'apparaît pas.',
-    input_schema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'list_my_visits',
-    description: 'Les visites à venir de la personne, avec leur statut et leur date.',
-    input_schema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'start_identity_verification',
-    description:
-      "Ouvre une session de vérification d'identité et renvoie le lien. À utiliser quand la " +
+});
+
+export const supportTools: SupportTool[] = [
+  tool(
+    'get_account_status',
+    "L'état du compte de la personne : identité vérifiée ou non, propriétaire ou non, " +
+      "restrictions actives, nombre d'annonces et de visites. À appeler AVANT de répondre à " +
+      '« pourquoi je ne peux pas… » — la réponse dépend presque toujours de cet état.'
+  ),
+  tool(
+    'list_my_listings',
+    'Les annonces de la personne avec leur statut (PENDING = en attente de validation, ACTIVE, ' +
+      "REJECTED, PAUSED…). Utile pour expliquer pourquoi une annonce n'apparaît pas."
+  ),
+  tool('list_my_visits', 'Les visites à venir de la personne, avec leur statut et leur date.'),
+  tool(
+    'start_identity_verification',
+    "Ouvre une session de vérification d'identité et renvoie le lien. À utiliser quand la " +
       "personne est bloquée parce qu'elle n'est pas vérifiée. Ne vérifie PAS le compte — elle " +
-      'doit terminer le contrôle elle-même.',
-    input_schema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'set_listing_availability',
-    description:
-      "Rend une annonce disponible ou indisponible — par exemple quand le bien vient d'être " +
-      'loué. Uniquement sur les annonces de la personne.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        listingId: { type: 'string', description: "L'id de l'annonce" },
-        available: { type: 'boolean', description: 'true = disponible, false = indisponible' },
+      'doit terminer le contrôle elle-même.'
+  ),
+  tool(
+    'set_listing_availability',
+    "Rend une annonce disponible ou indisponible — par exemple quand le bien vient d'être loué. " +
+      'Uniquement sur les annonces de la personne.',
+    {
+      listingId: { type: 'string', description: "L'id de l'annonce" },
+      available: { type: 'boolean', description: 'true = disponible, false = indisponible' },
+    },
+    ['listingId', 'available']
+  ),
+  tool(
+    'cancel_visit',
+    'Annule une visite de la personne (comme visiteur ou comme propriétaire).',
+    { visitId: { type: 'string', description: 'id de la visite' } },
+    ['visitId']
+  ),
+  tool(
+    'escalate_to_human',
+    "Transmet la conversation à un membre de l'équipe. À utiliser pour : arnaque, fraude, " +
+      "litige d'argent, compte suspendu, contestation d'une sanction, demande de remboursement, " +
+      "ou dès que vous n'êtes pas sûr. Utilisez-le aussi dès que la personne demande à parler à " +
+      "un humain. Prévenez-la que quelqu'un va reprendre la conversation.",
+    {
+      reason: {
+        type: 'string',
+        description: "Pourquoi, en une phrase, pour l'agent qui reprendra.",
       },
-      required: ['listingId', 'available'],
     },
-  },
-  {
-    name: 'cancel_visit',
-    description: 'Annule une visite de la personne (comme visiteur ou comme propriétaire).',
-    input_schema: {
-      type: 'object',
-      properties: { visitId: { type: 'string' } },
-      required: ['visitId'],
-    },
-  },
-  {
-    name: 'escalate_to_human',
-    description:
-      "Transmet la conversation à un membre de l'équipe. À utiliser pour : arnaque, fraude, " +
-      'litige d\'argent, compte suspendu, contestation d\'une sanction, demande de ' +
-      "remboursement, ou dès que vous n'êtes pas sûr. Utilisez-le aussi dès que la personne " +
-      "demande à parler à un humain. Prévenez-la que quelqu'un va reprendre la conversation.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        reason: {
-          type: 'string',
-          description: "Pourquoi, en une phrase, pour l'agent qui reprendra.",
-        },
-      },
-      required: ['reason'],
-    },
-  },
+    ['reason']
+  ),
 ];
+
 
 const FR_STATUS: Record<string, string> = {
   DRAFT: 'brouillon',

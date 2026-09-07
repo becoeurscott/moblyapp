@@ -107,8 +107,8 @@ export const flagsSchema = z
     /// showing the support e-mail instead of opening a chat.
     'support.chat': flag(),
     /// The support assistant. Off = conversations simply wait for a human.
-    /// It also stays off unless ANTHROPIC_API_KEY is set, so switching this on
-    /// without a key changes nothing.
+    /// It also stays off unless OPENROUTER_API_KEY is set, so switching this
+    /// on without a key changes nothing.
     'support.ai': flag(false),
     'notifications.push': flag(),
     'maps': flag(),
@@ -157,7 +157,12 @@ export const limitsSchema = z
 
 export const supportSchema = z
   .object({
-    aiModel: z.string().max(60).default('claude-sonnet-5'),
+    /// OpenRouter model slug. Defaults to a `:free` model, so the assistant
+    /// costs nothing to run — at the price of tight rate limits. Free slugs
+    /// come and go; check OpenRouter's model list and set whichever you want,
+    /// no deploy needed. A paid slug (e.g. `anthropic/claude-sonnet-4.5`)
+    /// works the same way.
+    aiModel: z.string().max(80).default('google/gemma-4-31b-it:free'),
   })
   .default({});
 

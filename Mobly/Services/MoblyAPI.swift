@@ -97,6 +97,24 @@ final class MoblyAPI {
         cfg.timeoutIntervalForRequest = 15
         cfg.timeoutIntervalForResource = 30
         cfg.waitsForConnectivity = false   // fail fast so the UI can say "hors ligne"
+
+        // NEVER let HTTP caching touch the API.
+        //
+        // The backend is Express, which stamps an ETag on every JSON response
+        // and sends no Cache-Control. URLSession then heuristically caches GETs
+        // in `URLCache.shared` — which this app deliberately enlarged to 512 MB
+        // for photos — and the cache key is the URL ALONE: the Authorization
+        // header is not part of it.
+        //
+        // So `/verification/me`, `/favorites`, `/notifications`, `/threads`,
+        // `/users/me` — one URL each, shared by every account that ever signed
+        // in on the handset — could be answered from disk with the PREVIOUS
+        // user's body, or revalidated to a 304 that reuses it. On a shared
+        // phone (routine in this market) that is both a broken second account
+        // and a privacy leak. Each store keeps its own cache for offline use,
+        // so nothing depends on this layer.
+        cfg.urlCache = nil
+        cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: cfg)
     }()
 
@@ -153,6 +171,10 @@ final class MoblyAPI {
         case limitReached     = "LIMIT_REACHED"
         case internalError    = "INTERNAL"
         case offline          = "OFFLINE"
+        /// The request was cancelled — the screen went away, or SwiftUI tore
+        /// down the `.refreshable` task when the gesture ended. Nobody is
+        /// waiting for the result, so this is a non-event, never an error.
+        case cancelled        = "CANCELLED"
         case unknown          = "UNKNOWN"
 
         /// The account can no longer hold a session — sign the user out.
@@ -181,6 +203,8 @@ final class MoblyAPI {
 
         var errorDescription: String? { message }
         var isOffline: Bool { code == .offline }
+        /// Nothing went wrong — the caller walked away. Never show this.
+        var isCancelled: Bool { code == .cancelled }
         /// Transient conditions where retrying is reasonable.
         var isRetryable: Bool { code == .offline || status >= 500 }
         /// The user needs to sign in before this will work.
@@ -272,6 +296,15 @@ final class MoblyAPI {
                 }
                 throw APIError(status: 0, code: .offline,
                                message: "Pas de connexion. Vérifiez votre réseau.",
+                               requestId: nil, fields: [:])
+            }
+            // A cancelled request is not a failure. SwiftUI cancels the
+            // `.refreshable` task as soon as the pull gesture ends, so treating
+            // -999 as an error painted an orange "Annulé · Réessayer" banner
+            // across the top of the feed every time someone pulled to refresh.
+            if urlError.code == .cancelled {
+                throw APIError(status: 0, code: .cancelled,
+                               message: "Requête annulée.",
                                requestId: nil, fields: [:])
             }
             throw APIError(status: 0, code: .unknown,

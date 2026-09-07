@@ -71,6 +71,10 @@ struct MoblyApp: App {
                     // app sat in the background.
                     if phase == .active {
                         Task { await MaintenanceStore.shared.checkAtLaunch() }
+                        // The socket does not survive suspension. Without this
+                        // the app came back to a dead connection and messages
+                        // arrived only when something happened to refetch.
+                        ChatStore.shared.ensureConnected()
                         // Same reasoning for the configuration: a flag may have
                         // been flipped while the app sat in the background.
                         Task { await RemoteConfigStore.shared.refresh() }

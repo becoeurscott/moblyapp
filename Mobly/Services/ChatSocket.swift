@@ -52,6 +52,9 @@ final class ChatSocket: NSObject, ObservableObject {
     /// Set when the app deliberately disconnects, so we don't fight it by
     /// reconnecting.
     private var intentionallyClosed = false
+    /// When the current `.connecting` attempt began, so a stalled one can be
+    /// detected and replaced rather than blocking every future attempt.
+    private var connectingSince: Date?
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -69,11 +72,31 @@ final class ChatSocket: NSObject, ObservableObject {
         return comps.url
     }
 
+    /// How long a connection attempt may sit in `.connecting` before it is
+    /// treated as wedged. Generous, because the first frames can be slow on a
+    /// Douala connection — but finite, which is the point.
+    private static let connectTimeout: TimeInterval = 15
+
     func connect() {
-        guard state == .disconnected, MoblyAPI.shared.isAuthenticated,
-              let url = socketURL else { return }
+        guard MoblyAPI.shared.isAuthenticated, let url = socketURL else { return }
+
+        // A stalled attempt used to wedge the socket for the life of the app.
+        // `connect()` only proceeded from `.disconnected`, so if an attempt
+        // began and never produced a `ready` frame — nor an error to trigger
+        // the reconnect path — the state stayed `.connecting` forever and every
+        // later call silently no-oped. The socket never came back, and messages
+        // only appeared when something else happened to refetch. Tear down an
+        // attempt that has outlived its welcome and start a fresh one.
+        if state == .connecting,
+           let since = connectingSince,
+           Date().timeIntervalSince(since) > Self.connectTimeout {
+            teardown()
+        }
+
+        guard state == .disconnected else { return }
         intentionallyClosed = false
         state = .connecting
+        connectingSince = Date()
 
         let cfg = URLSessionConfiguration.default
         cfg.waitsForConnectivity = false
@@ -89,11 +112,18 @@ final class ChatSocket: NSObject, ObservableObject {
 
     func disconnect() {
         intentionallyClosed = true
+        teardown()
+    }
+
+    /// Drop the transport and return to `.disconnected`, without marking the
+    /// close as deliberate — so the caller decides whether to reconnect.
+    private func teardown() {
         pingTimer?.invalidate()
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
         session?.invalidateAndCancel()
         session = nil
+        connectingSince = nil
         state = .disconnected
     }
 
@@ -180,6 +210,7 @@ final class ChatSocket: NSObject, ObservableObject {
         switch envelope.type {
         case "ready":
             state = .connected
+            connectingSince = nil
             reconnectAttempt = 0
             startPing()
         case "message":

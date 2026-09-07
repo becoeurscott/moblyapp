@@ -42,7 +42,9 @@ final class VisitRequestStore: ObservableObject {
             }
             lastError = nil
         } catch let e as MoblyAPI.APIError {
-            if !silent { lastError = e.message }
+            // A cancelled fetch means the screen went away, not that anything
+            // failed — surfacing it would show an error nobody caused.
+            if !silent && !e.isCancelled { lastError = e.message }
         } catch {
             if !silent { lastError = error.localizedDescription }
         }

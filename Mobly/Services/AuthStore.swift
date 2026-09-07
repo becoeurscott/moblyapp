@@ -47,6 +47,9 @@ final class AuthStore: ObservableObject {
                 Session.shared.signOutLocal()
                 ChatStore.shared.stop()
                 RemoteConfigStore.shared.clearRestrictions()
+                // Same reason as in `signOut`: whoever signs in next must not
+                // inherit this account's verification state.
+                IdentityVerificationStore.shared.clear()
                 self?.errorMessage = "Votre session a expiré. Reconnectez-vous."
             }
         }
@@ -512,6 +515,7 @@ final class AuthStore: ObservableObject {
         ThreadPrefs.shared.clearAll()          // pin / mute / archive / deleted
         BlockedUsers.shared.clearAll()         // blocked peers
         VisitRequestStore.shared.clearAll()    // visit inbox (visitor phone numbers)
+        IdentityVerificationStore.shared.clear() // KYC status + hosted session URL
     }
 
     // MARK: - Internals
@@ -536,6 +540,9 @@ final class AuthStore: ObservableObject {
         user = u
         // Bring the user's own data online as soon as there's a session.
         ChatStore.shared.start()
+        // Pull THIS account's verification status. Without it the screen would
+        // sit on the cleared default until someone opened it.
+        Task { await IdentityVerificationStore.shared.refresh() }
         Task {
             // Link the anonymous analytics session to this account so the
             // pre-sign-in events (splash, welcome, sign-up funnel) survive.

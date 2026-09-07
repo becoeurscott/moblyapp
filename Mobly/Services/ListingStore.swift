@@ -58,7 +58,7 @@ final class ListingStore: ObservableObject {
             // Whatever the cache gave us stays on screen; only the banner changes.
             // A silent poll failing is not news — the user asked for nothing, so
             // they get told nothing and the next tick tries again.
-            if !silent {
+            if !silent && !apiError.isCancelled {
                 if apiError.isOffline {
                     isOffline = true
                 } else {

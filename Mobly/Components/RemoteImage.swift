@@ -161,6 +161,21 @@ enum MoblyImageCache {
             diskCapacity: 512 * 1024 * 1024,     // 512 MB
             diskPath: "mobly_images"
         )
+        purgeLegacyAPIResponses()
+    }
+
+    /// Builds before the API session opted out of HTTP caching stored
+    /// authenticated JSON in this same cache, keyed by URL only — so a handset
+    /// that has already been through a sign-out still holds another account's
+    /// `/verification/me`, `/favorites` and friends on disk. There is no way to
+    /// evict by prefix, so this drops the cache wholesale, exactly once. The
+    /// cost is one round of image re-downloads; the alternative is leaving one
+    /// user's data answerable to the next.
+    private static func purgeLegacyAPIResponses() {
+        let key = "urlCachePurgedForAPILeak_v1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        URLCache.shared.removeAllCachedResponses()
+        UserDefaults.standard.set(true, forKey: key)
     }
 }
 

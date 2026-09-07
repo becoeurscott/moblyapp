@@ -180,6 +180,23 @@ final class ChatStore: ObservableObject {
 
     func stop() { socket.disconnect() }
 
+    /// Connect the socket if it isn't already.
+    ///
+    /// `connect()` no-ops when a socket is live, so this is safe to call
+    /// freely — on every foreground, and whenever a conversation opens.
+    ///
+    /// It exists because the socket used to be started in exactly one place:
+    /// sign-in. iOS suspends a backgrounded app and the connection dies with
+    /// it, and nothing reconnected on the way back except a network-reconnect
+    /// handler that only ran while the Messages tab was on screen. So a user
+    /// who opened support from Profil → Centre d'aide, or who simply came back
+    /// to the app, sat on a dead socket: replies existed on the server but
+    /// only appeared after something forced a refetch.
+    func ensureConnected() {
+        guard api.isAuthenticated else { return }
+        socket.connect()
+    }
+
     func reconnectSocket() {
         guard api.isAuthenticated else { return }
         socket.disconnect()

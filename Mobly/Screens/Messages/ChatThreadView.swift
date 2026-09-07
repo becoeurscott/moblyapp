@@ -258,6 +258,9 @@ struct ChatThreadView: View {
         .onAppear { recorder.requestPermissionIfNeeded() }
         .task {
             chat.activeThreadId = thread.id
+            // A conversation is exactly where a dead socket is most visible, so
+            // make sure there is one before the user starts waiting on a reply.
+            chat.ensureConnected()
             ThreadPrefs.shared.clearManualUnread(thread.id)
             await chat.loadMessages(threadId: thread.id)
             chat.markRead(threadId: thread.id)

@@ -67,6 +67,40 @@ final class IdentityVerificationStore: ObservableObject {
     /// True once the account carries the badge, from the server.
     @Published private(set) var isVerified = false
 
+    // MARK: - Account lifecycle
+
+    /// Wipe every trace of the previous account's check.
+    ///
+    /// This store is a singleton holding one user's KYC state, and none of it
+    /// is namespaced by user id. Without this, signing out and signing in as
+    /// someone else on the same handset — routine in this market — left the
+    /// new account looking at the old one's verification:
+    ///
+    ///   * a leftover `isVerified = true` hides the "Commencer" button
+    ///     entirely (`if !store.isVerified { startButton }`), so the second
+    ///     account simply cannot start a check;
+    ///   * a leftover PENDING shows "reprendre" with the previous user's
+    ///     countdown, and `hostedFlow` still holds their one-shot provider
+    ///     URL — a link into someone else's identity flow.
+    ///
+    /// Called from `AuthStore` on sign-out and whenever a session ends.
+    func clear() {
+        stopTicker()
+        status = .none
+        isVerified = false
+        isBusy = false
+        isRefreshing = false
+        reason = nil
+        errorMessage = nil
+        unavailable = false
+        incomplete = false
+        hostedFlow = nil
+        resumeDeadline = nil
+        resumeSecondsLeft = nil
+        clockSkew = 0
+        isPollingAfterFlow = false
+    }
+
     // MARK: - Actions
 
     /// Ask the backend for a session and hand back the hosted URL to present.
@@ -87,7 +121,13 @@ final class IdentityVerificationStore: ObservableObject {
             hostedFlow = HostedFlowLink(url: url)
         } catch let err as MoblyAPI.APIError {
             if err.status == 409 {
+                // "Votre identité est déjà vérifiée" — the only 409 this route
+                // raises. Refreshing alone left the button looking broken: the
+                // user taps, nothing visibly happens, and they tap again (the
+                // server logs show exactly that, right up to the rate limit).
+                // Re-read the truth AND say what happened.
                 await refresh()
+                if !isVerified { errorMessage = err.message }
             } else if err.status == 503 || err.code == .internalError {
                 unavailable = true
             } else {

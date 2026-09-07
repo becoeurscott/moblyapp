@@ -14,6 +14,8 @@ import {
   assertNotBlocked,
 } from '../middleware/gates';
 import { configSnapshot, getConfig, isFlagEnabled, flagMessage } from '../services/config';
+import { isSupportThread } from '../services/support';
+import { runSupportAgent, supportAgentReady } from '../services/supportAgent';
 
 export const chatRouter = Router();
 
@@ -378,6 +380,15 @@ chatRouter.post(
       void deliverPush(req.params.id, req.userId!, text).catch((err) =>
         console.error('[push] chat notification failed', err)
       );
+    }
+
+    // If this is the support desk, let the assistant have a go. Fire-and-forget
+    // and after the response, so a slow or failing model never delays — or
+    // fails — the user's own message. Worst case there is no automatic reply
+    // and the conversation waits for a human, which is where it would have
+    // been anyway.
+    if (supportAgentReady() && (await isSupportThread(req.params.id))) {
+      void runSupportAgent(req.params.id, req.userId!);
     }
   })
 );

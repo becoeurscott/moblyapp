@@ -494,15 +494,20 @@ model Review {
 // ─────────────────────────────────────────────────────────────
 
 model Thread {
-  id            String    @id @default(cuid())
-  listingId     String?
-  lastMessageAt DateTime?
+  id              String    @id @default(cuid())
+  listingId       String?
+  lastMessageAt   DateTime?
   /// Frozen by a moderator: the transcript stays readable but no new message
   /// is accepted (403 THREAD_FROZEN).
-  frozenAt      DateTime?
-  frozenReason  String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  frozenAt        DateTime?
+  frozenReason    String?
+  /// Set when the support assistant hands a conversation to a person — either
+  /// because it judged the question beyond what it should answer, or because
+  /// the user asked for a human. Cleared when someone replies.
+  escalatedAt     DateTime?
+  escalatedReason String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   listing      Listing?            @relation(fields: [listingId], references: [id], onDelete: SetNull)
   messages     Message[]

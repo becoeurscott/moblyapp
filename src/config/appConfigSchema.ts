@@ -106,6 +106,10 @@ export const flagsSchema = z
     /// The in-app support conversation. Off = the Help Center falls back to
     /// showing the support e-mail instead of opening a chat.
     'support.chat': flag(),
+    /// The support assistant. Off = conversations simply wait for a human.
+    /// It also stays off unless ANTHROPIC_API_KEY is set, so switching this on
+    /// without a key changes nothing.
+    'support.ai': flag(false),
     'notifications.push': flag(),
     'maps': flag(),
     'share': flag(),
@@ -148,6 +152,12 @@ export const limitsSchema = z
     favoritesMax: z.number().int().min(1).max(10_000).default(1_000),
     searchResultsMax: z.number().int().min(10).max(500).default(100),
     listingCacheTtlSec: z.number().int().min(0).max(3_600).default(60),
+  })
+  .default({});
+
+export const supportSchema = z
+  .object({
+    aiModel: z.string().max(60).default('claude-sonnet-5'),
   })
   .default({});
 
@@ -208,6 +218,10 @@ export const copySchema = z
         url: z.string().max(500).default(''),
       })
       .default({}),
+    /// Extra business context for the support assistant — tone, current
+    /// promotions, anything it should know. Appended to the safety rules,
+    /// which are compiled in and cannot be edited from here.
+    supportAiContext: z.string().max(4000).default(''),
     supportEmail: z.string().max(120).default('support@mobly.cm'),
     supportWhatsapp: z.string().max(40).default(''),
   })
@@ -327,6 +341,7 @@ export const appConfigSchema = z
     flags: flagsSchema,
     limits: limitsSchema,
     boost: boostSchema,
+    support: supportSchema,
     copy: copySchema,
     content: contentSchema,
     versions: versionsSchema,
@@ -346,7 +361,7 @@ export type FlagKey = keyof AppConfigDoc['flags'];
 /** Every section name, for `POST /admin/config/reset-section`. */
 export const CONFIG_SECTIONS = [
   'flags', 'limits', 'boost', 'copy', 'content',
-  'versions', 'geo', 'security', 'moderation', 'notifications',
+  'versions', 'geo', 'security', 'moderation', 'notifications', 'support',
 ] as const;
 export type ConfigSection = (typeof CONFIG_SECTIONS)[number];
 

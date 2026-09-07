@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
 import { signToken } from '../lib/jwt';
+import { issueSession } from '../services/session';
 import { createOtp, verifyOtp, otpLength } from '../services/otp';
 import { issueRefreshToken } from '../services/refresh';
 import { checkPassword, PASSWORD_RULE_MESSAGES } from '../lib/password';
@@ -210,8 +211,7 @@ signupRouter.post(
       },
     });
 
-    const token = signToken({ sub: user.id, phone: user.phone });
-    const refresh = await issueRefreshToken(user.id);
+    const { token, refresh } = await issueSession(user.id, user.phone, req);
     res.status(201).json({
       token,
       refreshToken: refresh.token,
@@ -343,8 +343,7 @@ signupRouter.post(
 
     const existing = await prisma.user.findUnique({ where: { email: identity.email } });
     if (existing) {
-      const token = signToken({ sub: existing.id, phone: existing.phone });
-      const refresh = await issueRefreshToken(existing.id);
+      const { token, refresh } = await issueSession(existing.id, existing.phone, req);
       return res.json({
         needsPhone: false,
         token,
@@ -467,8 +466,7 @@ signupRouter.post(
       },
     });
 
-    const token = signToken({ sub: user.id, phone: user.phone });
-    const refresh = await issueRefreshToken(user.id);
+    const { token, refresh } = await issueSession(user.id, user.phone, req);
     res.status(201).json({
       token,
       refreshToken: refresh.token,

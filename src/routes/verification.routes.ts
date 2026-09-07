@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
 import { requireAuth } from '../middleware/auth';
+import { featureGate, restrictionGate } from '../middleware/gates';
 import { createSession, retrieveDecision, mapStatus, verifyWebhook } from '../services/didit';
 import type { IdentityStatus } from '../services/didit';
 
@@ -47,6 +48,8 @@ const RESUME_WINDOW_MS = 30 * 60 * 1000;
 verificationRouter.post(
   '/session',
   requireAuth,
+  featureGate('identity.verification'),
+  restrictionGate('IDENTITY_VERIFY'),
   sessionLimiter,
   asyncHandler(async (req, res) => {
     const userId = req.userId!;

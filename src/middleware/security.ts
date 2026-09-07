@@ -2,6 +2,8 @@ import rateLimit, { type Options } from 'express-rate-limit';
 import type { Request, Response, NextFunction } from 'express';
 import { randomUUID } from 'node:crypto';
 import { env } from '../config/env';
+import { configSnapshot } from '../services/config';
+import { RATE_LIMIT_WINDOW_MS, type AppConfigDoc } from '../config/appConfigSchema';
 
 /**
  * Rate limiters.
@@ -17,6 +19,23 @@ import { env } from '../config/env';
  * NOTE: this store is in-process. Running more than one instance means each
  * gets its own counters — move to `rate-limit-redis` before scaling out.
  */
+
+/**
+ * Read one limiter's ceiling from the live configuration.
+ *
+ * `express-rate-limit` re-evaluates a function-valued `limit` on every request,
+ * so an operator raising a limit from the dashboard takes effect on the next
+ * call — no restart, no redeploy. The lookup has to be synchronous, which is
+ * why `configSnapshot()` exists alongside the async `getConfig()`.
+ *
+ * `windowMs` is read once at construction by the library, so it stays fixed.
+ */
+type LimiterName = keyof AppConfigDoc['limits']['rateLimits'];
+
+const fromConfig = (name: LimiterName): Partial<Options> => ({
+  windowMs: RATE_LIMIT_WINDOW_MS,
+  limit: () => configSnapshot().limits.rateLimits[name],
+});
 
 const common: Partial<Options> = {
   standardHeaders: 'draft-7', // RateLimit-* response headers
@@ -34,8 +53,7 @@ const common: Partial<Options> = {
 /** Broad ceiling on the whole API. */
 export const globalLimiter = rateLimit({
   ...common,
-  windowMs: 15 * 60 * 1000,
-  limit: 300,
+  ...fromConfig('global'),
   // Health checks shouldn't burn budget.
   skip: (req) => req.path === '/health',
 });
@@ -43,15 +61,13 @@ export const globalLimiter = rateLimit({
 /** Anything that creates a session. */
 export const authLimiter = rateLimit({
   ...common,
-  windowMs: 15 * 60 * 1000,
-  limit: 20,
+  ...fromConfig('auth'),
 });
 
 /** Sending an SMS costs money — keep this tight per IP. */
 export const otpRequestLimiter = rateLimit({
   ...common,
-  windowMs: 15 * 60 * 1000,
-  limit: 5,
+  ...fromConfig('otpRequest'),
   handler: (_req, res) => {
     res.status(429).json({
       error: 'Trop de demandes de code. Patientez quelques minutes.',
@@ -71,8 +87,7 @@ export const otpRequestLimiter = rateLimit({
  */
 export const smsSendLimiter = rateLimit({
   ...common,
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
+  ...fromConfig('smsSend'),
   skipFailedRequests: true, // 4xx/5xx don't consume the budget
   handler: (_req, res) => {
     res.status(429).json({
@@ -85,8 +100,7 @@ export const smsSendLimiter = rateLimit({
 /** Guessing a code. Deliberately the tightest limit in the app. */
 export const otpVerifyLimiter = rateLimit({
   ...common,
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
+  ...fromConfig('otpVerify'),
   handler: (_req, res) => {
     res.status(429).json({
       error: 'Trop de tentatives. Demandez un nouveau code.',
@@ -98,8 +112,7 @@ export const otpVerifyLimiter = rateLimit({
 /** Writes are cheap to make and expensive to clean up. */
 export const writeLimiter = rateLimit({
   ...common,
-  windowMs: 15 * 60 * 1000,
-  limit: 60,
+  ...fromConfig('write'),
 });
 
 /**

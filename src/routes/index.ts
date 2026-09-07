@@ -16,7 +16,10 @@ import { adminRouter } from './admin.routes';
 import { cronRouter } from './cron.routes';
 import { verificationRouter } from './verification.routes';
 import { maintenanceRouter } from './maintenance.routes';
+import { configRouter } from './config.routes';
+import { reportsRouter } from './reports.routes';
 import { maintenanceGate } from '../middleware/maintenance';
+import { versionGate } from '../middleware/gates';
 
 export const api = Router();
 
@@ -27,7 +30,13 @@ api.get('/health', (_req, res) => res.json({ ok: true, service: 'mobly-backend' 
 // mounted before the gate as well as allow-listed inside it.
 api.use(maintenanceGate);
 
+// Then the minimum-version gate. After maintenance (a down app is down for
+// every build) and before everything else, so an obsolete client is told to
+// update rather than failing in odd ways deeper in.
+api.use(versionGate);
+
 api.use('/maintenance', maintenanceRouter); // public: is the app down, until when
+api.use('/config', configRouter); // public: feature flags, limits, copy, versions
 
 api.use('/auth', authRouter);
 api.use('/auth', oauthRouter);   // /auth/apple, /auth/google (later)
@@ -50,4 +59,5 @@ api.use('/notifications', notificationsRouter);
 api.use('/users', usersRouter);
 api.use('/cron', cronRouter);
 api.use('/verification', verificationRouter); // Didit KYC: session, status, webhook
+api.use('/reports', reportsRouter);           // users flag a listing/user/message/review
 api.use('/', miscRouter); // /geo, /categories

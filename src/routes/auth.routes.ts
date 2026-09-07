@@ -4,6 +4,10 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
 import { signToken } from '../lib/jwt';
+import { issueSession } from '../services/session';
+import { assertCanLogin, serializeRestriction } from '../services/restrictions';
+import { configSnapshot, getConfig, isFlagEnabled, flagMessage } from '../services/config';
+import { restrictionGate, callerRestricted, assertNotBlocked } from '../middleware/gates';
 import { createOtp, verifyOtp, otpLength } from '../services/otp';
 import {
   issueRefreshToken,
@@ -105,8 +109,7 @@ authRouter.post(
       });
     }
 
-    const token = signToken({ sub: user.id, phone: user.phone });
-    const refresh = await issueRefreshToken(user.id);
+    const { token, refresh } = await issueSession(user.id, user.phone, req);
     res.json({
       token,
       refreshToken: refresh.token,
@@ -171,8 +174,36 @@ authRouter.post(
       );
     }
 
+    // Refuse before spending a hash if the account is already locked out —
+    // otherwise an attacker's guesses keep costing us bcrypt work for free.
+    await assertCanLogin(user);
+
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) {
+      // Per-account lockout, complementing the per-IP `authLimiter`. An
+      // attacker spreading guesses across many IPs slips past a rate limit but
+      // still burns this counter, which follows the account rather than the
+      // origin. `maxFails: 0` in the config disables it entirely.
+      const { maxFails, lockMinutes } = configSnapshot().security.lockout;
+      if (maxFails > 0) {
+        const fails = user.failedLoginCount + 1;
+        const locked = fails >= maxFails;
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            failedLoginCount: locked ? 0 : fails,
+            lockedUntil: locked ? new Date(Date.now() + lockMinutes * 60_000) : null,
+          },
+        });
+        if (locked) {
+          throw new ApiError(
+            403,
+            `Trop de tentatives. Compte bloqué ${lockMinutes} minutes.`,
+            'ACCOUNT_LOCKED'
+          );
+        }
+      }
+
       const err = new ApiError(401, 'Mot de passe incorrect', 'INVALID_PASSWORD');
       (err as ApiError & { fields?: Record<string, string> }).fields = {
         password: 'Mot de passe incorrect',
@@ -180,8 +211,16 @@ authRouter.post(
       throw err;
     }
 
-    const token = signToken({ sub: user.id, phone: user.phone });
-    const refresh = await issueRefreshToken(user.id);
+    // A good password clears the counter: lockout must punish sustained
+    // guessing, not someone who mistyped twice over a month.
+    if (user.failedLoginCount > 0 || user.lockedUntil) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginCount: 0, lockedUntil: null },
+      });
+    }
+
+    const { token, refresh } = await issueSession(user.id, user.phone, req);
     res.json({
       token,
       refreshToken: refresh.token,
@@ -207,7 +246,11 @@ authRouter.post(
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new ApiError(401, 'Session invalide', 'UNAUTHENTICATED');
 
-    const token = signToken({ sub: user.id, phone: user.phone });
+    // Carries the current token version, so a session refreshed after an admin
+    // forced a logout still comes back invalid on the next request rather than
+    // quietly re-arming itself. (`rotateRefreshToken` has already refused the
+    // rotation outright for a suspended or banned account.)
+    const token = signToken({ sub: user.id, phone: user.phone, tv: user.tokenVersion });
     res.json({
       token,
       refreshToken: refresh.token,
@@ -246,7 +289,13 @@ authRouter.get(
   asyncHandler(async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.userId! } });
     if (!user) throw new ApiError(404, 'Utilisateur introuvable', 'NOT_FOUND');
-    res.json({ user: serializeUser(user) });
+    // Restrictions ride along so the app can disable the controls it must not
+    // offer, instead of letting the user tap and collect a 403. `requireAuth`
+    // already loaded them, so this costs nothing.
+    res.json({
+      user: serializeUser(user),
+      restrictions: (req.restrictions ?? []).map(serializeRestriction),
+    });
   })
 );
 
@@ -254,6 +303,7 @@ authRouter.get(
 authRouter.patch(
   '/me',
   requireAuth,
+  restrictionGate('PROFILE_EDIT'),
   asyncHandler(async (req, res) => {
     const body = z
       .object({
@@ -271,6 +321,31 @@ authRouter.patch(
         region: z.string().trim().min(1).max(80).optional(),
       })
       .parse(req.body);
+
+    // Becoming a propriétaire is a role change, not a profile edit: it opens
+    // the publishing surface, so it carries its own switch, its own
+    // restriction, and — when `owners.identityRequired` is on — the KYC check.
+    // Enforcing it here as well as on `POST /listings` means an account can
+    // never *hold* the owner role without having passed verification, rather
+    // than merely being stopped at the moment it tries to publish.
+    if (body.isOwner === true && !req.user?.isOwner) {
+      const doc = await getConfig();
+      if (!isFlagEnabled('owners.signup', doc)) {
+        throw new ApiError(403, flagMessage('owners.signup', doc), 'FEATURE_DISABLED');
+      }
+      if (await callerRestricted(req, 'BECOME_OWNER')) {
+        throw new ApiError(403, 'Vous ne pouvez pas devenir propriétaire.', 'USER_RESTRICTED');
+      }
+      if (isFlagEnabled('owners.identityRequired', doc) && !req.user?.identityVerified) {
+        throw new ApiError(
+          403,
+          "Vérifiez votre identité pour devenir propriétaire.",
+          'IDENTITY_REQUIRED'
+        );
+      }
+    }
+
+    if (body.fullName) assertNotBlocked(body.fullName);
 
     const user = await prisma.user.update({
       where: { id: req.userId! },
@@ -411,8 +486,7 @@ authRouter.post(
     // attacker's refresh token must not survive the password change.
     await revokeAllForUser(user.id);
 
-    const token = signToken({ sub: user.id, phone: user.phone });
-    const refresh = await issueRefreshToken(user.id);
+    const { token, refresh } = await issueSession(user.id, user.phone, req);
     res.json({
       token,
       refreshToken: refresh.token,

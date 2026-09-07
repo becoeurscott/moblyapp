@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { asyncHandler } from '../lib/http';
 import { requireAuth } from '../middleware/auth';
+import { featureGate, restrictionGate } from '../middleware/gates';
 import { serializeListing } from '../lib/serialize';
 
 export const favoritesRouter = Router();
@@ -28,6 +29,8 @@ favoritesRouter.get(
 favoritesRouter.post(
   '/:listingId',
   requireAuth,
+  featureGate('favorites'),
+  restrictionGate('FAVORITE'),
   asyncHandler(async (req, res) => {
     const { listingId } = req.params;
     await prisma.favorite.upsert({

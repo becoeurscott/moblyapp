@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma';
 import { ApiError } from '../lib/http';
 import { env } from '../config/env';
+import { assertCanLogin } from './restrictions';
 
 /**
  * Rotating refresh tokens with reuse detection.
@@ -39,14 +40,30 @@ export interface IssuedRefresh {
   expiresAt: Date;
 }
 
+/** Where a session was born, for the admin session list. */
+export interface SessionMeta {
+  ip?: string | null;
+  userAgent?: string | null;
+}
+
 /** Start a new token family (called on fresh login). */
-export async function issueRefreshToken(userId: string): Promise<IssuedRefresh> {
+export async function issueRefreshToken(
+  userId: string,
+  meta: SessionMeta = {}
+): Promise<IssuedRefresh> {
   const token = newToken();
   const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
   const familyId = randomBytes(16).toString('hex');
 
   await prisma.refreshToken.create({
-    data: { userId, tokenHash: hash(token), familyId, expiresAt },
+    data: {
+      userId,
+      tokenHash: hash(token),
+      familyId,
+      expiresAt,
+      ip: meta.ip ?? null,
+      userAgent: meta.userAgent ?? null,
+    },
   });
   return { token, expiresAt };
 }
@@ -77,6 +94,17 @@ export async function rotateRefreshToken(
     throw new ApiError(401, 'Session expirée, reconnectez-vous', 'UNAUTHENTICATED');
   }
 
+  // Refresh is the loophole that made suspension cosmetic: a banned user whose
+  // access token expired would simply mint a new one here. The account is
+  // re-checked on every rotation, so a ban takes hold within one token
+  // lifetime at the very worst, and immediately once `tokenVersion` is bumped.
+  const owner = await prisma.user.findUnique({
+    where: { id: existing.userId },
+    select: { id: true, isActive: true, lockedUntil: true },
+  });
+  if (!owner) throw new ApiError(401, 'Session invalide', 'UNAUTHENTICATED');
+  await assertCanLogin(owner);
+
   const replacement = newToken();
   const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 
@@ -94,6 +122,10 @@ export async function rotateRefreshToken(
         familyId: existing.familyId,
         parentId: existing.id,
         expiresAt,
+        // Carried forward so the session keeps the origin it was born with —
+        // rotations happen in the background and would otherwise overwrite it.
+        ip: existing.ip,
+        userAgent: existing.userAgent,
       },
     }),
   ]);

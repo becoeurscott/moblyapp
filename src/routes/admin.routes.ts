@@ -4,9 +4,32 @@ import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
 import { requireAuth, requireAdmin } from '../middleware/auth';
 import { notifyUser, pushConfigured } from '../services/push';
+import { adminIpGate, adminWriteLimiter } from '../middleware/adminSecurity';
+import { adminUsersRouter } from './admin/users.routes';
+import { adminConfigRouter } from './admin/config.routes';
+import { adminModerationRouter } from './admin/moderation.routes';
+import { adminSecurityRouter } from './admin/security.routes';
+import { adminSystemRouter } from './admin/system.routes';
 
 export const adminRouter = Router();
-adminRouter.use(requireAuth, requireAdmin);
+
+/**
+ * Order matters here. Identify the caller, confirm they are an admin, then
+ * check where they are calling from and how fast — an IP check is meaningless
+ * before we know who is asking, and rate limiting an anonymous request would
+ * let one attacker exhaust an admin's quota.
+ */
+adminRouter.use(requireAuth, requireAdmin, adminIpGate, adminWriteLimiter);
+
+// Remote-control surface, split by concern. Mounted before the legacy routes
+// below so the more specific paths (/users/:id/restrictions) are matched by
+// their own router rather than falling into the generic handlers.
+adminRouter.use('/config', adminConfigRouter);
+adminRouter.use('/security', adminSecurityRouter);
+adminRouter.use('/system', adminSystemRouter);
+adminRouter.use('/moderation', adminModerationRouter);
+adminRouter.use('/users', adminUsersRouter);
+adminRouter.use('/restrictions', adminUsersRouter);
 
 // ═════════════════════════════════════════════════════════════
 // Overview + analytics

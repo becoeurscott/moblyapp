@@ -17,7 +17,7 @@ import { getMaintenance } from '../services/maintenance';
  *                     on the very next call.
  *  - `/admin`       — the dashboard itself.
  */
-const ALLOW_PREFIXES = ['/health', '/maintenance', '/auth', '/admin'];
+const ALLOW_PREFIXES = ['/health', '/maintenance', '/config', '/auth', '/admin'];
 
 /** True when the caller presents a valid token belonging to an admin. */
 async function isAdminRequest(req: Request): Promise<boolean> {

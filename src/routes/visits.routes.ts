@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
 import { requireAuth, requireOwner } from '../middleware/auth';
 import { writeLimiter } from '../middleware/security';
+import { featureGate, restrictionGate } from '../middleware/gates';
 import { notifyUser } from '../services/push';
 import { broadcastMessage } from '../realtime/hub';
 
@@ -129,6 +130,8 @@ function serializeVisit(v: any) {
 listingVisitsRouter.post(
   '/',
   requireAuth,
+  featureGate('visits.request'),
+  restrictionGate('VISIT_REQUEST'),
   writeLimiter,
   asyncHandler(async (req, res) => {
     const parsed = z
@@ -193,6 +196,8 @@ listingVisitsRouter.post(
   '/invite',
   requireAuth,
   requireOwner,
+  featureGate('visits.invite'),
+  restrictionGate('VISIT_REQUEST'),
   writeLimiter,
   asyncHandler(async (req, res) => {
     const parsed = z

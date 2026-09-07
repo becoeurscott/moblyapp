@@ -29,16 +29,43 @@ export type ErrorCode =
   | 'OTP_EXPIRED'
   | 'OTP_LOCKED'
   | 'OWNER_REQUIRED'
+  | 'IDENTITY_REQUIRED'
   | 'CONFLICT'
   | 'MAINTENANCE'
+  // Remote control. The app branches on these to disable a control, show the
+  // admin's own French sentence, sign the user out, or force an update.
+  | 'FEATURE_DISABLED'
+  | 'USER_RESTRICTED'
+  | 'ACCOUNT_SUSPENDED'
+  | 'ACCOUNT_LOCKED'
+  | 'THREAD_FROZEN'
+  | 'CONTENT_BLOCKED'
+  | 'FORCE_UPDATE'
+  | 'ROLE_REQUIRED'
+  | 'ADMIN_IP_BLOCKED'
+  | 'CONFIRMATION_REQUIRED'
+  | 'LIMIT_REACHED'
   | 'INTERNAL';
 
 export class ApiError extends Error {
   status: number;
   code: ErrorCode;
-  constructor(status: number, message: string, code: ErrorCode = 'INTERNAL') {
+  /**
+   * Extra fields merged into the JSON body. Used to carry the detail the app
+   * needs to act on an error rather than merely display it — when a
+   * restriction expires, which store URL to open on a forced update.
+   */
+  extra?: Record<string, unknown>;
+
+  constructor(
+    status: number,
+    message: string,
+    code: ErrorCode = 'INTERNAL',
+    extra?: Record<string, unknown>
+  ) {
     super(message);
     this.status = status;
     this.code = code;
+    this.extra = extra;
   }
 }

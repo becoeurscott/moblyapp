@@ -6,6 +6,13 @@ import { requireAuth } from '../middleware/auth';
 import { writeLimiter } from '../middleware/security';
 import { broadcastMessage, isOnline, emitToUsers } from '../realtime/hub';
 import { notifyUser } from '../services/push';
+import {
+  featureGate,
+  restrictionGate,
+  callerRestricted,
+  assertNotBlocked,
+} from '../middleware/gates';
+import { configSnapshot, getConfig, isFlagEnabled, flagMessage } from '../services/config';
 
 export const chatRouter = Router();
 
@@ -105,6 +112,8 @@ chatRouter.get(
 chatRouter.post(
   '/',
   requireAuth,
+  featureGate('chat.enabled'),
+  restrictionGate('CONTACT_OWNER'),
   writeLimiter,
   asyncHandler(async (req, res) => {
     const { listingId, otherUserId } = z
@@ -293,12 +302,14 @@ chatRouter.get(
 chatRouter.post(
   '/:id/messages',
   requireAuth,
+  featureGate('chat.send'),
+  restrictionGate('MESSAGE_SEND'),
   writeLimiter,
   asyncHandler(async (req, res) => {
     await assertParticipant(req.params.id, req.userId!);
     const { text, clientId, kind, mediaUrl, durationSec, replyToId } = z
       .object({
-        text: z.string().min(1).max(4000),
+        text: z.string().min(1).max(configSnapshot().limits.messageMaxLength),
         clientId: z.string().min(1).max(64).optional(),
         kind: z.enum(['TEXT', 'IMAGE', 'VOICE', 'SYSTEM']).default('TEXT'),
         mediaUrl: z.string().url().optional(),
@@ -306,6 +317,39 @@ chatRouter.post(
         replyToId: z.string().optional(),
       })
       .parse(req.body);
+
+    // A frozen thread stays readable but accepts nothing new — the moderation
+    // equivalent of closing a comment section rather than deleting it.
+    const thread = await prisma.thread.findUnique({
+      where: { id: req.params.id },
+      select: { frozenAt: true, frozenReason: true },
+    });
+    if (thread?.frozenAt) {
+      throw new ApiError(
+        403,
+        thread.frozenReason || 'Cette conversation a été gelée par un modérateur.',
+        'THREAD_FROZEN'
+      );
+    }
+
+    // Media and voice are separately switchable, so an operator can keep text
+    // chat running while turning off the expensive or abusable parts.
+    if (kind === 'IMAGE' || kind === 'VOICE') {
+      const doc = await getConfig();
+      const mediaFlag = kind === 'VOICE' ? 'chat.voice' : 'chat.media';
+      if (!isFlagEnabled(mediaFlag, doc)) {
+        throw new ApiError(403, flagMessage(mediaFlag, doc), 'FEATURE_DISABLED');
+      }
+      if (await callerRestricted(req, 'MESSAGE_MEDIA')) {
+        throw new ApiError(
+          403,
+          'Vous ne pouvez plus envoyer de photos ou de vocaux.',
+          'USER_RESTRICTED'
+        );
+      }
+    }
+
+    assertNotBlocked(text);
 
     // A retry after a timeout must resolve to the message already stored,
     // rather than posting it a second time.
@@ -344,15 +388,26 @@ chatRouter.post(
     ]);
 
     const payload = serializeMessage(message);
-    await broadcastMessage(req.params.id, { ...payload, senderId: req.userId! });
+
+    // Shadow ban: the message is stored and echoed back so the sender sees a
+    // normal, successful send, but it is never delivered to anyone else. The
+    // point is to make persistent spammers waste their effort instead of
+    // immediately registering a new account, which is what an obvious block
+    // teaches them to do.
+    const shadowBanned = await callerRestricted(req, 'SHADOW_BAN');
+    if (!shadowBanned) {
+      await broadcastMessage(req.params.id, { ...payload, senderId: req.userId! });
+    }
 
     // Respond first — delivery must not wait on APNs, and a push failure must
     // never fail a message that is already saved and broadcast.
     res.status(201).json({ message: payload });
 
-    void deliverPush(req.params.id, req.userId!, text).catch((err) =>
-      console.error('[push] chat notification failed', err)
-    );
+    if (!shadowBanned) {
+      void deliverPush(req.params.id, req.userId!, text).catch((err) =>
+        console.error('[push] chat notification failed', err)
+      );
+    }
   })
 );
 

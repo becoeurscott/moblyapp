@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
-import { asyncHandler } from '../lib/http';
+import { asyncHandler, ApiError } from '../lib/http';
 import { requireAuth } from '../middleware/auth';
+import { broadcastReview } from '../realtime/hub';
+import { featureGate, restrictionGate, assertNotBlocked } from '../middleware/gates';
+import { configSnapshot } from '../services/config';
 
 // Static reference data used by the app's pickers.
 const REGIONS = [
@@ -83,23 +86,51 @@ reviewsRouter.get(
 reviewsRouter.post(
   '/:id/reviews',
   requireAuth,
+  featureGate('reviews.post'),
+  restrictionGate('REVIEW_POST'),
   asyncHandler(async (req, res) => {
+    const limits = configSnapshot().limits;
     const { rating, text } = z
-      .object({ rating: z.number().int().min(1).max(5), text: z.string().optional() })
+      .object({
+        rating: z.number().int().min(1).max(5),
+        text: z.string().max(limits.reviewMaxChars).optional(),
+      })
       .parse(req.body);
-    const review = await prisma.review.create({
-      data: { listingId: req.params.id, userId: req.userId!, rating, text },
+
+    // A configurable floor on review length. Set above zero to stop one-word
+    // "ok" reviews from being farmed to inflate a listing's rating.
+    if (limits.reviewMinChars > 0 && (text ?? '').trim().length < limits.reviewMinChars) {
+      throw new ApiError(
+        422,
+        `Votre avis doit faire au moins ${limits.reviewMinChars} caractères.`,
+        'VALIDATION_FAILED'
+      );
+    }
+    assertNotBlocked(text);
+    const listingId = req.params.id;
+    const userId = req.userId!;
+
+    const existing = await prisma.review.findUnique({
+      where: { listingId_userId: { listingId, userId } },
     });
-    // Recompute listing rating.
+    if (existing) throw new ApiError(409, 'Vous avez déjà laissé un avis', 'CONFLICT');
+
+    const review = await prisma.review.create({
+      data: { listingId, userId, rating, text },
+      include: { user: { select: { id: true, fullName: true, avatarUrl: true } } },
+    });
+
     const agg = await prisma.review.aggregate({
-      where: { listingId: req.params.id },
+      where: { listingId },
       _avg: { rating: true },
       _count: true,
     });
     await prisma.listing.update({
-      where: { id: req.params.id },
+      where: { id: listingId },
       data: { rating: agg._avg.rating ?? null, reviewCount: agg._count },
     });
+
+    broadcastReview(listingId, review as unknown as Record<string, unknown>);
     res.status(201).json({ review });
   })
 );

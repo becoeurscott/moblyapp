@@ -4,6 +4,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import { asyncHandler, ApiError } from '../lib/http';
 import { requireAuth, requireOwner } from '../middleware/auth';
 import { writeLimiter } from '../middleware/security';
+import { restrictionGate } from '../middleware/gates';
 import { env } from '../config/env';
 
 export const uploadsRouter = Router();
@@ -83,6 +84,7 @@ uploadsRouter.post(
   '/photos',
   requireAuth,
   requireOwner,
+  restrictionGate('LISTING_EDIT'),
   writeLimiter,
   upload.array('photos', 30),
   asyncHandler(async (req, res) => {
@@ -109,6 +111,7 @@ uploadsRouter.post(
 uploadsRouter.post(
   '/avatar',
   requireAuth,
+  restrictionGate('AVATAR_UPLOAD'),
   writeLimiter,
   upload.single('avatar'),
   asyncHandler(async (req, res) => {

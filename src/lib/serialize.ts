@@ -80,6 +80,11 @@ export function serializeUser(u: User) {
     avatarUrl: u.avatarUrl,
     avatarColor: u.avatarColor,
     isAdmin: u.isAdmin,
+    adminRole: u.adminRole,
+    bio: u.bio,
+    locale: u.locale,
+    membershipTier: u.membershipTier,
+    moblyScore: u.moblyScore,
     createdAt: u.createdAt,
   };
 }

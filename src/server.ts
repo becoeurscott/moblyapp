@@ -2,8 +2,14 @@ import { createApp } from './app';
 import { env } from './config/env';
 import { prisma } from './lib/prisma';
 import { attachRealtime } from './realtime/hub';
+import { primeConfig } from './services/config';
 
 const app = createApp();
+
+// Load the remote configuration before serving. The rate limiters and the
+// socket hub read it synchronously, so without this the first requests after a
+// deploy would run on the built-in defaults instead of the operator's settings.
+primeConfig().catch((err) => console.error('[config] prime failed:', err));
 
 const server = app.listen(env.port, () => {
   console.log(

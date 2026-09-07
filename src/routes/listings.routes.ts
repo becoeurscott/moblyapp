@@ -3,9 +3,17 @@ import { z } from 'zod';
 import { Prisma, DealType, ListingStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
-import { optionalAuth, requireAuth, requireOwner } from '../middleware/auth';
+import { optionalAuth, requireAuth, requireOwner, requireVerified } from '../middleware/auth';
 import { serializeListing } from '../lib/serialize';
 import { cacheGet, cacheSet, cacheBust } from '../lib/cache';
+import {
+  featureGate,
+  restrictionGate,
+  conditionalGate,
+  assertNotBlocked,
+  assertMax,
+} from '../middleware/gates';
+import { configSnapshot } from '../services/config';
 
 export const listingsRouter = Router();
 
@@ -72,11 +80,29 @@ listingsRouter.get(
       ];
     }
 
+    // Hide the listings of shadow-banned owners from public search. They stay
+    // visible to their owner, who sees a normal-looking annonce and therefore
+    // has no signal to go and register a fresh account.
+    const shadowBanned = await prisma.userRestriction.findMany({
+      where: {
+        kind: 'SHADOW_BAN',
+        revokedAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
+      select: { userId: true },
+    });
+    if (shadowBanned.length) {
+      where.ownerId = { notIn: shadowBanned.map((r) => r.userId) };
+    }
+
     const [items, total] = await Promise.all([
       prisma.listing.findMany({
         where,
         include: ownerSelect,
-        orderBy: [{ createdAt: 'desc' }],
+        // Editorially pinned annonces first, then newest. `nulls: 'last'` is
+        // required — without it Postgres sorts NULLs first on a DESC order and
+        // every unpinned listing would outrank the pinned ones.
+        orderBy: [{ pinnedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
         skip: q.offset,
         take: q.limit,
       }),
@@ -153,8 +179,51 @@ listingsRouter.post(
   '/',
   requireAuth,
   requireOwner,
+  featureGate('listings.publish'),
+  restrictionGate('LISTING_PUBLISH'),
+  // Identity verification, but only while the `owners.identityRequired` switch
+  // is on. Keeping the requirement in configuration rather than in code means
+  // it can be relaxed for a launch push and restored afterwards without a
+  // deploy — which is exactly the kind of decision that changes under pressure.
+  conditionalGate('owners.identityRequired', requireVerified),
   asyncHandler(async (req, res) => {
     const body = listingBody.parse(req.body);
+    const limits = configSnapshot().limits;
+
+    assertNotBlocked(body.title);
+    assertNotBlocked(body.about);
+    assertMax(body.photos.length, limits.maxPhotosPerListing,
+      `Maximum ${limits.maxPhotosPerListing} photos par annonce.`);
+
+    if (body.priceFcfa < limits.priceMinFcfa || body.priceFcfa > limits.priceMaxFcfa) {
+      throw new ApiError(
+        422,
+        `Le prix doit être entre ${limits.priceMinFcfa.toLocaleString('fr-FR')} et ` +
+          `${limits.priceMaxFcfa.toLocaleString('fr-FR')} FCFA.`,
+        'VALIDATION_FAILED'
+      );
+    }
+
+    // Cap how many annonces one account can hold. Without it a single owner
+    // can flood search results, which is the cheapest way to ruin a young
+    // marketplace. Archived listings don't count against the quota.
+    const owned = await prisma.listing.count({
+      where: { ownerId: req.userId!, status: { not: 'ARCHIVED' } },
+    });
+    assertMax(owned + 1, limits.maxListingsPerOwner,
+      `Vous avez atteint la limite de ${limits.maxListingsPerOwner} annonces.`);
+
+    // An operator can restrict the marketplace to a set of cities — useful for
+    // a city-by-city launch. Empty list means everywhere.
+    const allowed = configSnapshot().geo.allowedCities;
+    if (allowed.length && !allowed.includes(body.city)) {
+      throw new ApiError(
+        422,
+        `Mobly n’est pas encore disponible à ${body.city}.`,
+        'VALIDATION_FAILED'
+      );
+    }
+
     const listing = await prisma.listing.create({
       data: { ...body, ownerId: req.userId!, status: 'PENDING' },
       include: ownerSelect,
@@ -176,9 +245,13 @@ listingsRouter.patch(
   '/:id',
   requireAuth,
   requireOwner,
+  featureGate('listings.edit'),
+  restrictionGate('LISTING_EDIT'),
   asyncHandler(async (req, res) => {
     await assertOwnership(req.params.id, req.userId!);
     const body = listingBody.partial().parse(req.body);
+    assertNotBlocked(body.title);
+    assertNotBlocked(body.about);
     const listing = await prisma.listing.update({
       where: { id: req.params.id },
       data: body,
@@ -194,6 +267,7 @@ listingsRouter.patch(
   '/:id/availability',
   requireAuth,
   requireOwner,
+  restrictionGate('LISTING_EDIT'),
   asyncHandler(async (req, res) => {
     await assertOwnership(req.params.id, req.userId!);
     const { available } = z.object({ available: z.boolean() }).parse(req.body);

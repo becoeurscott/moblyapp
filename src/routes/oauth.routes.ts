@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
 import { signToken } from '../lib/jwt';
+import { issueSession } from '../services/session';
 import { issueRefreshToken } from '../services/refresh';
 import { serializeUser } from '../lib/serialize';
 import { authLimiter } from '../middleware/security';
@@ -94,8 +95,7 @@ oauthRouter.post(
       });
     }
 
-    const token = signToken({ sub: user.id, phone: user.phone });
-    const refresh = await issueRefreshToken(user.id);
+    const { token, refresh } = await issueSession(user.id, user.phone, req);
     res.json({
       token,
       refreshToken: refresh.token,
@@ -166,8 +166,7 @@ oauthRouter.post(
       });
     }
 
-    const token = signToken({ sub: user.id, phone: user.phone });
-    const refresh = await issueRefreshToken(user.id);
+    const { token, refresh } = await issueSession(user.id, user.phone, req);
     res.json({
       token,
       refreshToken: refresh.token,

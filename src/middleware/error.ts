@@ -22,6 +22,9 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
       error: err.message,
       code: err.code,
       ...(fields ? { fields } : {}),
+      // Actionable detail the client needs beyond the message: when a
+      // restriction lapses, which store URL to open, and so on.
+      ...(err.extra ?? {}),
       requestId,
     });
   }

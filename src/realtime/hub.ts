@@ -2,6 +2,8 @@ import { WebSocketServer, WebSocket, RawData } from 'ws';
 import type { Server } from 'node:http';
 import { verifyToken } from '../lib/jwt';
 import { prisma } from '../lib/prisma';
+import { hasRestriction } from '../services/restrictions';
+import { configSnapshot, isFlagEnabled, flagMessage } from '../services/config';
 
 /**
  * Real-time delivery for chat.
@@ -38,7 +40,26 @@ export type ServerEvent =
   | { type: 'call:incoming'; callId: string; threadId: string; from: { id: string; name: string }; isVideo: boolean }
   | { type: 'call:accepted'; callId: string }
   | { type: 'call:rejected'; callId: string }
-  | { type: 'call:ended'; callId: string };
+  | { type: 'call:ended'; callId: string }
+  | { type: 'review'; listingId: string; review: unknown }
+  | { type: 'notification'; notification: unknown }
+  // ── Remote control ────────────────────────────────────────
+  /** The configuration changed; the app refetches `GET /config`. */
+  | { type: 'config'; version: number }
+  /** A restriction was granted or lifted on the receiving user. */
+  | {
+      type: 'restriction';
+      kind: string;
+      active: boolean;
+      reason: string | null;
+      expiresAt: string | null;
+    }
+  /** Identity/role/suspension state changed; the app refetches `/auth/me`. */
+  | { type: 'account'; identityVerified?: boolean; reason?: string | null }
+  /** The session was terminated by an admin. The socket closes right after. */
+  | { type: 'kicked'; reason: string }
+  | { type: 'message:deleted'; threadId: string; messageId: string }
+  | { type: 'thread:frozen'; threadId: string; frozen: boolean; reason: string | null };
 
 interface Client {
   socket: WebSocket;
@@ -132,6 +153,73 @@ export async function broadcastMessage(
   emitToUsers(recipients, { type: 'message', threadId, message });
 }
 
+/** Push an event to every live socket, whoever it belongs to. */
+export function broadcastAll(event: ServerEvent) {
+  for (const [, clients] of byUser) {
+    for (const c of clients) send(c.socket, event);
+  }
+}
+
+/**
+ * Deliver a notification to one user's open sessions.
+ *
+ * Push alone is not enough: it is silently dropped for a user who is already
+ * in the app, and it never arrives at all on a simulator or an account with no
+ * registered device. Without this the bell only updated when something
+ * happened to re-fetch the list, so a broadcast sent from the admin dashboard
+ * appeared to do nothing until the user pulled to refresh.
+ */
+export function broadcastNotification(userId: string, notification: Record<string, unknown>) {
+  emitToUsers([userId], { type: 'notification', notification });
+}
+
+/** Broadcast a new review to every connected user (the client filters by listingId). */
+export function broadcastReview(listingId: string, review: Record<string, unknown>) {
+  broadcastAll({ type: 'review', listingId, review });
+}
+
+/** Tell every connected app that the configuration moved on. */
+export function broadcastConfig(version: number) {
+  broadcastAll({ type: 'config', version });
+}
+
+/**
+ * Close every socket a user holds.
+ *
+ * Used when an admin bans an account or forces a logout: without this the
+ * user's websocket would keep delivering messages and calls until they happened
+ * to reconnect. The `kicked` event goes out first so the app can show why,
+ * then the socket closes with 4403 — a code the client treats as deliberate,
+ * so it does not try to reconnect in a loop.
+ */
+export function kickUser(userId: string, reason = 'Session terminée par un administrateur.') {
+  const set = byUser.get(userId);
+  if (!set) return 0;
+  let closed = 0;
+  for (const client of set) {
+    send(client.socket, { type: 'kicked', reason });
+    try {
+      client.socket.close(4403, 'kicked');
+    } catch {
+      // Already closing — the heartbeat sweep will collect it.
+    }
+    closed++;
+  }
+  byUser.delete(userId);
+  return closed;
+}
+
+/** User ids with at least one live socket — the admin "who is online" view. */
+export function onlineUserIds(): string[] {
+  return [...byUser.keys()];
+}
+
+export function onlineCount(): number {
+  let n = 0;
+  for (const [, set] of byUser) n += set.size;
+  return n;
+}
+
 export function attachRealtime(server: Server, path = '/ws') {
   const wss = new WebSocketServer({ server, path });
 
@@ -181,9 +269,16 @@ export function attachRealtime(server: Server, path = '/ws') {
           const payload = verifyToken(event.token);
           const user = await prisma.user.findUnique({
             where: { id: payload.sub },
-            select: { id: true },
+            select: { id: true, isActive: true, tokenVersion: true },
           });
           if (!user) throw new Error('unknown user');
+
+          // The socket is a second door into the product — it must apply the
+          // same suspension and force-logout checks as `requireAuth`, or a
+          // banned user would keep receiving messages and calls in real time.
+          if (!user.isActive) throw new Error('suspended');
+          if ((payload.tv ?? 0) !== user.tokenVersion) throw new Error('stale token');
+          if (await hasRestriction(user.id, 'LOGIN')) throw new Error('banned');
 
           clearTimeout(client.authTimer);
           client.userId = user.id;
@@ -232,6 +327,8 @@ export function attachRealtime(server: Server, path = '/ws') {
             select: { id: true },
           });
           if (!member) return;
+          // Someone blocked from sending must not show as "en train d'écrire".
+          if (await hasRestriction(client.userId, 'MESSAGE_SEND')) return;
           const ids = await threadParticipantIds(event.threadId);
           emitToUsers(
             ids.filter((id) => id !== client.userId),
@@ -274,6 +371,22 @@ export function attachRealtime(server: Server, path = '/ws') {
         case 'call:start': {
           const ev = event as Extract<ClientEvent, { type: 'call:start' }>;
           if (userToCallId.has(client.userId)) return; // already in a call
+
+          // Calls never touch REST, so this is the only place an admin switch
+          // or a per-user block can stop one. Both sides are checked: being
+          // restricted must also mean nobody can call *you*.
+          const doc = configSnapshot();
+          const flag = ev.isVideo ? 'calls.video' : 'calls.audio';
+          if (!isFlagEnabled(flag, doc)) {
+            return send(socket, { type: 'error', message: flagMessage(flag, doc) });
+          }
+          if (await hasRestriction(client.userId, 'CALL')) {
+            return send(socket, {
+              type: 'error',
+              message: 'Les appels sont désactivés sur votre compte.',
+            });
+          }
+
           const member = await prisma.threadParticipant.findUnique({
             where: { threadId_userId: { threadId: ev.threadId, userId: client.userId } },
             select: { id: true },
@@ -282,6 +395,16 @@ export function attachRealtime(server: Server, path = '/ws') {
           const ids = await threadParticipantIds(ev.threadId);
           const calleeId = ids.find((id) => id !== client.userId);
           if (!calleeId) return;
+
+          // A user blocked from calls must not be reachable by call either,
+          // otherwise the restriction only stops half the behaviour.
+          if (await hasRestriction(calleeId, 'CALL')) {
+            return send(socket, {
+              type: 'error',
+              message: "Cet utilisateur ne peut pas recevoir d'appel.",
+            });
+          }
+
           const caller = await prisma.user.findUnique({
             where: { id: client.userId },
             select: { fullName: true },

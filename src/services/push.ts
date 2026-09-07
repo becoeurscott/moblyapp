@@ -178,7 +178,7 @@ export async function notifyUser(opts: {
   threadId?: string;
   badge?: number;
 }): Promise<void> {
-  await prisma.notification.create({
+  const row = await prisma.notification.create({
     data: {
       userId: opts.userId,
       type: opts.type,
@@ -187,6 +187,26 @@ export async function notifyUser(opts: {
       payload: opts.payload ?? {},
     },
   });
+
+  // Live delivery to any open session, in the same shape GET /notifications
+  // returns so the client can prepend it without a round-trip. Imported here
+  // rather than at module scope: push.ts is pulled in by scripts that never
+  // start the socket server.
+  try {
+    const { broadcastNotification } = await import('../realtime/hub');
+    broadcastNotification(opts.userId, {
+      id: row.id,
+      type: row.type,
+      title: row.title,
+      body: row.body,
+      read: row.read,
+      createdAt: row.createdAt,
+    });
+  } catch (err) {
+    // A socket fault must not lose the notification — the row is already
+    // written and the push still goes out below.
+    console.error('[notify] socket delivery failed', err);
+  }
   await pushToUser(opts.userId, {
     title: opts.title,
     body: opts.body,

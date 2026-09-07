@@ -46,10 +46,38 @@ final class AuthStore: ObservableObject {
                 self?.user = nil
                 Session.shared.signOutLocal()
                 ChatStore.shared.stop()
+                RemoteConfigStore.shared.clearRestrictions()
                 self?.errorMessage = "Votre session a expiré. Reconnectez-vous."
             }
         }
+
+        // An administrator suspended, banned or force-logged-out this account.
+        // Handled separately from an expired session because the user needs to
+        // be told *why* — otherwise a suspension looks like a random bug and
+        // they simply try to sign in again, repeatedly.
+        NotificationCenter.default.addObserver(
+            forName: MoblyAPI.accountBlocked, object: nil, queue: .main
+        ) { [weak self] note in
+            let reason = note.userInfo?["reason"] as? String
+            Task { @MainActor in
+                self?.user = nil
+                Session.shared.signOutLocal()
+                // `stop()` disconnects the socket ChatStore owns, so the
+                // real-time channel closes with the session.
+                ChatStore.shared.stop()
+                RemoteConfigStore.shared.clearRestrictions()
+                self?.api.clearSession()
+                self?.suspensionMessage = reason ?? "Votre compte a été suspendu."
+                // Reuse the existing routing signal so RootView bounces to the
+                // welcome screen; the message above is what distinguishes it.
+                NotificationCenter.default.post(name: MoblyAPI.sessionExpired, object: nil)
+            }
+        }
     }
+
+    /// Set when the account itself was blocked. Shown as an alert, and cleared
+    /// once the user has read it.
+    @Published var suspensionMessage: String?
 
     // MARK: - Launch
 

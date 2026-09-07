@@ -68,6 +68,9 @@ final class ChatStore: ObservableObject {
 
     @Published private(set) var threads: [ThreadDTO] = []
     @Published private(set) var messages: [String: [MessageDTO]] = [:]   // threadId -> messages
+    /// Threads a moderator has frozen: `threadId` → the reason to show above
+    /// the composer. Absent means the conversation is open as usual.
+    @Published private(set) var frozenThreads: [String: String] = [:]
     @Published private(set) var typingIn: Set<String> = []               // threadIds
     @Published private(set) var isLoadingThreads = false
     /// Thread ids that are currently fetching a page of messages. The chat
@@ -106,6 +109,23 @@ final class ChatStore: ObservableObject {
         // Re-render when the socket's connection state changes.
         socket.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        // Any frame delivered while the socket was down is simply gone — the
+        // server does not replay. So on every (re)connect, re-fetch whichever
+        // thread is on screen. Without this a visit accepted by the other side
+        // during a dropped connection never reaches the banner, and the thread
+        // sits on stale history until it is reopened.
+        socket.$state
+            .removeDuplicates()
+            .filter { $0 == .connected }
+            .sink { [weak self] _ in
+                guard let self, let id = self.activeThreadId else { return }
+                Task { @MainActor in
+                    await self.loadMessages(threadId: id)
+                    await self.loadThreads()
+                }
+            }
             .store(in: &cancellables)
 
         // A refused refresh ends the session — drop the cache so the next user
@@ -424,6 +444,46 @@ final class ChatStore: ObservableObject {
             CallService.shared.handleAudioData(data)
         case .review:
             break
+
+        case .notification(let n):
+            // Owned by UserDataStore (the bell + Notifications screen); routed
+            // through here only because ChatStore holds the single socket.
+            UserDataStore.shared.receive(n)
+
+        // ── Remote control ──────────────────────────────────────────
+        // The socket is the fast path for these: an operator's change reaches
+        // the screen in about a second instead of at the next poll.
+
+        case .config:
+            Task { await RemoteConfigStore.shared.refresh() }
+
+        case .restriction(let kind, let active, let reason, let expiresAt):
+            RemoteConfigStore.shared.apply(
+                kind: kind, active: active, reason: reason, expiresAt: expiresAt
+            )
+            // Tell the user immediately when something is taken away; staying
+            // silent on a lift avoids congratulating them for a sanction ending.
+            if active, let reason {
+                RemoteConfigStore.shared.report(blocked: reason)
+            }
+
+        case .account:
+            // Identity approval, a role change, or an admin edit. Refetching is
+            // simpler and safer than patching fields piecemeal — and it is what
+            // makes an approved verification flip the badge while the user is
+            // still watching the screen.
+            Task { await AuthStore.shared.bootstrap() }
+
+        case .kicked(let reason):
+            NotificationCenter.default.post(
+                name: MoblyAPI.accountBlocked, object: nil, userInfo: ["reason": reason]
+            )
+
+        case .messageDeleted(let threadId, let messageId):
+            messages[threadId]?.removeAll { $0.id == messageId }
+
+        case .threadFrozen(let threadId, let frozen, let reason):
+            frozenThreads[threadId] = frozen ? (reason ?? "Conversation gelée.") : nil
         }
     }
 

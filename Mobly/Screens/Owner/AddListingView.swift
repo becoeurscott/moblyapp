@@ -127,6 +127,10 @@ struct AddListingView: View {
     /// (silent local-only saves were how the "Impossible d'ouvrir la
     /// conversation" bug got through — the listing existed only on device).
     @State private var publishError: String?
+    /// Shown instead of publishing when the account has not passed identity
+    /// verification and `owners.identityRequired` is on.
+    @State private var showIdentityGate = false
+    @ObservedObject private var auth = AuthStore.shared
 
     private let categories = ["Chambres", "Studios", "Appartements", "Villas",
                               "Bureaux", "Boutiques", "Coworking", "Commercial"]
@@ -365,6 +369,17 @@ struct AddListingView: View {
             Button("OK", role: .cancel) { publishError = nil }
         } message: { msg in
             Text(LT(msg))
+        }
+        // Identity verification is mandatory to publish. Presented as a sheet
+        // over the form rather than a dead-end alert, so the owner can complete
+        // the check and come straight back to the annonce they were writing.
+        .sheet(isPresented: $showIdentityGate) {
+            NavigationStack { IdentityVerificationView() }
+        }
+        .onChange(of: showIdentityGate) { showing in
+            // Re-read the account when the sheet closes: if the check passed
+            // while it was open, the next tap on Publier should go through.
+            if !showing { Task { await auth.bootstrap() } }
         }
         .fullScreenCover(isPresented: $showMapPicker) {
             LocationPinPicker(
@@ -989,7 +1004,20 @@ struct AddListingView: View {
     }
     private func next() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        if step == .review { publish(); return }
+        if step == .review {
+            // Publishing is gated three ways, all decided remotely: the global
+            // switch, a personal block, and identity verification. Checked here
+            // rather than only on the server so the owner learns the rule
+            // before uploading photos and filling in eight steps of a form.
+            guard RemoteConfigStore.shared.can("listings.publish", "LISTING_PUBLISH") else { return }
+            if RemoteConfigStore.shared.isEnabled("owners.identityRequired"),
+               AuthStore.shared.user?.identityVerified != true {
+                showIdentityGate = true
+                return
+            }
+            publish()
+            return
+        }
         withAnimation(Motion.quick) { stepIndex = min(stepIndex + 1, steps.count - 1) }
     }
     private func back() {

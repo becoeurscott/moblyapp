@@ -369,6 +369,9 @@ struct ExploreView: View {
                 .padding(.bottom, 112)
             }
         }
+        // Filter changes and silently-refreshed listings restack the pins and
+        // the carousel together instead of both cutting.
+        .animation(Motion.content, value: listings)
         .sheet(isPresented: $showFilters) {
             FilterPanelView(filters: $filters,
                             onApply: { showFilters = false },

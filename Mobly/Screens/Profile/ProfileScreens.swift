@@ -978,7 +978,17 @@ struct BecomeOwnerView: View {
 
     private let totalSteps = 5
 
-    private var isIdentityVerified: Bool { auth.user?.identityVerified == true }
+    /// Whether the KYC step applies at all. Driven by the same
+    /// `owners.identityRequired` switch the server enforces, so relaxing the
+    /// rule from the dashboard also removes the step here — rather than the
+    /// app demanding a check the backend no longer asks for.
+    private var kycRequired: Bool {
+        RemoteConfigStore.shared.isEnabled("owners.identityRequired")
+    }
+
+    private var isIdentityVerified: Bool {
+        !kycRequired || auth.user?.identityVerified == true
+    }
 
     private var listingsCount: Int { max(listingStore.listings.count, 126) }
     private var citiesCount: Int {
@@ -1629,7 +1639,17 @@ private struct StepConfirm: View {
     @ObservedObject private var auth = AuthStore.shared
     @State private var appear = false
 
-    private var isIdentityVerified: Bool { auth.user?.identityVerified == true }
+    /// Whether the KYC step applies at all. Driven by the same
+    /// `owners.identityRequired` switch the server enforces, so relaxing the
+    /// rule from the dashboard also removes the step here — rather than the
+    /// app demanding a check the backend no longer asks for.
+    private var kycRequired: Bool {
+        RemoteConfigStore.shared.isEnabled("owners.identityRequired")
+    }
+
+    private var isIdentityVerified: Bool {
+        !kycRequired || auth.user?.identityVerified == true
+    }
 
     private let promises: [(icon: String, text: String)] = [
         ("checkmark.circle.fill", "Publication 100 % gratuite"),
@@ -1734,7 +1754,7 @@ private struct CelebrationView: View {
                         y: CGFloat.random(in: 80...UIScreen.main.bounds.height - 200)
                     )
                     .opacity(appear ? 1 : 0)
-                    .animation(.easeOut(duration: 1.5).delay(Double(i) * 0.05), value: appear)
+                    .animation(Motion.gentle.delay(Double(i) * 0.05), value: appear)
             }
 
             VStack(spacing: 24) {

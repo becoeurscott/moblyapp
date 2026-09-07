@@ -48,6 +48,14 @@ struct OwnerStatsView: View {
         .refreshable { await refresh() }
         .onAppear { startPolling() }
         .onDisappear { stopPolling() }
+        // Nothing to poll for while the app is in someone's pocket.
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didEnterBackgroundNotification)) { _ in stopPolling() }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didBecomeActiveNotification)) { _ in
+            startPolling()
+            Task { await refresh() }
+        }
     }
 
     // MARK: Live refresh
@@ -70,7 +78,7 @@ struct OwnerStatsView: View {
         defer { loading = false }
         do {
             let s = try await MoblyAPI.shared.ownerListingStats(id: annonce.listing.id)
-            await MainActor.run { self.stats = s }
+            await MainActor.run { withAnimation(Motion.content) { self.stats = s } }
         } catch {
             // Keep the last-known values on screen; a failure here is
             // usually offline / auth expiring, not a hard error.
@@ -152,6 +160,10 @@ struct OwnerStatsView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(LT(value)).font(.moblyHeading(24)).foregroundStyle(Color.moblyTextPrimary)
+                    // The poll updates these behind the owner's back; a rolling
+                    // digit reads as live, a hard swap reads as a reload.
+                    .contentTransition(.numericText())
+                    .animation(Motion.content, value: value)
                 Text(LT(label)).font(.moblyBody(11.5)).foregroundStyle(Color(hex: 0x9A9DAC))
             }
         }

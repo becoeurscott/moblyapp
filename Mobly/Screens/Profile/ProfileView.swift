@@ -29,10 +29,19 @@ struct ProfileView: View {
     /// Snapshot of the user's first name, taken before sign-out wipes it.
     @State private var farewellName = ""
 
-    private let account: [MenuItem] = [
+    /// Computed, not constant: the identity row used to hard-code the value
+    /// "Vérifié", so an account that had never passed the check still showed a
+    /// green "Vérifié" next to it — directly contradicting the red "Identité
+    /// non vérifiée" badge on the card a few points above it.
+    private var account: [MenuItem] { [
         MenuItem(label: "Modifier le profil", icon: "square.and.pencil", iconBg: 0xEEF0FE, iconColor: 0x3A4FF0, route: .editProfile),
-        MenuItem(label: "Vérification d'identité", icon: "checkmark.shield.fill", iconBg: 0xE9F9EF, iconColor: 0x1F8A5B, value: "Vérifié", route: .identity),
-    ]
+        MenuItem(label: "Vérification d'identité",
+                 icon: identityVerified ? "checkmark.shield.fill" : "exclamationmark.shield.fill",
+                 iconBg: identityVerified ? 0xE9F9EF : 0xFFF4E5,
+                 iconColor: identityVerified ? 0x1F8A5B : 0xE5950C,
+                 value: identityVerified ? "Vérifié" : "Non vérifié",
+                 route: .identity),
+    ] }
     /// Computed so the Langue row can show the language the user is actually
     /// on — and so it can be hidden entirely while `selectionEnabled` is off.
     /// The row is gated rather than deleted: the String Catalog and the

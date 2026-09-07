@@ -63,6 +63,12 @@ final class MoblyAPI {
     /// real sign-out or a refresh the server refused.
     static let sessionExpired = Notification.Name("MoblySessionExpired")
 
+    /// Posted when the server refuses the account itself (suspended or locked
+    /// by an administrator). Distinct from `sessionExpired`, because the user
+    /// must be told why rather than simply shown the sign-in screen again.
+    /// `userInfo["reason"]` carries the French explanation to display.
+    static let accountBlocked = Notification.Name("MoblyAccountBlocked")
+
     func store(token: String, refreshToken: String?) {
         self.token = token
         if let refreshToken { self.refreshToken = refreshToken }
@@ -135,9 +141,31 @@ final class MoblyAPI {
         case identityRequired = "IDENTITY_REQUIRED"
         case conflict         = "CONFLICT"
         case maintenance      = "MAINTENANCE"
+        // Remote control. An admin turned a feature off, blocked this account,
+        // or raised the minimum version — see `RemoteConfigStore`.
+        case featureDisabled  = "FEATURE_DISABLED"
+        case userRestricted   = "USER_RESTRICTED"
+        case accountSuspended = "ACCOUNT_SUSPENDED"
+        case accountLocked    = "ACCOUNT_LOCKED"
+        case threadFrozen     = "THREAD_FROZEN"
+        case contentBlocked   = "CONTENT_BLOCKED"
+        case forceUpdate      = "FORCE_UPDATE"
+        case limitReached     = "LIMIT_REACHED"
         case internalError    = "INTERNAL"
         case offline          = "OFFLINE"
         case unknown          = "UNKNOWN"
+
+        /// The account can no longer hold a session — sign the user out.
+        var isAccountBlocked: Bool { self == .accountSuspended || self == .accountLocked }
+
+        /// An action was refused by an admin decision rather than by a bug or
+        /// bad input. These carry French prose written by an operator, so the
+        /// server's message is shown verbatim instead of an app-side string.
+        var isAdminBlock: Bool {
+            self == .featureDisabled || self == .userRestricted
+                || self == .threadFrozen || self == .contentBlocked
+                || self == .limitReached
+        }
     }
 
     struct APIError: Error, LocalizedError {
@@ -167,6 +195,17 @@ final class MoblyAPI {
         /// Present only on a 503 MAINTENANCE, so a client that was mid-session
         /// can render the countdown without a second round-trip.
         let maintenance: MaintenanceInfo?
+        /// Present on a 426 FORCE_UPDATE: where to send the user.
+        let update: UpdateInfo?
+        /// On USER_RESTRICTED, when the block lifts. Null = indefinite.
+        let expiresAt: String?
+    }
+
+    /// Minimum supported build, as the server describes it.
+    struct UpdateInfo: Decodable {
+        let minVersion: String?
+        let latestVersion: String?
+        let storeUrl: String?
     }
 
     /// Maintenance window as the server describes it. `serverTime` is what the
@@ -272,6 +311,52 @@ final class MoblyAPI {
                 requestId: parsed?.requestId,
                 fields: [:]
             )
+        }
+
+        // ── Remote control ──────────────────────────────────────────────
+        //
+        // These are all deliberate decisions taken by an operator, so they are
+        // handled centrally rather than at each call site. That matters here
+        // more than it looks: most callers use `try?` and discard the error, so
+        // a refusal handled only locally would be invisible — the user would
+        // tap "envoyer", see the optimistic bubble stay, and believe it sent.
+
+        // The account can no longer hold a session. Sign out rather than let
+        // the app sit in a signed-in state where every request fails.
+        if code.isAccountBlocked {
+            let reason = parsed?.error ?? "Votre compte a été suspendu."
+            Task { @MainActor in
+                NotificationCenter.default.post(
+                    name: MoblyAPI.accountBlocked, object: nil, userInfo: ["reason": reason]
+                )
+            }
+            throw APIError(status: http.statusCode, code: code, message: reason,
+                           requestId: parsed?.requestId, fields: [:])
+        }
+
+        // This build is below the configured minimum. Nothing else will work,
+        // so raise the blocking cover.
+        if code == .forceUpdate {
+            let info = parsed?.update
+            Task { @MainActor in
+                RemoteConfigStore.shared.forceUpdate(
+                    message: parsed?.error ?? "Une mise à jour est nécessaire.",
+                    storeUrl: info?.storeUrl
+                )
+            }
+            throw APIError(status: http.statusCode, code: code,
+                           message: parsed?.error ?? "Mise à jour requise.",
+                           requestId: parsed?.requestId, fields: [:])
+        }
+
+        // A feature switched off, a personal restriction, a frozen thread or a
+        // blocked word. The message is French prose an admin wrote, so it is
+        // surfaced verbatim through a global banner.
+        if code.isAdminBlock {
+            let message = parsed?.error ?? "Action indisponible pour le moment."
+            Task { @MainActor in RemoteConfigStore.shared.report(blocked: message) }
+            throw APIError(status: http.statusCode, code: code, message: message,
+                           requestId: parsed?.requestId, fields: [:])
         }
 
         // Server faults are usually transient — back off and retry.
@@ -491,8 +576,18 @@ final class MoblyAPI {
     }
 
     func me() async throws -> UserDTO {
-        struct Wrap: Decodable { let user: UserDTO }
+        struct Wrap: Decodable {
+            let user: UserDTO
+            /// Capabilities an admin has withheld from this account. Optional
+            /// so an app talking to an older backend still decodes.
+            let restrictions: [RestrictionInfo]?
+        }
         let w: Wrap = try await request("auth/me", authorized: true)
+        // `/auth/me` is the source of truth for restrictions: assigning the
+        // whole set (rather than merging) is what lets one that expired
+        // server-side disappear here without an explicit lift event.
+        let list = w.restrictions ?? []
+        await MainActor.run { RemoteConfigStore.shared.replaceRestrictions(list) }
         return w.user
     }
 

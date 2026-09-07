@@ -116,6 +116,18 @@ final class UserDataStore: ObservableObject {
 
     // MARK: - Notifications
 
+    /// A notification pushed over the socket. Prepended in place so the bell
+    /// and the list update the moment it is raised — previously the row only
+    /// appeared once something re-fetched `GET /notifications`, which is why an
+    /// admin broadcast looked like it had done nothing until a pull-to-refresh.
+    func receive(_ n: NotificationDTO) {
+        guard !notifications.contains(where: { $0.id == n.id }) else { return }
+        withAnimation(Motion.content) {
+            notifications.insert(n, at: 0)
+            if !n.read { unreadNotifications += 1 }
+        }
+    }
+
     func loadNotifications() async {
         guard api.isAuthenticated else { return }
         do {

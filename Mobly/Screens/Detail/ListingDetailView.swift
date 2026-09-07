@@ -660,7 +660,16 @@ struct ListingDetailView: View {
                 Text("Avis")
                     .font(.moblyHeading(17))
                     .foregroundStyle(Color.moblyTextPrimary)
-                if reviews.isEmpty {
+                if reviews.isEmpty && listing.reviewCount > 0 {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 12)).foregroundStyle(Color.moblyPrimary)
+                    Text(listing.rating)
+                        .font(.moblyBody(13, weight: .semibold))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                    Text("· \(listing.reviewCount) avis")
+                        .font(.moblyBody(13))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                } else if reviews.isEmpty {
                     Text("· Aucun avis")
                         .font(.moblyBody(13))
                         .foregroundStyle(Color(hex: 0x9A9DAC))
@@ -699,7 +708,22 @@ struct ListingDetailView: View {
             }
             .padding(.bottom, 16)
 
-            if reviews.isEmpty {
+            if reviews.isEmpty && listing.reviewCount > 0 {
+                // The listing says it has avis but they haven't landed yet.
+                // "Soyez le premier à laisser un avis" here would be a lie, so
+                // hold the space with cards instead of contradicting the 4.2
+                // rating printed at the top of the page.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 14) {
+                        ForEach(0..<2, id: \.self) { _ in
+                            SkeletonBox(width: 260, height: 170, radius: 18)
+                        }
+                    }
+                    .padding(.horizontal, 22)
+                }
+                .padding(.horizontal, -22)
+                .transition(.opacity)
+            } else if reviews.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "star.bubble")
                         .font(.system(size: 32, weight: .medium))
@@ -889,7 +913,7 @@ struct ListingDetailView: View {
         // hit, so it drops to just above the indicator instead of floating on a
         // band of blur.
         // Content clears the home indicator...
-        .padding(.bottom, (isOwnListing ? 4 : 6) + safeAreaBottom)
+        .padding(.bottom, (isOwnListing ? 2 : 2) + safeAreaBottom)
         .background(
             Rectangle().fill(.ultraThinMaterial)
                 .shadow(color: Color(hex: 0x14152A).opacity(0.08), radius: 16, y: -4)

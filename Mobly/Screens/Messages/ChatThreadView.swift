@@ -158,12 +158,23 @@ struct ChatThreadView: View {
 
     /// The most recent visit-related system message, pinned to the top of the
     /// thread so both parties always see the current appointment state.
+    /// The appointment the banner shows: the most recent visit message that is
+    /// still live.
+    ///
+    /// Finished and past-dated visits are SKIPPED rather than being allowed to
+    /// hide the banner. Taking only the newest visit message meant a cancelled
+    /// request masked an older one that was still outstanding, and the strip
+    /// vanished while the owner still had something to answer. When every visit
+    /// in the thread is finished the banner disappears, which is the intended
+    /// behaviour for a refused or cancelled appointment.
     private var latestVisitMessage: ChatMessage? {
-        guard let m = messages.reversed().first(where: { $0.kind == .visit }) else { return nil }
-        let action = m.visitAction ?? "REQUESTED"
-        if ["CANCELLED", "COMPLETED", "NO_SHOW"].contains(action) { return nil }
-        if let scheduled = Self.visitScheduledDate(from: m.text), scheduled < .now { return nil }
-        return m
+        let terminal: Set<String> = ["CANCELLED", "COMPLETED", "NO_SHOW"]
+        return messages.reversed().first { m in
+            guard m.kind == .visit else { return false }
+            if terminal.contains(m.visitAction ?? "REQUESTED") { return false }
+            if let scheduled = Self.visitScheduledDate(from: m.text), scheduled < .now { return false }
+            return true
+        }
     }
 
     private static func visitScheduledDate(from text: String) -> Date? {
@@ -175,18 +186,6 @@ struct ChatThreadView: View {
         df.defaultDate = Date()
         df.dateFormat = "EEEE d MMM · HH'h'mm"
         return df.date(from: combined)
-    }
-
-    /// The newest visit message per visit. Only these may carry action
-    /// buttons: an older REQUESTED card must not keep offering Accepter /
-    /// Refuser after the visit has already been answered somewhere else (the
-    /// owner's inbox, say). Superseded cards render as inert history.
-    private var liveVisitMessageIDs: Set<String> {
-        var latest: [String: ChatMessage] = [:]
-        for m in messages where m.kind == .visit {
-            latest[m.visitId ?? m.id] = m   // chronological, so last wins
-        }
-        return Set(latest.values.map(\.id))
     }
 
     private func pinnedVisitCard(_ m: ChatMessage) -> some View {
@@ -457,25 +456,18 @@ struct ChatThreadView: View {
                         ChatSkeleton()
                     }
                     ForEach(Array(messages.enumerated()), id: \.element.id) { i, m in
-                        // A visit request is part of the conversation, so it
-                        // appears inline like any other message. Only the
-                        // newest card per visit is actionable (see
-                        // `liveVisitMessageIDs`) — that is what stops a stale
-                        // REQUESTED card from still offering Accepter /
-                        // Refuser after the visit was answered elsewhere.
+                        // A visit shows up in the transcript as a plain
+                        // centred line, like the day separator — both sides see
+                        // that it happened and when. The actionable card stays
+                        // in the pinned banner alone: two Accepter / Refuser
+                        // cards competing for the owner's attention is how a
+                        // stale one ends up outliving the decision.
                         if m.kind == .visit {
                             if i == 0 || messages[i - 1].day != m.day {
                                 DateSeparator(text: m.day)
                             }
-                            VisitCardBubble(
-                                message: m,
-                                actionable: !m.visitIsMine && liveVisitMessageIDs.contains(m.id),
-                                busy: visitActionBusy,
-                                onConfirm: { performVisitAction(m, status: "CONFIRMED") },
-                                onDecline: { performVisitAction(m, status: "CANCELLED") }
-                            )
-                            .transition(.scale(scale: 0.85, anchor: .bottom).combined(with: .opacity))
-                            .id(m.id)
+                            SystemNoteLine(text: m.text)
+                                .id(m.id)
                         } else {
                             if i == 0 || messages[i - 1].day != m.day {
                                 DateSeparator(text: m.day)
@@ -506,6 +498,7 @@ struct ChatThreadView: View {
                 .padding(.top, 12)
                 .animation(Motion.panel, value: messages.count)
             }
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: messages.count) { _, _ in scrollDown(proxy) }
             .onChange(of: partnerTyping) { _, _ in scrollDown(proxy) }
             .onChange(of: uploadingPreview == nil) { _, _ in scrollDown(proxy) }
@@ -1334,6 +1327,26 @@ struct LiveWaveform: View {
     }
 }
 
+/// A centred, low-key line in the transcript for things that happened to the
+/// conversation rather than things someone said — visit requests and their
+/// outcomes. Styled off `DateSeparator` so it reads as chrome, not as a bubble
+/// from either participant.
+struct SystemNoteLine: View {
+    let text: String
+    var body: some View {
+        Text(LT(text))
+            .font(.moblyBody(11, weight: .medium))
+            .foregroundStyle(Color(hex: 0x6B6F80))
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 14).padding(.vertical, 6)
+            .background(Capsule().fill(Color.white.opacity(0.9)))
+            .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 2)
+    }
+}
+
 struct DateSeparator: View {
     let text: String
     var body: some View {
@@ -2010,7 +2023,7 @@ private struct CachedFullScreenImage: View {
                             }
                     )
                     .onTapGesture(count: 2) {
-                        withAnimation(.spring(response: 0.3)) {
+                        withAnimation(Motion.panel) {
                             if scale > 1 {
                                 scale = 1; lastScale = 1
                                 offset = .zero; lastOffset = .zero

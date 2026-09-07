@@ -62,8 +62,16 @@ struct OwnerDashboardView: View {
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(item: $statsAnnonce) { OwnerStatsView(annonce: $0) }
         .task {
-            await visits.refresh()
+            await visits.refresh(silent: !visits.items.isEmpty)
             await loadOverview()
+        }
+        // Coming back to the app: refresh the figures with no sign of it.
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didBecomeActiveNotification)) { _ in
+            Task {
+                await visits.refresh(silent: true)
+                await loadOverview()
+            }
         }
         .onAppear {
             if ProcessInfo.processInfo.environment["OPEN_VISITS"] == "1" {
@@ -159,7 +167,10 @@ struct OwnerDashboardView: View {
     /// Best-effort: on failure the card falls back to the listing totals and
     /// simply shows no trend badge, rather than a stale or invented one.
     private func loadOverview() async {
-        overview = try? await MoblyAPI.shared.ownerOverview()
+        guard let fresh = try? await MoblyAPI.shared.ownerOverview() else { return }
+        // Keep the last-known figures when the call fails, and ease the new
+        // ones in when it succeeds.
+        withAnimation(Motion.content) { overview = fresh }
     }
 
     // MARK: Performance card
@@ -194,6 +205,8 @@ struct OwnerDashboardView: View {
     private func perfStat(_ value: String, _ label: String, _ delta: Int?) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(value).font(.moblyHeading(27)).foregroundStyle(.white)
+                .contentTransition(.numericText())
+                .animation(Motion.content, value: value)
             Text(LT(label)).font(.moblyBody(11.5)).foregroundStyle(.white.opacity(0.8))
                 .fixedSize(horizontal: false, vertical: true)
             if let d = delta {

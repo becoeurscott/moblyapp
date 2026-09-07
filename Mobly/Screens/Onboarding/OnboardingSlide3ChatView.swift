@@ -157,7 +157,7 @@ private struct ChatCard: View {
                            style: .outgoing, delay: 0.5, show: show, time: "09:42")
                 TypingBubble()
                     .opacity(show ? 1 : 0)
-                    .animation(.easeInOut.delay(0.75), value: show)
+                    .animation(Motion.standard.delay(0.75), value: show)
             }
             .padding(.horizontal, 14).padding(.vertical, 15)
             .frame(maxWidth: .infinity, alignment: .leading)

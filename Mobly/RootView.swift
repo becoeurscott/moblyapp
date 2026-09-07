@@ -28,6 +28,8 @@ struct RootView: View {
     @ObservedObject private var lang = AppLang.shared
     @ObservedObject private var listingStore = ListingStore.shared
     @ObservedObject private var maintenance = MaintenanceStore.shared
+    @ObservedObject private var remoteConfig = RemoteConfigStore.shared
+    @ObservedObject private var auth = AuthStore.shared
     @State private var route: AppRoute = {
         // Allow launch arg to skip splash for screenshotting: -skipSplash 1
         if ProcessInfo.processInfo.environment["START_AT"] == "welcome" {
@@ -298,6 +300,44 @@ struct RootView: View {
             guard route == .placeholder else { return }
             withAnimation(Motion.standard) { route = .welcome }
         }
+        // This build is below the minimum an operator set. Sits above the
+        // maintenance cover: an obsolete client cannot be fixed by waiting.
+        .overlay {
+            if let update = remoteConfig.update {
+                ForceUpdateView(update: update)
+                    .environment(\.locale, Locale(identifier: lang.code))
+                    .transition(.opacity)
+                    .zIndex(101)
+            }
+        }
+        // Why the account was signed out, when it was an admin decision rather
+        // than an expired token.
+        .alert(
+            "Compte suspendu",
+            isPresented: Binding(
+                get: { auth.suspensionMessage != nil },
+                set: { if !$0 { auth.suspensionMessage = nil } }
+            ),
+            presenting: auth.suspensionMessage
+        ) { _ in
+            Button("OK", role: .cancel) { auth.suspensionMessage = nil }
+        } message: { reason in
+            Text(LT(reason))
+        }
+        // A refusal the user needs to see even though the call site discarded
+        // the error — most do, with `try?`. Without this a blocked action just
+        // silently does nothing.
+        .overlay(alignment: .top) {
+            if let message = remoteConfig.blockedMessage {
+                BlockedBanner(message: message) {
+                    withAnimation(Motion.quick) { remoteConfig.blockedMessage = nil }
+                }
+                .environment(\.locale, Locale(identifier: lang.code))
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(99)
+            }
+        }
+        .animation(Motion.standard, value: remoteConfig.blockedMessage)
     }
 
     /// Full-screen scrim shown while `AppLang.switching == true` so the

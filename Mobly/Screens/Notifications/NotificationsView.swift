@@ -121,6 +121,9 @@ struct NotificationsView: View {
                         if !earlierItems.isEmpty { section("Plus tôt", items: earlierItems) }
                     }
                     .padding(.bottom, 30)
+                    // A notification arriving from the background poll slides
+                    // the list rather than reshuffling it under the thumb.
+                    .animation(Motion.content, value: userData.notifications.map(\.id))
                 }
                 .refreshable { await userData.loadNotifications() }
             }

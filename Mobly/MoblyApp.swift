@@ -34,6 +34,11 @@ struct MoblyApp: App {
                     // should meet the maintenance screen, not a home feed that
                     // fails to load piece by piece.
                     await MaintenanceStore.shared.checkAtLaunch()
+                    // Then the remote configuration: which features are on,
+                    // the current limits and copy, and whether this build is
+                    // still supported. Fetched before the UI settles so a
+                    // disabled control is never briefly offered.
+                    await RemoteConfigStore.shared.checkAtLaunch()
                     // Fetch listings early so the onboarding slides can render
                     // real properties from the DB instead of the bundled
                     // sample cards. Detached so it doesn't get cancelled with
@@ -66,6 +71,9 @@ struct MoblyApp: App {
                     // app sat in the background.
                     if phase == .active {
                         Task { await MaintenanceStore.shared.checkAtLaunch() }
+                        // Same reasoning for the configuration: a flag may have
+                        // been flipped while the app sat in the background.
+                        Task { await RemoteConfigStore.shared.refresh() }
                     }
                     if phase == .active, AuthStore.shared.isSignedIn {
                         Task {

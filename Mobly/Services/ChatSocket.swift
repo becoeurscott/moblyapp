@@ -12,7 +12,7 @@ import Foundation
 @MainActor
 final class ChatSocket: NSObject, ObservableObject {
 
-    enum State { case disconnected, connecting, connected }
+    enum State: Equatable { case disconnected, connecting, connected }
     @Published private(set) var state: State = .disconnected
 
     /// Events surfaced to the store.
@@ -27,6 +27,20 @@ final class ChatSocket: NSObject, ObservableObject {
         case callEnded(callId: String)
         case callAudio(Data)
         case review(listingId: String, review: MoblyAPI.ReviewDTO)
+        /// A notification was raised for this account (admin broadcast, visit
+        /// update, …). Delivered live so the bell does not wait for a refetch.
+        case notification(NotificationDTO)
+        // ── Remote control ──────────────────────────────────────────
+        /// The configuration changed — refetch `GET /config`.
+        case config(version: Int)
+        /// A restriction on this account was granted or lifted.
+        case restriction(kind: String, active: Bool, reason: String?, expiresAt: String?)
+        /// Identity/role/suspension state changed — refetch `/auth/me`.
+        case account(identityVerified: Bool?, reason: String?)
+        /// An admin ended this session. The socket closes right after.
+        case kicked(reason: String)
+        case messageDeleted(threadId: String, messageId: String)
+        case threadFrozen(threadId: String, frozen: Bool, reason: String?)
     }
 
     var onEvent: ((Event) -> Void)?
@@ -172,6 +186,8 @@ final class ChatSocket: NSObject, ObservableObject {
             if let threadId = envelope.threadId, let m = envelope.message {
                 onEvent?(.message(threadId: threadId, message: m))
             }
+        case "notification":
+            if let n = envelope.notification { onEvent?(.notification(n)) }
         case "typing":
             if let threadId = envelope.threadId, let userId = envelope.userId {
                 onEvent?(.typing(threadId: threadId, userId: userId, typing: envelope.typing ?? false))
@@ -201,6 +217,34 @@ final class ChatSocket: NSObject, ObservableObject {
             if let listingId = envelope.listingId, let review = envelope.review {
                 onEvent?(.review(listingId: listingId, review: review))
             }
+        case "config":
+            onEvent?(.config(version: envelope.version ?? 0))
+        case "restriction":
+            if let kind = envelope.kind {
+                onEvent?(.restriction(kind: kind,
+                                      active: envelope.active ?? false,
+                                      reason: envelope.reason,
+                                      expiresAt: envelope.expiresAt))
+            }
+        case "account":
+            onEvent?(.account(identityVerified: envelope.identityVerified,
+                              reason: envelope.reason))
+        case "kicked":
+            // Mark the close as deliberate BEFORE it happens, so the reconnect
+            // backoff doesn't immediately fight the server's decision and
+            // hammer it with retries the whole time the ban stands.
+            intentionallyClosed = true
+            onEvent?(.kicked(reason: envelope.reason ?? "Session terminée."))
+        case "message:deleted":
+            if let threadId = envelope.threadId, let messageId = envelope.messageId {
+                onEvent?(.messageDeleted(threadId: threadId, messageId: messageId))
+            }
+        case "thread:frozen":
+            if let threadId = envelope.threadId {
+                onEvent?(.threadFrozen(threadId: threadId,
+                                       frozen: envelope.frozen ?? false,
+                                       reason: envelope.reason))
+            }
         case "error":
             disconnect()
         default:
@@ -225,6 +269,16 @@ final class ChatSocket: NSObject, ObservableObject {
         let from: CallPeer?
         let listingId: String?
         let review: MoblyAPI.ReviewDTO?
+        let notification: NotificationDTO?
+        // Remote control
+        let version: Int?
+        let kind: String?
+        let active: Bool?
+        let reason: String?
+        let expiresAt: String?
+        let identityVerified: Bool?
+        let messageId: String?
+        let frozen: Bool?
     }
 
     // MARK: - Keepalive & reconnect

@@ -88,3 +88,45 @@ export function serializeUser(u: User) {
     createdAt: u.createdAt,
   };
 }
+
+
+/**
+ * Wire shape of a chat message.
+ *
+ * Shared rather than local to the chat router because the admin support reply
+ * writes messages too — and if the two shapes drifted, a message sent from the
+ * dashboard would decode differently in the app than one sent by a user.
+ */
+export function serializeMessage(m: {
+  id: string;
+  threadId: string;
+  senderId: string;
+  clientId: string | null;
+  kind: string;
+  text: string;
+  mediaUrl: string | null;
+  durationSec: number | null;
+  replyToId: string | null;
+  visitId?: string | null;
+  visitAction?: string | null;
+  read: boolean;
+  readAt: Date | null;
+  createdAt: Date;
+}) {
+  return {
+    id: m.id,
+    threadId: m.threadId,
+    senderId: m.senderId,
+    clientId: m.clientId,
+    kind: m.kind,
+    text: m.text,
+    mediaUrl: m.mediaUrl,
+    durationSec: m.durationSec,
+    replyToId: m.replyToId,
+    visitId: m.visitId ?? null,
+    visitAction: m.visitAction ?? null,
+    read: m.read,
+    readAt: m.readAt,
+    createdAt: m.createdAt,
+  };
+}

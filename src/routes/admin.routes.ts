@@ -10,6 +10,7 @@ import { adminConfigRouter } from './admin/config.routes';
 import { adminModerationRouter } from './admin/moderation.routes';
 import { adminSecurityRouter } from './admin/security.routes';
 import { adminSystemRouter } from './admin/system.routes';
+import { adminSupportRouter } from './admin/support.routes';
 
 export const adminRouter = Router();
 
@@ -28,6 +29,7 @@ adminRouter.use('/config', adminConfigRouter);
 adminRouter.use('/security', adminSecurityRouter);
 adminRouter.use('/system', adminSystemRouter);
 adminRouter.use('/moderation', adminModerationRouter);
+adminRouter.use('/support', adminSupportRouter);
 adminRouter.use('/users', adminUsersRouter);
 adminRouter.use('/restrictions', adminUsersRouter);
 

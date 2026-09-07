@@ -144,6 +144,11 @@ model User {
   // Role. `isOwner` drives the app's visitor ↔ propriétaire switch.
   isOwner    Boolean @default(false)
   isAdmin    Boolean @default(false)
+  /// The shared "Support Mobly" identity. Exactly one row carries this, and it
+  /// is the other participant in every support conversation — so whoever is on
+  /// duty answers, and the user always sees one consistent contact rather than
+  /// a rotating cast of staff names.
+  isSupport  Boolean @default(false)
   agencyName String?
 
   // Trust surfaces (visible in the app)

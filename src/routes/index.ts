@@ -18,6 +18,7 @@ import { verificationRouter } from './verification.routes';
 import { maintenanceRouter } from './maintenance.routes';
 import { configRouter } from './config.routes';
 import { reportsRouter } from './reports.routes';
+import { supportRouter } from './support.routes';
 import { maintenanceGate } from '../middleware/maintenance';
 import { versionGate } from '../middleware/gates';
 
@@ -59,5 +60,6 @@ api.use('/notifications', notificationsRouter);
 api.use('/users', usersRouter);
 api.use('/cron', cronRouter);
 api.use('/verification', verificationRouter); // Didit KYC: session, status, webhook
-api.use('/reports', reportsRouter);           // users flag a listing/user/message/review
+api.use('/reports', reportsRouter);
+api.use('/support', supportRouter);           // in-app conversation with Mobly support
 api.use('/', miscRouter); // /geo, /categories

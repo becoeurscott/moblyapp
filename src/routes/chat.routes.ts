@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
+import { serializeMessage } from '../lib/serialize';
 import { requireAuth } from '../middleware/auth';
 import { writeLimiter } from '../middleware/security';
 import { broadcastMessage, isOnline, emitToUsers } from '../realtime/hub';
@@ -23,41 +24,11 @@ const userSelect = {
   avatarUrl: true,
   avatarColor: true,
   verified: true,
+  // Lets the app recognise the support desk and drop the affordances that
+  // make no sense there — a listing header, and calling it.
+  isSupport: true,
 } as const;
 
-function serializeMessage(m: {
-  id: string;
-  threadId: string;
-  senderId: string;
-  clientId: string | null;
-  kind: string;
-  text: string;
-  mediaUrl: string | null;
-  durationSec: number | null;
-  replyToId: string | null;
-  visitId?: string | null;
-  visitAction?: string | null;
-  read: boolean;
-  readAt: Date | null;
-  createdAt: Date;
-}) {
-  return {
-    id: m.id,
-    threadId: m.threadId,
-    senderId: m.senderId,
-    clientId: m.clientId,
-    kind: m.kind,
-    text: m.text,
-    mediaUrl: m.mediaUrl,
-    durationSec: m.durationSec,
-    replyToId: m.replyToId,
-    visitId: m.visitId ?? null,
-    visitAction: m.visitAction ?? null,
-    read: m.read,
-    readAt: m.readAt,
-    createdAt: m.createdAt,
-  };
-}
 
 /** GET /api/threads — the user's conversations, newest activity first. */
 chatRouter.get(

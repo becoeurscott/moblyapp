@@ -103,6 +103,9 @@ export const flagsSchema = z
     'owners.identityRequired': flag(true),
     'identity.verification': flag(),
     'reports.file': flag(),
+    /// The in-app support conversation. Off = the Help Center falls back to
+    /// showing the support e-mail instead of opening a chat.
+    'support.chat': flag(),
     'notifications.push': flag(),
     'maps': flag(),
     'share': flag(),

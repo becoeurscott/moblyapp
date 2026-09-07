@@ -204,6 +204,7 @@ struct ListingDetailView: View {
         .fullScreenCover(isPresented: $openingChat) {
             ChatOpeningView(listing: listing, onBack: { openingChat = false })
         }
+
         .alert("Impossible d'ouvrir la conversation", isPresented: $contactFailed) {
             Button("OK", role: .cancel) {}
         } message: {

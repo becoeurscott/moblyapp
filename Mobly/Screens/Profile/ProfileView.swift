@@ -95,6 +95,7 @@ struct ProfileView: View {
         }
         .fullScreenCover(isPresented: $showBecomeOwner) {
             BecomeOwnerView(onClose: { showBecomeOwner = false })
+                .swipeToDismiss(onDismiss: { showBecomeOwner = false })
         }
 
         .onAppear {
@@ -273,7 +274,7 @@ struct ProfileView: View {
                 // asking for a photo asset. Kept low-opacity so text stays legible.
                 Image(systemName: "house.fill")
                     .font(.system(size: 130, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.08))
+                    .foregroundStyle(Color.moblyPrimary.opacity(0.10))
                     .rotationEffect(.degrees(-12))
                     .offset(x: 30, y: -20)
 
@@ -283,19 +284,19 @@ struct ProfileView: View {
                             .font(.system(size: 11, weight: .bold))
                         Text("NOUVEAU").font(.moblyBody(10, weight: .bold)).tracking(0.8)
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.moblyPrimary)
                     .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(Capsule().fill(.white.opacity(0.22)))
+                    .background(Capsule().fill(.white.opacity(0.85)))
 
                     Text("Devenez propriétaire\nsur Mobly")
                         .font(.moblyHeading(21))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.moblyTextPrimary)
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
 
                     Text("Publiez gratuitement et touchez des milliers de locataires vérifiés au Cameroun.")
                         .font(.moblyBody(12.5))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(Color(hex: 0x5A5F73))
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -305,9 +306,9 @@ struct ProfileView: View {
                         Image(systemName: "arrow.right")
                             .font(.system(size: 12, weight: .bold))
                     }
-                    .foregroundStyle(Color.moblyAccent)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(Capsule().fill(.white))
+                    .background(Capsule().fill(Color.moblyPrimary))
                     .padding(.top, 2)
                 }
                 .padding(20)
@@ -315,12 +316,14 @@ struct ProfileView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 LinearGradient(
-                    colors: [Color.moblyAccent, Color(hex: 0xE85A1A)],
+                    colors: [Color(hex: 0xF2F6FF), Color(hex: 0xE4ECFF)],
                     startPoint: .topLeading, endPoint: .bottomTrailing
                 )
             )
             .clipShape(RoundedRectangle(cornerRadius: 22))
-            .shadow(color: Color.moblyAccent.opacity(0.35), radius: 16, y: 8)
+            // A tinted shadow at the old strength reads as a smudge under a
+            // near-white card, so it drops to a soft neutral lift.
+            .shadow(color: Color(hex: 0x14152A).opacity(0.07), radius: 12, y: 5)
         }
         .buttonStyle(.plain)
     }

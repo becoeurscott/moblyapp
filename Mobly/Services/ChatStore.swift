@@ -34,6 +34,9 @@ struct ThreadPeerDTO: Codable, Identifiable, Equatable {
     let avatarColor: String?
     let verified: Bool
     var online: Bool?
+    /// True for the Mobly support desk. Optional so a build talking to an
+    /// older backend still decodes.
+    var isSupport: Bool?
 }
 
 struct ThreadListingDTO: Codable, Equatable {
@@ -276,6 +279,34 @@ final class ChatStore: ObservableObject {
             )
             // Keep it locally so the conversation screen can render straight
             // away; it joins the inbox once a message exists.
+            if !threads.contains(where: { $0.id == w.thread.id }) {
+                threads.insert(w.thread, at: 0)
+            }
+            return w.thread
+        } catch let e as MoblyAPI.APIError {
+            isOffline = e.isOffline
+            return nil
+        } catch {
+            return nil
+        }
+    }
+
+    /// Open (or reopen) the conversation with Mobly support.
+    ///
+    /// Its own endpoint rather than `openThread(otherUserId:)`: the recipient is
+    /// fixed server-side, so the app never has to know or send the support
+    /// account's id. That also lets the server skip the "no prior relationship"
+    /// rule, which would otherwise refuse the very first support message.
+    ///
+    /// The same thread is returned every time, so a user's history with support
+    /// stays in one place instead of fragmenting per question.
+    @discardableResult
+    func openSupportThread() async -> ThreadDTO? {
+        do {
+            struct Wrap: Decodable { let thread: ThreadDTO }
+            let w: Wrap = try await api.request(
+                "support/thread", method: "POST", authorized: true
+            )
             if !threads.contains(where: { $0.id == w.thread.id }) {
                 threads.insert(w.thread, at: 0)
             }

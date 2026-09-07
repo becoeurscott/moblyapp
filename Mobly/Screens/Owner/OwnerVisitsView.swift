@@ -51,6 +51,7 @@ struct OwnerVisitsView: View {
         .fullScreenCover(item: $openedThread) { thread in
             ChatThreadView(thread: thread, onBack: { openedThread = nil })
         }
+
         .alert("Impossible d'ouvrir la conversation", isPresented: $chatOpenFailed) {
             Button("OK", role: .cancel) {}
         }

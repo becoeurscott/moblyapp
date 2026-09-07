@@ -599,32 +599,175 @@ struct SavedSearchesView: View {
 // MARK: - Help center
 
 struct HelpCenterView: View {
-    private let faqs = [
-        "Comment contacter un propriétaire ?",
-        "Comment planifier une visite ?",
-        "Comment fonctionne la vérification ?",
-        "Les prix sont-ils négociables ?",
-        "Comment signaler une annonce ?",
+    /// Questions with real answers. The rows used to be plain `HStack`s with a
+    /// decorative chevron and no answers anywhere — the affordance promised
+    /// something that could not happen. They now expand in place.
+    private let faqs: [(q: String, a: String)] = [
+        ("Comment contacter un propriétaire ?",
+         "Ouvrez l'annonce puis touchez « Message ». La conversation reste dans Mobly : votre numéro n'est jamais partagé."),
+        ("Comment planifier une visite ?",
+         "Depuis l'annonce, touchez « Demander une visite » et proposez une date. Le propriétaire confirme ou propose un autre créneau, et vous recevez une notification."),
+        ("Comment fonctionne la vérification ?",
+         "Nous contrôlons votre pièce d'identité via un prestataire spécialisé. Mobly ne conserve aucune copie de vos documents. La vérification est obligatoire pour publier une annonce."),
+        ("Les prix sont-ils négociables ?",
+         "Cela dépend du propriétaire. Les annonces marquées « négociable » acceptent une offre : proposez votre prix dans la conversation."),
+        ("Comment signaler une annonce ?",
+         "Ouvrez l'annonce ou le profil concerné et touchez « Signaler ». Notre équipe examine chaque signalement."),
     ]
+
+    @ObservedObject private var auth = AuthStore.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
+    @ObservedObject private var chat = ChatStore.shared
+
+    @State private var expanded: Int?
+    @State private var openingSupport = false
+    @State private var supportThread: ChatThread?
+    @State private var supportFailed = false
+
+    /// Support chat can be switched off remotely, in which case the button
+    /// falls back to the e-mail address from the same configuration rather
+    /// than disappearing and leaving the user with no way to reach anyone.
+    private var chatAvailable: Bool { config.isEnabled("support.chat") && auth.isSignedIn }
+    private var supportEmail: String { config.config.copy.supportEmail ?? "support@mobly.cm" }
+
     var body: some View {
         ProfileScaffold(title: "Centre d'aide") {
             VStack(spacing: 16) {
                 card {
                     VStack(spacing: 0) {
-                        ForEach(Array(faqs.enumerated()), id: \.offset) { i, q in
-                            HStack {
-                                Text(LT(q)).font(.moblyBody(13.5)).foregroundStyle(Color.moblyTextPrimary)
-                                Spacer()
-                                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(Color(hex: 0xC4C7D2))
+                        ForEach(Array(faqs.enumerated()), id: \.offset) { i, item in
+                            VStack(alignment: .leading, spacing: 0) {
+                                Button {
+                                    withAnimation(Motion.quick) {
+                                        expanded = (expanded == i) ? nil : i
+                                    }
+                                } label: {
+                                    HStack(alignment: .top) {
+                                        Text(LT(item.q))
+                                            .font(.moblyBody(13.5))
+                                            .foregroundStyle(Color.moblyTextPrimary)
+                                            .multilineTextAlignment(.leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        Spacer(minLength: 12)
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(Color(hex: 0xC4C7D2))
+                                            .rotationEffect(.degrees(expanded == i ? 90 : 0))
+                                    }
+                                    .padding(.vertical, 13)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+
+                                if expanded == i {
+                                    Text(LT(item.a))
+                                        .font(.moblyBody(12.5))
+                                        .foregroundStyle(Color(hex: 0x666F80))
+                                        .lineSpacing(3)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.bottom, 13)
+                                }
                             }
-                            .padding(.vertical, 13)
                             if i < faqs.count - 1 { Divider() }
                         }
                     }
                 }
-                PillButton(title: "Contacter le support", style: .primaryBlue, trailingIcon: "bubble.left.fill") {}
+
+                if chatAvailable {
+                    PillButton(title: "Contacter le support",
+                               style: .primaryBlue,
+                               trailingIcon: "bubble.left.fill") {
+                        openingSupport = true
+                    }
+                    Text("Réponse en général sous 24 h.")
+                        .font(.moblyBody(11.5))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                } else {
+                    PillButton(title: "Écrire à \(supportEmail)",
+                               style: .primaryBlue,
+                               trailingIcon: "envelope.fill") {
+                        if let url = URL(string: "mailto:\(supportEmail)") {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                }
             }
+        }
+        // Same bridge the listing screen uses: present immediately with a
+        // skeleton so the round-trip that opens the thread never leaves the
+        // button looking dead.
+        .fullScreenCover(isPresented: $openingSupport) {
+            SupportOpeningView(
+                onOpened: { thread in
+                    openingSupport = false
+                    supportThread = thread
+                },
+                onFailed: {
+                    openingSupport = false
+                    supportFailed = true
+                },
+                onBack: { openingSupport = false }
+            )
+            .swipeToDismiss(onDismiss: { openingSupport = false })
+        }
+        .fullScreenCover(item: $supportThread) { thread in
+            ChatThreadView(thread: thread, onBack: { supportThread = nil })
+        }
+        .alert("Support indisponible", isPresented: $supportFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(LT("Impossible d'ouvrir la conversation. Réessayez, ou écrivez à \(supportEmail)."))
+        }
+    }
+}
+
+/// Opens the support conversation, then hands it to `ChatThreadView`.
+///
+/// Mirrors `ChatOpeningView` for listings: the screen appears at once and the
+/// network call resolves behind it, because on a Douala connection the round
+/// trip is slow enough that an un-styled wait reads as a broken button.
+private struct SupportOpeningView: View {
+    var onOpened: (ChatThread) -> Void
+    var onFailed: () -> Void
+    var onBack: () -> Void
+
+    @ObservedObject private var chat = ChatStore.shared
+    @ObservedObject private var auth = AuthStore.shared
+
+    var body: some View {
+        ZStack {
+            Color.moblySurface.ignoresSafeArea()
+            VStack(spacing: 18) {
+                ZStack {
+                    Circle().fill(Color.moblySurfaceTint).frame(width: 76, height: 76)
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .font(.system(size: 30, weight: .medium))
+                        .foregroundStyle(Color.moblyPrimary)
+                }
+                Text("Support Mobly")
+                    .font(.moblyHeading(19))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                ProgressView()
+            }
+        }
+        .task {
+            guard let dto = await chat.openSupportThread() else {
+                onFailed()
+                return
+            }
+            onOpened(ChatThread.from(dto, myUserId: auth.user?.id))
+        }
+        .overlay(alignment: .topLeading) {
+            Button(action: onBack) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                    .frame(width: 38, height: 38)
+                    .background(Circle().fill(.white))
+            }
+            .padding(.leading, 18)
+            .padding(.top, 8)
         }
     }
 }
@@ -1020,16 +1163,13 @@ struct BecomeOwnerView: View {
         .toolbar(.hidden, for: .tabBar)
         .fullScreenCover(isPresented: $showCelebration) {
             CelebrationView(onDone: {
-                // Already flipped when step 5's primary action fired — kept
-                // here as a no-op safety net in case the flow ever changes.
                 Session.shared.upgradeToOwner()
                 showCelebration = false
-                // Small beat so the celebration cover has time to dismiss
-                // before the AddListing cover slides in.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                     showAddListing = true
                 }
             })
+            .swipeToDismiss(onDismiss: { showCelebration = false })
         }
         // AddListing presents on top of BecomeOwnerView. Whether the user
         // publishes, skips, or hits ✕, we dismiss both covers and let Profile
@@ -1047,6 +1187,10 @@ struct BecomeOwnerView: View {
                 showAddListing = false
                 onClose()
             }
+            .swipeToDismiss(onDismiss: {
+                showAddListing = false
+                onClose()
+            })
         }
         .fullScreenCover(isPresented: $showVerification) {
             NavigationStack {
@@ -1063,6 +1207,7 @@ struct BecomeOwnerView: View {
                         }
                     }
             }
+            .swipeToDismiss(onDismiss: { showVerification = false })
         }
         .onChange(of: showVerification) { showing in
             if !showing {

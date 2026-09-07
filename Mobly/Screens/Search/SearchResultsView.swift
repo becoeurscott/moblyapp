@@ -162,7 +162,6 @@ struct SearchResultsView: View {
         }
         .fullScreenCover(item: $selectedListing) { listing in
             ListingDetailView(listing: listing, onClose: { selectedListing = nil })
-                .transition(.move(edge: .bottom))
         }
     }
 

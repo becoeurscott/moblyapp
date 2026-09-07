@@ -94,12 +94,15 @@ struct OwnerDashboardView: View {
         }
         .fullScreenCover(isPresented: $showAddListing) {
             AddListingView { store.add($0) }
+                .swipeToDismiss(onDismiss: { showAddListing = false })
         }
         .fullScreenCover(isPresented: $showVisits) {
             OwnerVisitsView()
+                .swipeToDismiss(onDismiss: { showVisits = false })
         }
         .fullScreenCover(item: $editAnnonce) { annonce in
             ManageListingView(annonce: annonce) { editAnnonce = nil }
+                .swipeToDismiss(onDismiss: { editAnnonce = nil })
         }
         .sheet(item: $boostAnnonce) { annonce in
             BoostSheet(annonce: annonce) { days in

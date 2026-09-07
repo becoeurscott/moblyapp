@@ -152,7 +152,6 @@ struct MainTabView: View {
         }
         .fullScreenCover(item: $selectedListing) { listing in
             ListingDetailView(listing: listing, onClose: { selectedListing = nil })
-                .transition(.move(edge: .bottom))
         }
         .fullScreenCover(isPresented: $showNotifications) {
             NotificationsView(onClose: { showNotifications = false })

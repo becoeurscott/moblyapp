@@ -387,8 +387,6 @@ struct AddListingView: View {
                 existing: pinLat.flatMap { lat in
                     pinLng.map { lng in CLLocationCoordinate2D(latitude: lat, longitude: lng) }
                 },
-                // Fed to CLGeocoder so the map opens on the quartier, not
-                // just the ville — e.g. "Ekounou, Yaoundé".
                 searchQuery: locationQuery,
                 onConfirm: { coord in
                     pinLat = coord.latitude
@@ -397,6 +395,7 @@ struct AddListingView: View {
                 },
                 onCancel: { showMapPicker = false }
             )
+            .swipeToDismiss(onDismiss: { showMapPicker = false })
         }
     }
 

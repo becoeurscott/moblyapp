@@ -21,6 +21,13 @@ struct ChatThread: Identifiable, Hashable {
     let listingTitle: String
     let listingPrice: String
     let listingImage: String
+    /// Support conversations have no listing and cannot be called, so the
+    /// header strip and the call buttons are hidden for them.
+    var isSupport: Bool = false
+    /// Whether this thread is actually about a listing. Without it an empty
+    /// header card rendered above every support conversation — a placeholder
+    /// cover and a blank title, with a chevron leading nowhere.
+    var hasListing: Bool = false
     /// Remote cover for the listing, when the thread has one.
     var listingCoverUrl: String? = nil
     let preview: String
@@ -55,6 +62,8 @@ extension ChatThread {
             listingTitle: dto.listing?.title ?? "",
             listingPrice: dto.listing?.priceFcfa.map(Self.formatFcfa) ?? "",
             listingImage: dto.listing?.imageName ?? "ListingGreen",
+            isSupport: dto.participants.first?.isSupport ?? false,
+            hasListing: dto.listing != nil,
             listingCoverUrl: dto.listing?.coverUrl,
             preview: last?.text ?? "",
             unread: dto.unread,

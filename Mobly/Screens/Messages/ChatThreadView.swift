@@ -237,7 +237,11 @@ struct ChatThreadView: View {
         ZStack {
             VStack(spacing: 0) {
                 header
-                listingPill
+                // Only when the conversation is actually about an annonce.
+                // Support threads have none, and the strip was rendering an
+                // empty card — a placeholder cover, a blank title, and a
+                // chevron that led nowhere.
+                if thread.hasListing { listingPill }
                 messagesList
                 if replyingTo != nil { replyPreview }
                 // if !recorder.isRecording { quickReplies } // DEBUG: hidden to test mic tap
@@ -366,9 +370,13 @@ struct ChatThreadView: View {
             }
             .buttonStyle(.plain)
             Spacer()
-            // Voice + video call (in-app, masked numbers)
-            Button { callIsVideo = false; showCall = true } label: { headerIcon("phone.fill") }
-            Button { callIsVideo = true; showCall = true } label: { headerIcon("video.fill") }
+            // Voice + video call (in-app, masked numbers). Not offered for the
+            // support desk — there is nobody on the other end to pick up, and
+            // a ringing call that never connects reads as the app being broken.
+            if !thread.isSupport {
+                Button { callIsVideo = false; showCall = true } label: { headerIcon("phone.fill") }
+                Button { callIsVideo = true; showCall = true } label: { headerIcon("video.fill") }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 8)

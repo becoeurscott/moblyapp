@@ -64,8 +64,21 @@ struct ExploreView: View {
         return filtered
     }
 
+    /// Cameroon's bounding box, with a margin.
+    ///
+    /// A stored coordinate is only trusted when it falls inside it. Listings do
+    /// get saved with nonsense: the publish wizard's pin picker takes whatever
+    /// the device reports, so an annonce created on a simulator (or a phone
+    /// with location spoofing) lands somewhere like Arlington, Texas while its
+    /// city still says "Douala". One such row is enough to stretch the map's
+    /// bounding box across the Atlantic and put every real pin off-screen, so
+    /// an implausible coordinate is discarded in favour of the declared city.
+    private static func isInCameroon(lat: Double, lng: Double) -> Bool {
+        (1.5...13.5).contains(lat) && (8.0...16.5).contains(lng)
+    }
+
     private func baseCoord(for l: Listing) -> CLLocationCoordinate2D {
-        if let lat = l.lat, let lng = l.lng, lat != 0 || lng != 0 {
+        if let lat = l.lat, let lng = l.lng, Self.isInCameroon(lat: lat, lng: lng) {
             return CLLocationCoordinate2D(latitude: lat, longitude: lng)
         }
         let city = l.location.split(separator: ",").last.map {
@@ -264,11 +277,18 @@ struct ExploreView: View {
         searchText = ""
     }
 
+    /// Cancel the search entirely: empty the field, drop the committed city so
+    /// every listing comes back, and — the part that was missing — put the
+    /// camera back over all of them. Without the re-fit the map stayed zoomed
+    /// on the city that was just cancelled, so "annuler" widened the data
+    /// underneath a viewport that still showed one quartier.
     private func clearSearch() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         searchText = ""
         committedLocation = ""
+        selected = nil
         withAnimation(Motion.instant) { searchActive = false }
+        fitAllListings()
     }
 
     /// Coordinate for a listing on the map.
@@ -279,7 +299,7 @@ struct ExploreView: View {
     /// several listings sharing a city don't stack on the exact same point.
     private func coord(_ i: Int) -> CLLocationCoordinate2D {
         let l = listings[i]
-        if let lat = l.lat, let lng = l.lng, lat != 0 || lng != 0 {
+        if let lat = l.lat, let lng = l.lng, Self.isInCameroon(lat: lat, lng: lng) {
             return CLLocationCoordinate2D(latitude: lat, longitude: lng)
         }
         // Fall back to the listing's declared city. `location` looks like
@@ -458,7 +478,7 @@ struct ExploreView: View {
             zoomButton("plus")  { zoom(factor: 0.5) }        // in
             zoomButton("minus") { zoom(factor: 2.0) }        // out
             zoomButton("mappin.and.ellipse.circle.fill") { recenterUser() }
-            zoomButton("map") { fitCountry() }
+            zoomButton("map") { fitAllListings() }
         }
         .padding(.trailing, 14)
         .padding(.bottom, 200)
@@ -498,6 +518,36 @@ struct ExploreView: View {
         currentSpan = MKCoordinateSpan(latitudeDelta: 0.06, longitudeDelta: 0.06)
         withAnimation(Motion.standard) {
             position = .region(MKCoordinateRegion(center: currentCenter, span: currentSpan))
+        }
+    }
+
+    /// Frame every listing currently on the map — the real "voir tout".
+    ///
+    /// Preferred over `fitCountry()` because a fixed 12° box over Cameroon is
+    /// mostly empty space: with the pilot in Douala it puts every pin in one
+    /// small cluster. This fits the actual bounding box of what is displayed,
+    /// so cancelling a search lands on the annonces rather than on the country.
+    private func fitAllListings() {
+        let coords = (0..<listings.count).map(coord)
+        guard !coords.isEmpty else { return fitCountry() }
+
+        let lats = coords.map(\.latitude)
+        let lngs = coords.map(\.longitude)
+        let minLat = lats.min()!, maxLat = lats.max()!
+        let minLng = lngs.min()!, maxLng = lngs.max()!
+
+        let center = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,
+                                            longitude: (minLng + maxLng) / 2)
+        // 1.4× padding so pins never sit on the edge, and a floor so a single
+        // listing (or several at one address) doesn't zoom to street level.
+        let span = MKCoordinateSpan(
+            latitudeDelta: min(max((maxLat - minLat) * 1.4, 0.08), maxSpan.latitudeDelta),
+            longitudeDelta: min(max((maxLng - minLng) * 1.4, 0.08), maxSpan.longitudeDelta)
+        )
+        currentCenter = center
+        currentSpan = span
+        withAnimation(Motion.gentle) {
+            position = .region(MKCoordinateRegion(center: center, span: span))
         }
     }
 
@@ -649,9 +699,10 @@ struct ExploreView: View {
         HStack(spacing: 12) {
             if searchActive {
                 Button {
-                    searchText = ""
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                    withAnimation(Motion.instant) { searchActive = false }
+                    // One cancel path. This used to clear only the text field,
+                    // leaving `committedLocation` set and the camera parked on
+                    // the previous city.
+                    clearSearch()
                 } label: {
                     Image(systemName: "arrow.left")
                         .font(.system(size: 16, weight: .semibold))

@@ -244,7 +244,10 @@ struct ChatThreadView: View {
                 if thread.hasListing { listingPill }
                 messagesList
                 if replyingTo != nil { replyPreview }
-                // if !recorder.isRecording { quickReplies } // DEBUG: hidden to test mic tap
+                // Hidden while recording (the waveform takes the space) and while
+                // the user is already typing, where a row of canned openers is
+                // just noise over the keyboard.
+                if !recorder.isRecording && draft.isEmpty { quickReplies }
                 composer
             }
             .background(Color(hex: 0xF4F5F8))

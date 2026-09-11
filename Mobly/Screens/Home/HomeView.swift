@@ -106,8 +106,15 @@ struct HomeView: View {
     }
 
     private var featuredListings: [Listing] {
-        let boosted = liveListings.filter { $0.boosted }
-        let rest    = liveListings.filter { !$0.boosted }
+        let pool: [Listing]
+        if let city = userCity {
+            let local = liveListings.filter { $0.location.lowercased().contains(city) }
+            pool = local.isEmpty ? liveListings : local
+        } else {
+            pool = liveListings
+        }
+        let boosted = pool.filter { $0.boosted }
+        let rest    = pool.filter { !$0.boosted }
         return Array((boosted + rest).prefix(6))
     }
 
@@ -539,13 +546,9 @@ struct HomeView: View {
         } else {
             base = liveListings
         }
-        // Sort near-user listings to the top — any listing whose `location`
-        // string contains the user's city ranks 0, everything else keeps its
-        // original order via a stable partition.
         guard let city = userCity else { return base }
         let near = base.filter { $0.location.lowercased().contains(city) }
-        let far  = base.filter { !$0.location.lowercased().contains(city) }
-        return near + far
+        return near.isEmpty ? base : near
     }
 
     private var recommendedRow: some View {

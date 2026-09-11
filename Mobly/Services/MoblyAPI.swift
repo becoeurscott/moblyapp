@@ -281,6 +281,9 @@ final class MoblyAPI {
             data = d
             http = resp as? HTTPURLResponse ?? HTTPURLResponse()
         } catch let urlError as URLError {
+            #if DEBUG
+            print("[MOBLYNET] \(path) failed: code=\(urlError.code.rawValue) \(urlError.localizedDescription)")
+            #endif
             // Separate "no network" from a server fault so the UI can offer the
             // right recovery ("vérifiez votre connexion" vs "réessayez").
             let offlineCodes: Set<URLError.Code> = [

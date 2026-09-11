@@ -579,11 +579,9 @@ final class AuthStore: ObservableObject {
         case .offline:        return "Pas de connexion. Vérifiez votre réseau."
         case .validationFailed: return "Vérifiez les informations saisies."
         case .internalError:
-            if e.status == 502 || e.status == 503 {
+            if e.status == 0 || e.status == 502 || e.status == 503 {
                 return e.message
             }
-            // Surface the request id — it's the only thing that makes a user
-            // report traceable in the logs.
             return e.requestId.map { "Erreur serveur. Référence : \(String($0.prefix(8)))" }
                 ?? "Erreur serveur. Réessayez."
         default:              return e.message

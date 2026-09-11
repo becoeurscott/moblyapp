@@ -282,14 +282,16 @@ final class MoblyAPI {
             http = resp as? HTTPURLResponse ?? HTTPURLResponse()
         } catch let urlError as URLError {
             #if DEBUG
-            print("[MOBLYNET] \(path) failed: code=\(urlError.code.rawValue) \(urlError.localizedDescription)")
+            MoblyNetDebug.record("\(path) code=\(urlError.code.rawValue) \(urlError.localizedDescription)")
             #endif
             // Separate "no network" from a server fault so the UI can offer the
             // right recovery ("vérifiez votre connexion" vs "réessayez").
             let offlineCodes: Set<URLError.Code> = [
                 .notConnectedToInternet, .networkConnectionLost,
-                .cannotConnectToHost, .cannotFindHost, .timedOut,
                 .dataNotAllowed, .internationalRoamingOff,
+            ]
+            let serverCodes: Set<URLError.Code> = [
+                .cannotConnectToHost, .cannotFindHost, .timedOut,
             ]
             if offlineCodes.contains(urlError.code) {
                 if retries > 0 {
@@ -300,6 +302,19 @@ final class MoblyAPI {
                 throw APIError(status: 0, code: .offline,
                                message: "Pas de connexion. Vérifiez votre réseau.",
                                requestId: nil, fields: [:])
+            }
+            if serverCodes.contains(urlError.code) {
+                if retries > 0 {
+                    try? await Task.sleep(nanoseconds: backoff(attempt: 2 - retries))
+                    return try await request(path, method: method, query: query, body: body,
+                                             authorized: authorized, retries: retries - 1)
+                }
+                let online = await NetworkMonitor.shared.isConnected
+                let msg = online
+                    ? "Le serveur ne répond pas. Réessayez dans un instant."
+                    : "Pas de connexion. Vérifiez votre réseau."
+                throw APIError(status: 0, code: online ? .internalError : .offline,
+                               message: msg, requestId: nil, fields: [:])
             }
             // A cancelled request is not a failure. SwiftUI cancels the
             // `.refreshable` task as soon as the pull gesture ends, so treating
@@ -1174,3 +1189,23 @@ private struct AnyEncodable: Encodable {
     init(_ wrapped: Encodable) { encodeFunc = wrapped.encode }
     func encode(to encoder: Encoder) throws { try encodeFunc(encoder) }
 }
+
+
+#if DEBUG
+/// Temporary diagnostic: the simulator's system log redacts app messages, so
+/// transport failures are appended to a file we can read from the host.
+enum MoblyNetDebug {
+    static func record(_ line: String) {
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("netdebug.log")
+        let stamped = "\(Date()) \(line)\n"
+        if let data = stamped.data(using: .utf8) {
+            if let h = try? FileHandle(forWritingTo: url) {
+                h.seekToEndOfFile(); h.write(data); try? h.close()
+            } else {
+                try? data.write(to: url)
+            }
+        }
+    }
+}
+#endif

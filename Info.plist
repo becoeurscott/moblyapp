@@ -66,5 +66,20 @@
 			</array>
 		</dict>
 	</array>
+	<!--
+	  Camera and photo library.
+
+	  The chat attachment sheet opens UIImagePickerController with
+	  sourceType = .camera; without NSCameraUsageDescription iOS terminates the
+	  app the instant it touches the camera (TCC), which is exactly what
+	  crashed build 5 on device. Photo picking goes through SwiftUI's
+	  PhotosPicker, which runs out of process and does not strictly require a
+	  key — the entry is kept so a future switch to PHPhotoLibrary cannot
+	  reintroduce the same crash.
+	-->
+	<key>NSCameraUsageDescription</key>
+	<string>Mobly utilise l'appareil photo pour envoyer des photos dans vos conversations.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Mobly accède à vos photos pour les envoyer dans vos conversations et illustrer vos annonces.</string>
 </dict>
 </plist>

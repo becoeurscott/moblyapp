@@ -92,10 +92,10 @@ final class MoblyAPI {
 
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.default
-        // Without explicit timeouts a request can hang for 60s on a stalled
-        // connection, which on a weak mobile network reads as a frozen app.
-        cfg.timeoutIntervalForRequest = 15
-        cfg.timeoutIntervalForResource = 30
+        // Render free-tier cold-starts can take 30-50s, so the per-request
+        // timeout must be generous enough for the first hit after a spin-down.
+        cfg.timeoutIntervalForRequest = 45
+        cfg.timeoutIntervalForResource = 90
         cfg.waitsForConnectivity = false   // fail fast so the UI can say "hors ligne"
 
         // NEVER let HTTP caching touch the API.

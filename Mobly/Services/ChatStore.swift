@@ -15,6 +15,9 @@ struct MessageDTO: Codable, Identifiable, Equatable {
     let text: String
     let mediaUrl: String?
     let durationSec: Int?
+    /// True once the chat-media retention job has deleted the file from storage.
+    /// Optional so a build talking to an older backend still decodes.
+    var mediaExpired: Bool? = nil
     let replyToId: String?
     /// Set only when this is a SYSTEM message posted from a visit state change.
     /// `visitAction` snapshots the transition (REQUESTED / CONFIRMED / CANCELLED

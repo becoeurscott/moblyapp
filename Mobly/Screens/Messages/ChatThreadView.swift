@@ -83,6 +83,7 @@ struct ChatThreadView: View {
                 voiceDuration: voice.map { $0.label },
                 voiceSeconds: voice.map { $0.seconds },
                 mediaUrl: dto.mediaUrl,
+                mediaExpired: dto.mediaExpired ?? false,
                 locationLat: loc?.lat,
                 locationLng: loc?.lng,
                 day: Self.dayLabel(dto.createdAt),
@@ -1120,32 +1121,40 @@ struct MessageBubble: View {
                 }
             }
         case .voice:
-            VoiceBubble(message: message)
-        case .image:
-            Group {
-                if let urlStr = message.mediaUrl, let url = URL(string: urlStr) {
-                    CachedChatImage(url: url)
-                        .onTapGesture { onImageTap?(url) }
-                } else {
-                    imagePlaceholder
-                }
+            if message.mediaExpired {
+                expiredLabel("Note vocale expirée", icon: "mic.slash.fill")
+            } else {
+                VoiceBubble(message: message)
             }
-            // Time + ticks float over the bottom of the photo on a soft scrim,
-            // WhatsApp-style, so the image can stay full-bleed 9:16 with no
-            // coloured strip beneath it.
-            .overlay(alignment: .bottomTrailing) {
-                HStack(spacing: 3) {
-                    Text(message.time)
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.white)
-                    if message.fromMe { statusTicks }
+        case .image:
+            if message.mediaExpired {
+                expiredImagePlaceholder
+            } else {
+                Group {
+                    if let urlStr = message.mediaUrl, let url = URL(string: urlStr) {
+                        CachedChatImage(url: url)
+                            .onTapGesture { onImageTap?(url) }
+                    } else {
+                        imagePlaceholder
+                    }
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule().fill(Color.black.opacity(0.35))
-                )
-                .padding(8)
+                // Time + ticks float over the bottom of the photo on a soft scrim,
+                // WhatsApp-style, so the image can stay full-bleed 9:16 with no
+                // coloured strip beneath it.
+                .overlay(alignment: .bottomTrailing) {
+                    HStack(spacing: 3) {
+                        Text(message.time)
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.white)
+                        if message.fromMe { statusTicks }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule().fill(Color.black.opacity(0.35))
+                    )
+                    .padding(8)
+                }
             }
         case .location:
             LocationBubble(message: message)
@@ -1164,6 +1173,32 @@ struct MessageBubble: View {
                 .foregroundStyle(Color(hex: 0xC4C7D2))
         }
         .frame(width: 200, height: 150)
+    }
+
+    /// Shown when the retention job has deleted an expired photo. A muted 9:16
+    /// card so the bubble keeps its shape rather than collapsing.
+    private var expiredImagePlaceholder: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "clock.badge.xmark")
+                .font(.system(size: 26))
+                .foregroundStyle(Color(hex: 0x9A9DAC))
+            Text("Photo expirée")
+                .font(.moblyBody(12.5, weight: .medium))
+                .foregroundStyle(Color(hex: 0x9A9DAC))
+        }
+        .frame(width: 220, height: 220 * 16 / 9)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(hex: 0xF1F2F6)))
+    }
+
+    /// Inline "expirée" label for a voice note whose file has been removed.
+    private func expiredLabel(_ text: String, icon: String) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .medium))
+            Text(text)
+                .font(.moblyBody(13, weight: .medium))
+        }
+        .foregroundStyle(message.fromMe ? Color.white.opacity(0.85) : Color(hex: 0x9A9DAC))
     }
 
     private var statusTicks: some View {

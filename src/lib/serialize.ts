@@ -111,6 +111,7 @@ export function serializeMessage(m: {
   text: string;
   mediaUrl: string | null;
   durationSec: number | null;
+  mediaExpired?: boolean;
   replyToId: string | null;
   visitId?: string | null;
   visitAction?: string | null;
@@ -127,6 +128,7 @@ export function serializeMessage(m: {
     text: m.text,
     mediaUrl: m.mediaUrl,
     durationSec: m.durationSec,
+    mediaExpired: m.mediaExpired ?? false,
     replyToId: m.replyToId,
     visitId: m.visitId ?? null,
     visitAction: m.visitAction ?? null,

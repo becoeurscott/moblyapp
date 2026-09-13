@@ -142,6 +142,9 @@ struct ChatMessage: Identifiable, Equatable {
     var voiceSeconds: Int? = nil         // integer duration used by the player
     var imageName: String? = nil
     var mediaUrl: String? = nil
+    /// True once the server's retention job has deleted the photo / voice file.
+    /// The bubble then shows an "expirée" placeholder instead of loading it.
+    var mediaExpired: Bool = false
     /// Set only when `kind == .location`. Coordinates parsed from the
     /// message text (a Google Maps URL) and reused to open the native map app.
     var locationLat: Double? = nil

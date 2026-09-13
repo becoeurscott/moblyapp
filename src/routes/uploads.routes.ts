@@ -6,6 +6,7 @@ import { requireAuth, requireOwner } from '../middleware/auth';
 import { writeLimiter } from '../middleware/security';
 import { restrictionGate } from '../middleware/gates';
 import { env } from '../config/env';
+import { uploadChatMedia } from '../lib/supabaseStorage';
 
 export const uploadsRouter = Router();
 
@@ -131,6 +132,9 @@ uploadsRouter.post(
  * anything. Sending a photo in a conversation has nothing to do with owning a
  * listing, so it lives here — any signed-in user, gated only by the same
  * `MESSAGE_MEDIA` restriction as voice notes.
+ *
+ * Stored on Supabase Storage (not Cloudinary): chat media is auto-expired by
+ * the retention job, so it belongs in the cheap, disposable bucket.
  */
 uploadsRouter.post(
   '/chat-image',
@@ -141,13 +145,8 @@ uploadsRouter.post(
   asyncHandler(async (req, res) => {
     const file = req.file as Express.Multer.File | undefined;
     if (!file) throw new ApiError(400, 'Aucune image envoyée', 'VALIDATION_FAILED');
-    const uploaded = await uploadOne(file.buffer, req.userId!);
-    res.status(201).json({
-      url: uploaded.url,
-      publicId: uploaded.publicId,
-      width: uploaded.width,
-      height: uploaded.height,
-    });
+    const url = await uploadChatMedia(file.buffer, 'image/jpeg', 'jpg', req.userId!);
+    res.status(201).json({ url });
   })
 );
 
@@ -180,14 +179,9 @@ uploadsRouter.post(
 /**
  * POST /api/uploads/voice — one recording, field name `voice`.
  *
- * Voice notes used to never leave the sender's phone: the app sent a plain
- * TEXT message reading "🎤 Note vocale (0:05)" and kept the audio in a local
- * in-memory map, so the sender could replay it and the recipient received a
- * line of text with nothing to play. This is the missing half — the file goes
- * to Cloudinary and the returned URL travels on the message as `mediaUrl`.
- *
- * `resource_type: 'video'` is not a typo: Cloudinary handles audio through its
- * video pipeline, and it is what makes `duration` come back on the response.
+ * Stored on Supabase Storage (chat media bucket), same as chat images, so it
+ * is covered by the retention job. The client measures the note's length, so we
+ * return `durationSec: null` and the app falls back to its own timer value.
  */
 uploadsRouter.post(
   '/voice',
@@ -198,44 +192,12 @@ uploadsRouter.post(
   asyncHandler(async (req, res) => {
     const file = req.file as Express.Multer.File | undefined;
     if (!file) throw new ApiError(400, 'Aucun audio envoyé', 'VALIDATION_FAILED');
-
-    // `resource_type: 'auto'` lets Cloudinary detect the m4a and route it
-    // through the (audio-capable) video pipeline. Using an explicit 'video'
-    // here was silently hanging on the deployed instance — the callback never
-    // fired, so the request never finished, morgan never logged it, and Render's
-    // proxy returned a 502 the app couldn't explain ("voice ne s'envoie pas").
-    const uploaded = await new Promise<{ url: string; durationSec: number | null }>(
-      (resolve, reject) => {
-        // Hard timeout so a stalled Cloudinary call can never hang the request
-        // indefinitely: fail loud and fast with a diagnosable error instead.
-        const timer = setTimeout(
-          () => reject(new Error('Cloudinary voice upload timed out')),
-          25_000
-        );
-        const stream = cloudinary.uploader.upload_stream(
-          {
-            folder: `${env.cloudinary.folder}/chat/voice/${req.userId!}`,
-            resource_type: 'auto',
-            overwrite: false,
-          },
-          (err, result) => {
-            clearTimeout(timer);
-            if (err || !result) return reject(err ?? new Error('Upload failed'));
-            resolve({
-              url: result.secure_url,
-              durationSec: result.duration ? Math.round(result.duration) : null,
-            });
-          }
-        );
-        stream.end(file.buffer);
-      }
-    ).catch((e: unknown) => {
-      // Surface the real reason in the logs (it was invisible before) and hand
-      // the client a clean 502 with a message rather than a silent gateway one.
-      console.error('[uploads/voice] Cloudinary upload failed:', e);
-      throw new ApiError(502, "Envoi de la note vocale impossible", 'INTERNAL');
-    });
-
-    res.status(201).json(uploaded);
+    try {
+      const url = await uploadChatMedia(file.buffer, 'audio/mp4', 'm4a', req.userId!);
+      res.status(201).json({ url, durationSec: null });
+    } catch (e) {
+      console.error('[uploads/voice] Supabase upload failed:', e);
+      throw new ApiError(502, 'Envoi de la note vocale impossible', 'INTERNAL');
+    }
   })
 );

@@ -152,6 +152,20 @@ export const env = {
     },
   },
 
+  // Supabase Storage — chat media only (images + voice notes). Listing photos
+  // and avatars stay on Cloudinary. Auto-expired after `chatMediaRetentionDays`
+  // by the cleanup job.
+  supabase: {
+    url: (process.env.SUPABASE_URL ?? '').replace(/\/+$/, ''),
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+    chatBucket: process.env.SUPABASE_CHAT_BUCKET ?? 'chat-media',
+    get configured(): boolean {
+      return Boolean(this.url && this.serviceRoleKey);
+    },
+  },
+  /** How long a chat image / voice note lives before the retention job deletes it. */
+  chatMediaRetentionDays: Number(process.env.CHAT_MEDIA_RETENTION_DAYS ?? 90),
+
   /** Share-a-listing template only. Contact stays in-app (2026 pivot). */
   whatsappShareTemplate:
     process.env.WHATSAPP_MESSAGE_TEMPLATE ??

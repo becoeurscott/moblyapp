@@ -543,6 +543,10 @@ model Message {
   text         String
   mediaUrl     String? // voice note / image
   durationSec  Int? // voice note length
+  /// Set true by the chat-media retention job once the file has been deleted
+  /// from storage (after CHAT_MEDIA_RETENTION_DAYS). `mediaUrl` is cleared at
+  /// the same time; the app shows an "expirée" bubble instead of a broken one.
+  mediaExpired Boolean       @default(false)
   replyToId    String?
   /// System messages posted from a visit state change. `visitId` points at the
   /// VisitRequest row; `visitAction` snapshots the transition that produced

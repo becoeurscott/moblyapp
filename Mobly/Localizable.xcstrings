@@ -16,6 +16,9 @@
     "· %lld avis" : {
 
     },
+    "· Aucun avis" : {
+
+    },
     "« %@ » est boostée pour %lld jours." : {
       "localizations" : {
         "fr" : {
@@ -25,6 +28,9 @@
           }
         }
       }
+    },
+    "(%lld avis)" : {
+
     },
     "(%lld)" : {
 
@@ -86,16 +92,6 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "%1$@ · %2$@"
-          }
-        }
-      }
-    },
-    "%@ · %lld avis" : {
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@ · %2$lld avis"
           }
         }
       }
@@ -937,6 +933,9 @@
         }
       }
     },
+    "Appareil photo indisponible" : {
+
+    },
     "Appartement" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1047,6 +1046,9 @@
           }
         }
       }
+    },
+    "Appuyez longuement pour enregistrer" : {
+
     },
     "Archiver" : {
       "extractionState" : "manual",
@@ -1546,6 +1548,9 @@
           }
         }
       }
+    },
+    "Autorisez l'accès au microphone dans Réglages pour enregistrer des notes vocales." : {
+
     },
     "Autre" : {
       "extractionState" : "manual",
@@ -2089,6 +2094,9 @@
         }
       }
     },
+    "Ce propriétaire n'a pas encore vérifié son identité." : {
+
+    },
     "Cela change les équipements demandés ensuite." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2122,6 +2130,9 @@
           }
         }
       }
+    },
+    "Cet appareil n'a pas d'appareil photo. Choisissez une photo dans la galerie." : {
+
     },
     "Cet e-mail est déjà utilisé" : {
       "extractionState" : "manual",
@@ -2590,6 +2601,9 @@
           }
         }
       }
+    },
+    "Compte suspendu" : {
+
     },
     "Compte vérifié" : {
       "extractionState" : "manual",
@@ -3263,6 +3277,19 @@
         }
       }
     },
+    "DE RETOUR DANS" : {
+
+    },
+    "De retour dans %lld jours, %lld heures, %lld minutes et %lld secondes" : {
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "De retour dans %1$lld jours, %2$lld heures, %3$lld minutes et %4$lld secondes"
+          }
+        }
+      }
+    },
     "Débloquer" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3613,6 +3640,9 @@
       }
     },
     "Douala · 350m" : {
+
+    },
+    "Durée indéterminée" : {
 
     },
     "Durée min." : {
@@ -4744,6 +4774,9 @@
         }
       }
     },
+    "Hôte non vérifié" : {
+
+    },
     "Hôte vérifié" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5127,6 +5160,9 @@
         }
       }
     },
+    "La vérification d'identité est obligatoire pour publier" : {
+
+    },
     "Laisser un avis" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5143,6 +5179,9 @@
           }
         }
       }
+    },
+    "Lancez une recherche depuis Explorer : elle sera gardée ici." : {
+
     },
     "Langue" : {
       "extractionState" : "manual",
@@ -5385,6 +5424,9 @@
         }
       }
     },
+    "Maintenance en cours" : {
+
+    },
     "Maison" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5544,6 +5586,9 @@
         }
       }
     },
+    "Merci de votre patience." : {
+
+    },
     "Mes annonces" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5634,6 +5679,9 @@
           }
         }
       }
+    },
+    "Mettre à jour" : {
+
     },
     "Mettre en pause" : {
       "extractionState" : "manual",
@@ -5740,6 +5788,9 @@
         }
       }
     },
+    "Microphone désactivé" : {
+
+    },
     "Mieux notés" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5760,7 +5811,13 @@
     "Mis à jour le %@" : {
 
     },
+    "Mise à jour requise" : {
+
+    },
     "mobly" : {
+
+    },
+    "Mobly · Votre espace, à portée de main." : {
 
     },
     "Mobly v1.0.0 · Trouvez votre espace." : {
@@ -6177,6 +6234,9 @@
         }
       }
     },
+    "Note vocale non envoyée" : {
+
+    },
     "Noter Mobly sur l'App Store ⭐️" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6230,6 +6290,15 @@
           }
         }
       }
+    },
+    "Nous revenons d’un instant à l’autre" : {
+
+    },
+    "Nous revenons d'un instant à l'autre…" : {
+
+    },
+    "Nouveau" : {
+
     },
     "NOUVEAU" : {
       "extractionState" : "manual",
@@ -6593,6 +6662,9 @@
           }
         }
       }
+    },
+    "Ouvrir Réglages" : {
+
     },
     "Paiement Mobile Money · sans engagement" : {
       "extractionState" : "manual",
@@ -6971,6 +7043,9 @@
         }
       }
     },
+    "Plus tard" : {
+
+    },
     "Plus tôt" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7089,6 +7164,12 @@
           }
         }
       }
+    },
+    "Pour la sécurité de tous, vérifiez\nvotre identité avant de publier." : {
+
+    },
+    "Pour publier un espace sur Mobly, votre pièce d'identité doit d'abord être vérifiée. Cela protège les visiteurs et rassure vos futurs locataires." : {
+
     },
     "PRÉFÉRENCES" : {
       "extractionState" : "manual",
@@ -7412,6 +7493,9 @@
           }
         }
       }
+    },
+    "Propriétaire non vérifié" : {
+
     },
     "Propriétaire vérifié" : {
       "extractionState" : "manual",
@@ -8275,6 +8359,12 @@
         }
       }
     },
+    "Réponse en général sous 24 h." : {
+
+    },
+    "Reprise possible encore %lld minutes" : {
+
+    },
     "Reprogrammer" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8777,6 +8867,9 @@
         }
       }
     },
+    "Soyez le premier à laisser un avis" : {
+
+    },
     "SPONSORISÉ" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8898,6 +8991,15 @@
           }
         }
       }
+    },
+    "Support indisponible" : {
+
+    },
+    "Support Mobly" : {
+
+    },
+    "Suppression impossible" : {
+
     },
     "Supprimer" : {
       "extractionState" : "manual",
@@ -9497,6 +9599,9 @@
         }
       }
     },
+    "Trier par" : {
+
+    },
     "Trois étapes, et c'est parti." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9925,6 +10030,9 @@
         }
       }
     },
+    "Vérification requise" : {
+
+    },
     "Vérification…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9975,6 +10083,12 @@
           }
         }
       }
+    },
+    "Vérifier maintenant" : {
+
+    },
+    "Vérifier mon identité" : {
+
     },
     "Vérifiez et enregistrez" : {
       "extractionState" : "manual",
@@ -10043,6 +10157,9 @@
           }
         }
       }
+    },
+    "Vérifiez votre identité" : {
+
     },
     "Vérifiez votre identité pour rassurer les propriétaires." : {
       "extractionState" : "manual",
@@ -10502,6 +10619,9 @@
         }
       }
     },
+    "Vos visiteurs pourront laisser un avis ici" : {
+
+    },
     "Votre commentaire" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10553,6 +10673,9 @@
         }
       }
     },
+    "Votre compte, vos annonces, vos favoris et vos messages seront définitivement supprimés. Cette action est irréversible." : {
+
+    },
     "Votre couleur" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10569,6 +10692,9 @@
           }
         }
       }
+    },
+    "Votre espace" : {
+
     },
     "Votre espace propriétaire est prêt.\nVos locataires vous attendent." : {
       "extractionState" : "manual",
@@ -10810,6 +10936,9 @@
           }
         }
       }
+    },
+    "Vous ne pouvez pas contacter votre espace" : {
+
     },
     "Vous ne recevrez plus ses messages. Vous pouvez le débloquer à tout moment." : {
       "extractionState" : "manual",

@@ -17,6 +17,10 @@ final class LocationService: NSObject, ObservableObject {
     @Published private(set) var status: Status = .unknown
     /// Localised city, e.g. "Douala". Nil until resolved or if refused.
     @Published private(set) var city: String?
+    /// ISO country code of the resolved position, e.g. "CM". Nil until
+    /// resolved or refused. Lets the feed tell an in-market user from someone
+    /// browsing from abroad, for whom "près de chez vous" means nothing.
+    @Published private(set) var countryCode: String?
     @Published private(set) var region: String?
 
     private let manager = CLLocationManager()
@@ -103,6 +107,7 @@ final class LocationService: NSObject, ObservableObject {
                     ?? place.subAdministrativeArea
                     ?? place.administrativeArea
                 self.region = place.administrativeArea
+                self.countryCode = place.isoCountryCode
                 self.status = self.city == nil ? .denied : .resolved
 
                 if let city = self.city {

@@ -18,10 +18,12 @@ struct HomeView: View {
     @ObservedObject private var location = LocationService.shared
     @ObservedObject private var placeCompleter = LocationSearchCompleter.shared
     @ObservedObject private var userData = UserDataStore.shared
+    @ObservedObject private var savedSearches = SavedSearchStore.shared
 
     @State private var appeared = false
     @State private var selectedQuickFilter: String? = nil
     @State private var searchText = ""
+    @State private var showBecomeOwner = false
     @FocusState private var searchActive: Bool
 
     private var searching: Bool { searchActive || !searchText.isEmpty }
@@ -189,12 +191,60 @@ struct HomeView: View {
     private var suggestionsCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             if searchText.isEmpty {
+                // Recent searches first — the same list as Profil → Recherches
+                // enregistrées, so what you searched is where you expect it in
+                // both places. Tapping one runs it again.
+                if !savedSearches.items.isEmpty {
+                    HStack {
+                        Text("Recherches récentes")
+                            .font(.moblyBody(11, weight: .semibold))
+                            .foregroundStyle(Color(hex: 0x9A9DAC))
+                        Spacer()
+                        Button {
+                            withAnimation(Motion.quick) { savedSearches.clear() }
+                        } label: {
+                            Text("Effacer")
+                                .font(.moblyBody(11, weight: .semibold))
+                                .foregroundStyle(Color.moblyPrimary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 4)
+
+                    ForEach(Array(savedSearches.items.prefix(4))) { item in
+                        Button {
+                            dismissSearch()
+                            onOpenCityMap(item.query.isEmpty ? item.label : item.query)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(Color.moblyPrimary)
+                                    .frame(width: 34, height: 34)
+                                    .background(Circle().fill(Color.moblySurfaceTint))
+                                Text(item.label)
+                                    .font(.moblyBody(14, weight: .medium))
+                                    .foregroundStyle(Color.moblyTextPrimary)
+                                Spacer()
+                                Image(systemName: "arrow.up.left")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(Color(hex: 0xC4C7D2))
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 9)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Divider().padding(.horizontal, 16).padding(.vertical, 4)
+                }
+
                 Text("Quartiers populaires")
                     .font(.moblyBody(11, weight: .semibold))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
                     .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 4)
                 ForEach(Array(MoblyData.searchableLocations.prefix(6)), id: \.name) { s in
                     suggestionRow(s.name, s.region, action: {
+                        rememberSearch(s.name)
                         dismissSearch()
                         onOpenCityMap("\(s.name), \(s.region)")
                     })
@@ -261,6 +311,14 @@ struct HomeView: View {
         .buttonStyle(.plain)
     }
 
+    /// Record what was searched so it shows up under the bar next time — and
+    /// in Profil → Recherches enregistrées, which reads the same store.
+    private func rememberSearch(_ text: String) {
+        let q = text.trimmingCharacters(in: .whitespaces)
+        guard q.count >= 2 else { return }
+        savedSearches.add(label: q, query: q, filters: FilterState())
+    }
+
     private func dismissSearch() {
         searchActive = false
         searchText = ""
@@ -315,7 +373,11 @@ struct HomeView: View {
                     .submitLabel(.search)
                     .onSubmit {
                         let q = searchText.trimmingCharacters(in: .whitespaces)
-                        if !q.isEmpty { dismissSearch(); onOpenCityMap(q) }
+                        if !q.isEmpty {
+                            rememberSearch(q)
+                            dismissSearch()
+                            onOpenCityMap(q)
+                        }
                     }
                 if searching {
                     Button { searchText = "" } label: {
@@ -486,23 +548,23 @@ struct HomeView: View {
 
     private var promoBanner: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(
-                    LinearGradient(colors: [Color(hex: 0x3A4FF0), Color(hex: 0x5B6CF5)],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing)
-                )
+            Image("OwnerBanner")
+                .resizable()
+                .aspectRatio(contentMode: .fill)
 
             HStack {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(L("Visitez en toute confiance"))
+                    Text(L("Devenir propriétaire\navec Mobly"))
                         .font(.moblyHeading(19))
                         .foregroundStyle(.white)
-                    Text(L("Discutez et planifiez vos visites,\ndirectement dans Mobly"))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(L("Publiez votre espace, touchez\ndes milliers de locataires"))
                         .font(.moblyBody(12.5))
                         .foregroundStyle(.white.opacity(0.85))
                         .lineSpacing(2)
-                    Button(action: onSearch) {
-                        Text(L("Découvrir"))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(action: { showBecomeOwner = true }) {
+                        Text(L("Commencer"))
                             .font(.moblyBody(12.5, weight: .semibold))
                             .foregroundStyle(Color.moblyPrimary)
                             .padding(.horizontal, 16).padding(.vertical, 9)
@@ -511,15 +573,17 @@ struct HomeView: View {
                     .buttonStyle(.plain)
                     .padding(.top, 2)
                 }
-                Spacer()
-                Image(systemName: "checkmark.shield.fill")
-                    .font(.system(size: 54, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.25))
+                Spacer(minLength: 8)
             }
             .padding(20)
         }
-        .frame(height: 150)
+        .frame(height: 184)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .shadow(color: Color.moblyPrimary.opacity(0.25), radius: 16, y: 10)
+        .fullScreenCover(isPresented: $showBecomeOwner) {
+            BecomeOwnerView(onClose: { showBecomeOwner = false })
+                .swipeToDismiss(onDismiss: { showBecomeOwner = false })
+        }
     }
 
     // MARK: Recommended row
@@ -528,7 +592,12 @@ struct HomeView: View {
     /// (freshest), falling back to what's stored on the account.
     private var userCity: String? {
         let c = location.city ?? auth.user?.city
-        let trimmed = c?.trimmingCharacters(in: .whitespaces).lowercased()
+        let trimmed = c?.trimmingCharacters(in: .whitespaces)
+            // Fold accents: the geocoder says "Yaoundé" and an annonce may be
+            // stored as "Yaounde" (or the reverse), and an unfolded compare
+            // silently matched nothing — which looked like no filter at all.
+            .folding(options: .diacriticInsensitive, locale: .current)
+            .lowercased()
         return (trimmed?.isEmpty ?? true) ? nil : trimmed
     }
 
@@ -546,9 +615,48 @@ struct HomeView: View {
         } else {
             base = liveListings
         }
-        guard let city = userCity else { return base }
-        let near = base.filter { $0.location.lowercased().contains(city) }
-        return near.isEmpty ? base : near
+        // Best-rated first, always — "Recommandé" should mean recommended, and
+        // the row was previously in whatever order the API returned.
+        let ranked = base.sorted { score($0) > score($1) }
+
+        // Someone outside Cameroon has no useful "near me": their city will
+        // never match a listing, so they get the best-rated spaces nationwide
+        // rather than an empty or arbitrary row.
+        guard let city = userCity, isInCameroon else { return ranked }
+
+        let near = ranked.filter {
+            $0.location
+                .folding(options: .diacriticInsensitive, locale: .current)
+                .lowercased()
+                .contains(city)
+        }
+        // A city with nothing in it falls back to the national ranking too.
+        return near.isEmpty ? ranked : near
+    }
+
+    /// Sort key: the rating, with the number of avis breaking ties so a lone
+    /// 5★ doesn't outrank a 4.8 with forty reviews. Unrated listings sort last
+    /// instead of being treated as zero-star.
+    private func score(_ l: Listing) -> Double {
+        let rating = Double(l.rating) ?? 0
+        guard rating > 0 else { return -1 }
+        return rating + min(Double(l.reviewCount), 50) / 1000
+    }
+
+    /// Whether the user is somewhere our inventory can serve.
+    ///
+    /// The device's country wins when we have it. Otherwise we fall back to
+    /// whether the city we resolved is one Mobly actually covers — a user in
+    /// Paris has a city, it just never matches a listing, and without this
+    /// check they would get an empty "Recommandé" instead of the best spaces
+    /// in the country.
+    private var isInCameroon: Bool {
+        if let code = location.countryCode { return code.uppercased() == "CM" }
+        guard let city = userCity else { return true }   // unknown: assume in-market
+        return MoblyData.searchableLocations.contains {
+            $0.name.folding(options: .diacriticInsensitive, locale: .current)
+                .lowercased() == city
+        }
     }
 
     private var recommendedRow: some View {

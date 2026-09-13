@@ -15,6 +15,7 @@ struct ExploreView: View {
     @ObservedObject private var listingStore = ListingStore.shared
     @ObservedObject private var ownerListings = OwnerListings.shared
     @ObservedObject private var placeCompleter = LocationSearchCompleter.shared
+    @ObservedObject private var savedSearches = SavedSearchStore.shared
     @State private var activeChip = "Tous"
     @State private var locatingUser = false
 
@@ -569,6 +570,37 @@ struct ExploreView: View {
     private var searchDropdown: some View {
         VStack(spacing: 0) {
             if searchText.isEmpty {
+                // Recent searches on top — the same store Profil → Recherches
+                // enregistrées reads, so the two never disagree.
+                if !savedSearches.items.isEmpty {
+                    HStack {
+                        Text("Recherches récentes")
+                            .font(.moblyBody(11, weight: .semibold))
+                            .foregroundStyle(Color(hex: 0x9A9DAC))
+                        Spacer()
+                        Button {
+                            withAnimation(Motion.quick) { savedSearches.clear() }
+                        } label: {
+                            Text("Effacer")
+                                .font(.moblyBody(11, weight: .semibold))
+                                .foregroundStyle(Color.moblyPrimary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 2)
+
+                    ForEach(Array(savedSearches.items.prefix(4))) { item in
+                        suggestionRow(title: item.label,
+                                      subtitle: "Recherche récente",
+                                      icon: "clock.arrow.circlepath",
+                                      action: {
+                                          if !item.filters.isEmpty { filters = item.filters }
+                                          goTo(item.query.isEmpty ? item.label : item.query)
+                                      })
+                    }
+                    Divider().padding(.horizontal, 16).padding(.vertical, 4)
+                }
+
                 ForEach(Array(MoblyData.searchableLocations.prefix(6)), id: \.name) { s in
                     suggestionRow(title: s.name,
                                   subtitle: "\(s.region), Cameroun",
@@ -611,11 +643,12 @@ struct ExploreView: View {
     }
 
     private func suggestionRow(title: String, subtitle: String,
+                               icon: String = "mappin.and.ellipse",
                                action: @escaping () -> Void) -> some View {
         HStack(spacing: 12) {
             ZStack {
                 Circle().fill(Color.moblySurfaceTint).frame(width: 32, height: 32)
-                Image(systemName: "mappin.and.ellipse")
+                Image(systemName: icon)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Color.moblyPrimary)
             }

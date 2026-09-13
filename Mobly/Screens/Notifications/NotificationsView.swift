@@ -1,5 +1,12 @@
 import SwiftUI
 
+/// Where tapping a notification (or a visit card) should land.
+enum NotificationTarget: Equatable {
+    case thread(String)
+    case listing(String)
+    case visits
+}
+
 struct MoblyNotification: Identifiable {
     enum Kind {
         case message, visit, match, priceDrop, verified, boost, newListing, reengage
@@ -43,12 +50,24 @@ struct MoblyNotification: Identifiable {
     let time: String
     let createdAt: Date
     var unread: Bool
+    /// Where this notification happened — `threadId`, `listingId`, `visitId`.
+    var payload: [String: String] = [:]
 
     init(id: String = UUID().uuidString, kind: Kind, title: String,
          message: String, time: String, createdAt: Date = Date(),
-         unread: Bool) {
+         unread: Bool, payload: [String: String] = [:]) {
         self.id = id; self.kind = kind; self.title = title; self.message = message
         self.time = time; self.createdAt = createdAt; self.unread = unread
+        self.payload = payload
+    }
+
+    /// Resolved destination for a tap. Nil when the server sent no target, in
+    /// which case the row stays inert rather than pretending to lead somewhere.
+    var destination: NotificationTarget? {
+        if let t = payload["threadId"], !t.isEmpty { return .thread(t) }
+        if let l = payload["listingId"], !l.isEmpty { return .listing(l) }
+        if payload["visitId"] != nil || kind == .visit { return .visits }
+        return nil
     }
 
     /// Convert a raw server DTO into the display model. Chooses an icon /
@@ -73,7 +92,8 @@ struct MoblyNotification: Identifiable {
             message: dto.body ?? "",
             time: Self.relative(dto.createdAt),
             createdAt: dto.createdAt,
-            unread: !dto.read
+            unread: !dto.read,
+            payload: dto.payload ?? [:]
         )
     }
 
@@ -91,6 +111,8 @@ enum NotificationData {
 }
 
 struct NotificationsView: View {
+    /// Called with the deep-link target when a notification is tapped.
+    var onOpen: (NotificationTarget) -> Void = { _ in }
     var onClose: () -> Void = {}
 
     @ObservedObject private var userData = UserDataStore.shared
@@ -170,10 +192,17 @@ struct NotificationsView: View {
                 .padding(.bottom, 8)
             ForEach(items) { item in
                 NotificationRow(item: item)
+                    .contentShape(Rectangle())
                     .onTapGesture {
                         // Mark-read of a single row is a next step; for now
                         // any tap flips the whole inbox to read.
                         Task { await userData.markAllNotificationsRead() }
+                        // …and take the user to where it happened. Rows with
+                        // no target stay put rather than bouncing you to a
+                        // screen that has nothing to do with the alert.
+                        if let target = item.destination {
+                            onOpen(target)
+                        }
                     }
             }
         }

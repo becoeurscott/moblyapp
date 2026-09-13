@@ -351,7 +351,7 @@ struct ListingDetailView: View {
             CircleIconButton(icon: "xmark", action: onClose)
             Spacer()
             HStack(spacing: 10) {
-                CircleIconButton(icon: "square.and.arrow.up") {}
+                CircleIconButton(icon: "square.and.arrow.up") { shareListing() }
                 CircleIconButton(icon: liked ? "heart.fill" : "heart",
                                  tint: liked ? .moblyAccent : .moblyTextPrimary) {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -378,6 +378,18 @@ struct ListingDetailView: View {
             Text(listing.title)
                 .font(.moblyHeading(24))
                 .foregroundStyle(Color.moblyTextPrimary)
+
+            // Category, directly under the name. The screen knew it all along
+            // (it drives "Similaires") but never showed it, so nothing said
+            // whether you were looking at a studio, a villa or an office.
+            if !listing.category.isEmpty {
+                Text(LT(listing.category))
+                    .font(.moblyBody(12, weight: .semibold))
+                    .foregroundStyle(Color.moblyPrimary)
+                    .padding(.horizontal, 11).padding(.vertical, 5)
+                    .background(Capsule().fill(Color(hex: 0xEEF0FE)))
+                    .padding(.top, 8)
+            }
 
             HStack(spacing: 6) {
                 if listing.rating.isEmpty {
@@ -407,6 +419,7 @@ struct ListingDetailView: View {
             }
             .padding(.top, 8)
 
+
             // Host row + in-app contact (2026 pivot)
             HStack(spacing: 14) {
                 ZStack {
@@ -425,7 +438,10 @@ struct ListingDetailView: View {
                     }
                     Text(listing.ownerVerified ? "Propriétaire vérifié" : "Propriétaire non vérifié")
                         .font(.moblyBody(13))
-                        .foregroundStyle(listing.ownerVerified ? Color(hex: 0x34A853) : Color(hex: 0x9A9DAC))
+                        // Blue, not green: "vérifié" is a Mobly guarantee, so it
+                        // carries the brand colour rather than a generic success
+                        // green that reads like a system state.
+                        .foregroundStyle(listing.ownerVerified ? Color.moblyPrimary : Color(hex: 0x9A9DAC))
                 }
                 Spacer()
                 // Same rule as the sticky bar: you are the owner, so there is
@@ -806,6 +822,30 @@ struct ListingDetailView: View {
                     .foregroundStyle(Color(hex: 0x9A9DAC))
             }
         }
+    }
+
+    /// Share sheet for the listing. The button existed with an empty closure —
+    /// tapping it did nothing at all. UIKit's activity controller rather than
+    /// SwiftUI's ShareLink so it can be presented from this fullScreenCover
+    /// without fighting the sheet that is already up.
+    private func shareListing() {
+        let price = listing.price.isEmpty ? "" : " — \(listing.price)"
+        let text = "\(listing.title)\(price)\n\(listing.location)\nSur Mobly"
+        var items: [Any] = [text]
+        if let url = URL(string: "https://mobly.cm/annonce/\(listing.id)") { items.append(url) }
+
+        let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        guard let scene = UIApplication.shared.connectedScenes
+                .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+              var top = scene.keyWindow?.rootViewController
+        else { return }
+        while let presented = top.presentedViewController { top = presented }
+        // iPad needs an anchor or it traps.
+        vc.popoverPresentationController?.sourceView = top.view
+        vc.popoverPresentationController?.sourceRect = CGRect(
+            x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
+        top.present(vc, animated: true)
+        SessionTracker.shared.log("listing.share", ["listingId": listing.id])
     }
 
     private func listenForReviews() {

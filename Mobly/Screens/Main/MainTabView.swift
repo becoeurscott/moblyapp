@@ -51,6 +51,8 @@ struct MainTabView: View {
     }()
     @State private var selectedListing: Listing?
     @State private var showNotifications = false
+    /// Set when a notification points at a visit; MessagesView opens the hub.
+    @State private var showVisitsFromRoute = false
     @State private var showSearch = false
     @State private var searchCategory: String?
     @State private var searchQuery: String = ""
@@ -66,6 +68,35 @@ struct MainTabView: View {
     private func openListing(_ listing: Listing) {
         ListingStore.shared.prefetchGallery(for: listing)
         selectedListing = listing
+    }
+
+    /// Take the user to whatever a notification (or a visit card) refers to.
+    ///
+    /// Threads reuse the push deep-link channel `MessagesView` already
+    /// watches, so there is one path into a conversation rather than two.
+    private func route(to target: NotificationTarget) {
+        switch target {
+        case .thread(let id):
+            withAnimation(Motion.quick) { tab = .messages }
+            PushService.shared.pendingThreadId = id
+
+        case .listing(let id):
+            if let known = MoblyData.all.first(where: { $0.id == id }) {
+                openListing(known)
+            } else {
+                // Not in the cached feed (an archived or filtered annonce):
+                // fetch it rather than silently doing nothing.
+                Task {
+                    if let dto = try? await MoblyAPI.shared.listing(id: id) {
+                        await MainActor.run { openListing(dto.asListing) }
+                    }
+                }
+            }
+
+        case .visits:
+            withAnimation(Motion.quick) { tab = .messages }
+            showVisitsFromRoute = true
+        }
     }
 
     var body: some View {
@@ -107,7 +138,7 @@ struct MainTabView: View {
                 .opacity(tab == .explore ? 1 : 0)
                 .allowsHitTesting(tab == .explore)
 
-                MessagesView()
+                MessagesView(openVisits: $showVisitsFromRoute)
                     .opacity(tab == .messages ? 1 : 0)
                     .allowsHitTesting(tab == .messages)
 
@@ -154,8 +185,18 @@ struct MainTabView: View {
             ListingDetailView(listing: listing, onClose: { selectedListing = nil })
         }
         .fullScreenCover(isPresented: $showNotifications) {
-            NotificationsView(onClose: { showNotifications = false })
-                .swipeToDismiss(onDismiss: { showNotifications = false })
+            NotificationsView(
+                onOpen: { target in
+                    showNotifications = false
+                    // Let the cover finish dismissing before presenting the
+                    // next screen, or the second one never appears.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        route(to: target)
+                    }
+                },
+                onClose: { showNotifications = false }
+            )
+            .swipeToDismiss(onDismiss: { showNotifications = false })
         }
         .fullScreenCover(isPresented: $showExplore) {
             ExploreSearchView(

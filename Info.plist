@@ -22,6 +22,14 @@
 	  If a custom crypto implementation is ever added, this must be revisited.
 	-->
 	<!-- Microphone: needed for voice-note recording in chat. -->
+	<!--
+	  Required before the camera can be opened at all: iOS terminates an app
+	  that presents a camera picker without this key, which is exactly why
+	  "+ → Caméra" in a conversation was quitting the app.
+	-->
+	<key>NSCameraUsageDescription</key>
+	<string>Mobly utilise l'appareil photo pour envoyer des photos dans vos conversations et illustrer vos annonces.</string>
+
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Mobly utilise le micro pour enregistrer des notes vocales dans vos conversations.</string>
 

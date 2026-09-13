@@ -100,10 +100,12 @@ private struct HeroCard: View {
                         }
                     }
                     Spacer()
-                    Text("Voir détails")
-                        .font(.moblyHeading(13)).foregroundStyle(.white)
-                        .padding(.horizontal, 16).padding(.vertical, 10)
-                        .background(Capsule().fill(Color.moblyPrimary))
+                    if !listing.category.isEmpty {
+                        Text(LT(listing.category))
+                            .font(.moblyHeading(13)).foregroundStyle(Color.moblyPrimary)
+                            .padding(.horizontal, 16).padding(.vertical, 10)
+                            .background(Capsule().fill(.white))
+                    }
                 }
                 .padding(16)
             }

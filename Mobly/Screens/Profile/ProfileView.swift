@@ -17,9 +17,13 @@ struct ProfileView: View {
     var onLogout: () -> Void = {}
 
     @ObservedObject private var session = Session.shared
+    @ObservedObject private var identity = IdentityVerificationStore.shared
     @ObservedObject private var lang = AppLang.shared
 
     @State private var showBecomeOwner = false
+    /// Tapped "Devenir propriétaire" without a verified identity.
+    @State private var askIdentityFirst = false
+    @State private var goToIdentity = false
 
     /// Logout is a three-beat flow: confirm → sign out (spinner) → goodbye
     /// card, then RootView takes over and returns to Welcome.
@@ -93,6 +97,13 @@ struct ProfileView: View {
         } message: {
             Text("Vous devrez vous reconnecter pour accéder à vos messages et à vos favoris.")
         }
+        .alert("Vérifiez votre identité", isPresented: $askIdentityFirst) {
+            Button("Vérifier maintenant") { goToIdentity = true }
+            Button("Plus tard", role: .cancel) {}
+        } message: {
+            Text("Pour publier un espace sur Mobly, votre pièce d'identité doit d'abord être vérifiée. Cela protège les visiteurs et rassure vos futurs locataires.")
+        }
+        .navigationDestination(isPresented: $goToIdentity) { IdentityVerificationView() }
         .fullScreenCover(isPresented: $showBecomeOwner) {
             BecomeOwnerView(onClose: { showBecomeOwner = false })
                 .swipeToDismiss(onDismiss: { showBecomeOwner = false })
@@ -146,7 +157,11 @@ struct ProfileView: View {
         .refreshable {
             await AuthStore.shared.bootstrap()
             await UserDataStore.shared.loadFavorites(silent: true)
+            await identity.refresh()
         }
+        // Keep the badge honest when the screen is opened: a decision may have
+        // landed while the user was elsewhere in the app.
+        .task { await identity.refresh() }
         .background(Color.moblySurface)
     }
 
@@ -158,6 +173,30 @@ struct ProfileView: View {
     /// From the server. `verified` only means the phone was confirmed, so the
     /// identity badge reads `identityVerified` — the result of the KYC check.
     private var identityVerified: Bool { auth.user?.identityVerified ?? false }
+
+    /// How the identity row should read right now.
+    ///
+    /// It used to be binary — vérifié or non vérifié — so an owner who had
+    /// submitted their documents and was waiting on a decision saw a red dot
+    /// reading "Identité non vérifiée", which looks like the submission was
+    /// lost. The KYC flow has five outcomes and the badge now shows the one
+    /// the account is actually in.
+    private var identityState: (label: String, dot: Color, cta: String?, spins: Bool) {
+        if identityVerified {
+            return ("Identité vérifiée", Color(hex: 0x34C759), nil, false)
+        }
+        switch identity.status {
+        case .pending, .inReview:
+            return ("Vérification en cours", Color(hex: 0xE5950C), "Suivre", true)
+        case .declined:
+            return ("Vérification refusée", Color(hex: 0xE5484D), "Réessayer", false)
+        case .approved:
+            // Approved server-side but the cached user hasn't caught up yet.
+            return ("Identité vérifiée", Color(hex: 0x34C759), nil, false)
+        case .abandoned, .none:
+            return ("Identité non vérifiée", Color(hex: 0xE5484D), "Vérifier", false)
+        }
+    }
 
     private var displayName: String { auth.user?.fullName ?? "Invité" }
     private var displayCity: String { auth.isSignedIn ? Session.shared.phone : "Non connecté" }
@@ -206,13 +245,18 @@ struct ProfileView: View {
             NavigationLink(value: ProfileRoute.identity) {
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(identityVerified ? Color(hex: 0x34C759) : Color(hex: 0xE5484D))
+                        .fill(identityState.dot)
                         .frame(width: 10, height: 10)
-                    Text(LT(identityVerified ? "Identité vérifiée" : "Identité non vérifiée"))
+                    Text(LT(identityState.label))
                         .font(.moblyBody(12, weight: .medium)).foregroundStyle(.white)
+                    if identityState.spins {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .tint(.white)
+                    }
                     Spacer()
-                    if !identityVerified {
-                        Text(LT("Vérifier"))
+                    if let cta = identityState.cta {
+                        Text(LT(cta))
                             .font(.moblyBody(12, weight: .semibold))
                             .foregroundStyle(.white)
                         Image(systemName: "chevron.right")
@@ -223,6 +267,7 @@ struct ProfileView: View {
                 .padding(.horizontal, 12).padding(.vertical, 9)
                 .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.14)))
                 .contentShape(Rectangle())
+                .animation(Motion.standard, value: identityState.label)
             }
             .buttonStyle(.plain)
         }
@@ -264,20 +309,21 @@ struct ProfileView: View {
 
     // MARK: Become owner CTA (visitor)
 
+    // Publishing a space means taking money and visits from strangers, so the
+    // identity check has to happen before the flow, not after it — the help
+    // centre already told users "La vérification est obligatoire pour publier
+    // une annonce" while nothing enforced it. `identityVerified` is declared
+    // once, above, with the identity badge that reads the same flag.
     private var becomeOwnerCTA: some View {
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            showBecomeOwner = true
+            if identityVerified {
+                showBecomeOwner = true
+            } else {
+                askIdentityFirst = true
+            }
         } label: {
             ZStack(alignment: .topTrailing) {
-                // Decorative floating house — echoes the accent tint without
-                // asking for a photo asset. Kept low-opacity so text stays legible.
-                Image(systemName: "house.fill")
-                    .font(.system(size: 130, weight: .regular))
-                    .foregroundStyle(Color.moblyPrimary.opacity(0.10))
-                    .rotationEffect(.degrees(-12))
-                    .offset(x: 30, y: -20)
-
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 6) {
                         Image(systemName: "sparkles")

@@ -20,11 +20,18 @@ struct OwnerDashboardView: View {
     /// The free trial ran out and the one-time inscription fee hasn't been paid:
     /// the whole dashboard is locked behind the paywall.
     private var ownerLocked: Bool {
-        auth.user?.isOwner == true && auth.user?.isOwnerActive == false
+        // Dev hook: `FORCE_OWNER_LOCKED=1` simulates a lapsed trial so the
+        // paywall can be demoed without waiting 7 days or touching the server.
+        if ProcessInfo.processInfo.environment["FORCE_OWNER_LOCKED"] == "1" { return true }
+        return auth.user?.isOwner == true && auth.user?.isOwnerActive == false
     }
 
     /// Non-nil while the free trial is still running — drives the countdown banner.
-    private var trialDaysLeft: Int? { auth.user?.ownerTrialDaysLeft }
+    /// Dev hook: `FORCE_TRIAL_DAYS=<n>` simulates a running trial with n days left.
+    private var trialDaysLeft: Int? {
+        if let s = ProcessInfo.processInfo.environment["FORCE_TRIAL_DAYS"], let i = Int(s) { return i }
+        return auth.user?.ownerTrialDaysLeft
+    }
 
     private enum Filter: CaseIterable {
         case all, active, boosted, pending

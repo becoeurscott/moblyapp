@@ -1293,23 +1293,14 @@ struct BecomeOwnerView: View {
         }
         .fullScreenCover(isPresented: $showPayment) {
             OwnerPaymentView(
-                plan: selectedPlan,
+                plan: .paid,
+                oneTime: true,
                 onCancel: { showPayment = false },
                 onPaid: {
                     showPayment = false
-                    // Payment done → identity verification before publishing.
-                    // If KYC is already satisfied, go straight to the celebration.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        if !isIdentityVerified {
-                            showVerification = true
-                        } else {
-                            UINotificationFeedbackGenerator().notificationOccurred(.success)
-                            SessionTracker.shared.log("owner.upgrade", ["plan": selectedPlan.analyticsId])
-                            Session.shared.upgradeToOwner()
-                            Task { await AuthStore.shared.becomeOwnerOnServer() }
-                            showCelebration = true
-                        }
-                    }
+                    // Paid up front → become an active owner. Identity
+                    // verification still runs first when KYC applies.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { activateOwner() }
                 }
             )
             .swipeToDismiss(onDismiss: { showPayment = false })
@@ -1339,11 +1330,7 @@ struct BecomeOwnerView: View {
                     await auth.bootstrap()
                     await MainActor.run {
                         if isIdentityVerified && !showCelebration && !showAddListing {
-                            UINotificationFeedbackGenerator().notificationOccurred(.success)
-                            SessionTracker.shared.log("owner.upgrade", ["plan": selectedPlan.analyticsId])
-                            Session.shared.upgradeToOwner()
-                            Task { await AuthStore.shared.becomeOwnerOnServer() }
-                            showCelebration = true
+                            finishOwnerUpgrade()
                         }
                     }
                 }
@@ -1415,16 +1402,22 @@ struct BecomeOwnerView: View {
                 if step < totalSteps - 1 {
                     withAnimation(Motion.quick) { step += 1 }
                 } else {
-                    // Free activation — no payment required. Identity
-                    // verification still runs before publishing when KYC applies.
                     SessionTracker.shared.log("owner.plan_selected", ["plan": selectedPlan.analyticsId])
-                    activateOwner()
+                    if selectedPlan == .paid {
+                        // Pay the 5 000 FCFA now → active straight away, no trial.
+                        showPayment = true
+                    } else {
+                        // Free 7-day trial, no payment now.
+                        activateOwner()
+                    }
                 }
             } label: {
                 HStack(spacing: 8) {
                     Text(step == totalSteps - 1 ? selectedPlan.ctaTitle : "Suivant")
                         .font(.moblyHeading(15.5))
-                    Image(systemName: step == totalSteps - 1 ? "checkmark" : "arrow.right")
+                    Image(systemName: step == totalSteps - 1
+                          ? (selectedPlan == .paid ? "lock.fill" : "checkmark")
+                          : "arrow.right")
                         .font(.system(size: 13, weight: .bold))
                 }
                 .foregroundStyle(.white)
@@ -1449,19 +1442,28 @@ struct BecomeOwnerView: View {
         }
     }
 
-    /// Activate the owner account for free (no payment). If KYC is required and
-    /// not yet done, run identity verification first; otherwise upgrade and
-    /// celebrate straight away.
+    /// Gate before activation: run identity verification first when KYC applies,
+    /// otherwise complete the upgrade. Used by both the free-trial path and the
+    /// pay-now path (after the 5 000 FCFA payment succeeds).
     private func activateOwner() {
         if !isIdentityVerified {
             showVerification = true
         } else {
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            SessionTracker.shared.log("owner.upgrade", ["plan": selectedPlan.analyticsId])
-            Session.shared.upgradeToOwner()
-            Task { await AuthStore.shared.becomeOwnerOnServer() }
-            showCelebration = true
+            finishOwnerUpgrade()
         }
+    }
+
+    /// Complete the owner upgrade. For the pay-now plan this also settles the
+    /// one-time inscription fee so the account starts already active (no trial).
+    private func finishOwnerUpgrade() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        SessionTracker.shared.log("owner.upgrade", ["plan": selectedPlan.analyticsId])
+        Session.shared.upgradeToOwner()
+        Task {
+            await AuthStore.shared.becomeOwnerOnServer()
+            if selectedPlan == .paid { await AuthStore.shared.payOwnerInscription() }
+        }
+        showCelebration = true
     }
 }
 
@@ -2020,13 +2022,13 @@ enum OwnerPlan {
     var analyticsId: String { self == .trial ? "trial_7d" : "paid_monthly" }
 
     var ctaTitle: String {
-        self == .trial ? "Commencer l'essai gratuit" : "Continuer vers le paiement"
+        self == .trial ? "Commencer l'essai gratuit" : "Payer 5 000 FCFA"
     }
 
     var footnote: String {
         self == .trial
-            ? "Essai gratuit · Aucun paiement requis · Annulable à tout moment"
-            : "5 000 FCFA / mois · Annulable à tout moment"
+            ? "Essai gratuit 7 jours · Aucun paiement requis maintenant"
+            : "Paiement unique de 5 000 FCFA · Compte actif immédiatement"
     }
 }
 
@@ -2054,7 +2056,7 @@ private struct StepPricing: View {
                         .font(.moblyHeading(27))
                         .foregroundStyle(Color.moblyTextPrimary)
                         .multilineTextAlignment(.center)
-                    Text("Commencez gratuitement,\naucun paiement requis.")
+                    Text("Essayez 7 jours gratuitement,\nou payez une fois pour tout activer.")
                         .font(.moblyBody(14))
                         .foregroundStyle(Color(hex: 0x666F80))
                         .multilineTextAlignment(.center)
@@ -2070,7 +2072,15 @@ private struct StepPricing: View {
                         title: "Essai gratuit 7 jours",
                         price: "0 FCFA",
                         priceCaption: "aujourd'hui",
-                        subtitle: "Activez votre compte gratuitement. Aucun paiement requis, annulable à tout moment."
+                        subtitle: "Activez gratuitement. Après 7 jours, payez 5 000 FCFA pour rester actif."
+                    )
+                    planCard(
+                        plan: .paid,
+                        badge: nil,
+                        title: "Payer maintenant",
+                        price: "5 000 FCFA",
+                        priceCaption: "une seule fois",
+                        subtitle: "Compte actif immédiatement. Paiement unique, sans abonnement."
                     )
                 }
                 .padding(.horizontal, 20)
@@ -2264,7 +2274,7 @@ struct OwnerPaymentView: View {
                     .foregroundStyle(Color.moblyTextPrimary)
             }
             if oneTime {
-                Text("Paiement unique. Réactive votre compte et rend vos annonces à nouveau visibles.")
+                Text("Paiement unique. Aucun abonnement ni frais mensuel par la suite.")
                     .font(.moblyBody(11.5))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
                     .fixedSize(horizontal: false, vertical: true)

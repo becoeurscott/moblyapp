@@ -87,16 +87,29 @@ adminRouter.get(
     const now = Date.now();
     const day = 24 * 60 * 60 * 1000;
 
+    // Two GROUP BY queries instead of a pair of count() calls per day: the
+    // old loop issued 60 queries per request, which on its own could exhaust
+    // a small connection pool (P2024) when several admin pages load at once.
+    // Days are bucketed in UTC on both sides so the keys line up exactly.
+    const since = new Date(now - 30 * day);
+    since.setUTCHours(0, 0, 0, 0);
+    const [sessRows, evRows] = await Promise.all([
+      prisma.$queryRaw<{ d: string; n: number }[]>`
+        SELECT to_char(date_trunc('day', "startedAt"), 'YYYY-MM-DD') AS d, COUNT(*)::int AS n
+        FROM "AppSession" WHERE "startedAt" >= ${since} GROUP BY 1`,
+      prisma.$queryRaw<{ d: string; n: number }[]>`
+        SELECT to_char(date_trunc('day', "createdAt"), 'YYYY-MM-DD') AS d, COUNT(*)::int AS n
+        FROM "AppEvent" WHERE "createdAt" >= ${since} GROUP BY 1`,
+    ]);
+    const sessBy = new Map(sessRows.map((r) => [r.d, r.n]));
+    const evBy = new Map(evRows.map((r) => [r.d, r.n]));
+
     const dayBuckets: { day: string; sessions: number; events: number }[] = [];
     for (let i = 29; i >= 0; i--) {
       const start = new Date(now - i * day);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(start.getTime() + day);
-      const [sessions, events] = await Promise.all([
-        prisma.appSession.count({ where: { startedAt: { gte: start, lt: end } } }),
-        prisma.appEvent.count({ where: { createdAt: { gte: start, lt: end } } }),
-      ]);
-      dayBuckets.push({ day: start.toISOString().slice(0, 10), sessions, events });
+      start.setUTCHours(0, 0, 0, 0);
+      const k = start.toISOString().slice(0, 10);
+      dayBuckets.push({ day: k, sessions: sessBy.get(k) ?? 0, events: evBy.get(k) ?? 0 });
     }
 
     const since30d = new Date(now - 30 * day);
@@ -166,10 +179,13 @@ adminRouter.get(
     const search = q.data.query?.trim();
     const where: any = {};
     if (search && search.length > 0) {
+      // Phones are stored as "+2376XXXXXXXX"; an operator types "6 99 00 00 01"
+      // or "+237 699…" — compare on digits only so either form matches.
+      const digits = search.replace(/\D/g, '');
       where.OR = [
         { fullName: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
-        { phone: { contains: search } },
+        { phone: { contains: digits.length >= 3 ? digits : search } },
       ];
     }
     if (q.data.role === 'owner') where.isOwner = true;
@@ -463,6 +479,8 @@ adminRouter.get(
     const q = z
       .object({
         query: z.string().optional(),
+        /** Only conversations this user takes part in (the "by user" view). */
+        userId: z.string().optional(),
         page: z.coerce.number().int().min(0).optional(),
         pageSize: z.coerce.number().int().min(1).max(100).optional(),
       })
@@ -471,7 +489,11 @@ adminRouter.get(
 
     const search = q.data.query?.trim();
     const where: any = {};
+    if (q.data.userId) {
+      where.participants = { some: { userId: q.data.userId } };
+    }
     if (search && search.length > 0) {
+      const digits = search.replace(/\D/g, '');
       where.OR = [
         { listing: { title: { contains: search, mode: 'insensitive' } } },
         {
@@ -481,6 +503,7 @@ adminRouter.get(
                 OR: [
                   { fullName: { contains: search, mode: 'insensitive' } },
                   { email: { contains: search, mode: 'insensitive' } },
+                  { phone: { contains: digits.length >= 3 ? digits : search } },
                 ],
               },
             },
@@ -527,6 +550,69 @@ adminRouter.get(
         lastMessage: t.messages[0] ?? null,
         updatedAt: t.updatedAt,
       })),
+    });
+  })
+);
+
+/** GET /api/admin/threads/by-user — every account that takes part in at least
+ *  one conversation, with how many and when it was last active. Powers the
+ *  "conversations grouped by user" view: pick a person here, then list their
+ *  threads with `GET /threads?userId=`. Sorted by most recent activity. */
+adminRouter.get(
+  '/threads/by-user',
+  asyncHandler(async (req, res) => {
+    const q = z
+      .object({
+        query: z.string().optional(),
+        page: z.coerce.number().int().min(0).optional(),
+        pageSize: z.coerce.number().int().min(1).max(100).optional(),
+      })
+      .safeParse(req.query);
+    if (!q.success) throw new ApiError(400, 'Filtres invalides', 'VALIDATION_FAILED');
+
+    const search = q.data.query?.trim();
+    const where: any = { threads: { some: {} } };
+    if (search && search.length > 0) {
+      const digits = search.replace(/\D/g, '');
+      where.OR = [
+        { fullName: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: digits.length >= 3 ? digits : search } },
+      ];
+    }
+
+    const users = await prisma.user.findMany({
+      where,
+      select: {
+        id: true, fullName: true, email: true, phone: true,
+        avatarUrl: true, avatarColor: true,
+        isOwner: true, isAdmin: true, isSupport: true,
+        _count: { select: { threads: true } },
+        threads: {
+          select: { thread: { select: { updatedAt: true } } },
+          orderBy: { thread: { updatedAt: 'desc' } },
+          take: 1,
+        },
+      },
+    });
+
+    // Ordering by a nested aggregate isn't expressible in Prisma, so sort and
+    // page in memory — the participant set is small at admin scale.
+    const rows = users
+      .map(({ _count, threads, ...u }) => ({
+        ...u,
+        threadCount: _count.threads,
+        lastActivity: threads[0]?.thread.updatedAt ?? null,
+      }))
+      .sort((a, b) => (b.lastActivity?.getTime() ?? 0) - (a.lastActivity?.getTime() ?? 0));
+
+    const page = q.data.page ?? 0;
+    const pageSize = q.data.pageSize ?? 30;
+    res.json({
+      total: rows.length,
+      page,
+      pageSize,
+      items: rows.slice(page * pageSize, page * pageSize + pageSize),
     });
   })
 );

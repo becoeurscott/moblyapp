@@ -598,13 +598,6 @@ struct ExploreView: View {
                                           goTo(item.query.isEmpty ? item.label : item.query)
                                       })
                     }
-                    Divider().padding(.horizontal, 16).padding(.vertical, 4)
-                }
-
-                ForEach(Array(MoblyData.searchableLocations.prefix(6)), id: \.name) { s in
-                    suggestionRow(title: s.name,
-                                  subtitle: "\(s.region), Cameroun",
-                                  action: { goTo("\(s.name), \(s.region)") })
                 }
             } else {
                 let local = locationSuggestions

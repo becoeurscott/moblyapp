@@ -1122,7 +1122,7 @@ struct AddListingView: View {
             rating: existing?.rating ?? "Nouveau",
             imageName: cover.isEmpty ? (existing?.imageName ?? "ListingGreen") : cover,
             ownerName: existing?.ownerName ?? displayName,
-            ownerVerified: existing?.ownerVerified ?? (me?.verified ?? false),
+            ownerVerified: existing?.ownerVerified ?? (me?.identityVerified ?? false),
             customImageData: coverData,
             category: category,
             subtitle: subParts.joined(separator: " · "),

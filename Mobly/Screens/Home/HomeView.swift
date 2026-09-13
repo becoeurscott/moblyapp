@@ -19,11 +19,13 @@ struct HomeView: View {
     @ObservedObject private var placeCompleter = LocationSearchCompleter.shared
     @ObservedObject private var userData = UserDataStore.shared
     @ObservedObject private var savedSearches = SavedSearchStore.shared
+    @ObservedObject private var session = Session.shared
 
     @State private var appeared = false
     @State private var selectedQuickFilter: String? = nil
     @State private var searchText = ""
     @State private var showBecomeOwner = false
+    @State private var showOwnerDashboard = false
     @FocusState private var searchActive: Bool
 
     private var searching: Bool { searchActive || !searchText.isEmpty }
@@ -235,19 +237,6 @@ struct HomeView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    Divider().padding(.horizontal, 16).padding(.vertical, 4)
-                }
-
-                Text("Quartiers populaires")
-                    .font(.moblyBody(11, weight: .semibold))
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
-                    .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 4)
-                ForEach(Array(MoblyData.searchableLocations.prefix(6)), id: \.name) { s in
-                    suggestionRow(s.name, s.region, action: {
-                        rememberSearch(s.name)
-                        dismissSearch()
-                        onOpenCityMap("\(s.name), \(s.region)")
-                    })
                 }
             } else if placeCompleter.suggestions.isEmpty {
                 HStack(spacing: 10) {
@@ -554,17 +543,24 @@ struct HomeView: View {
 
             HStack {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(L("Devenir propriétaire\navec Mobly"))
+                    // An existing owner has nothing to "become" — the banner
+                    // becomes a shortcut back to their dashboard instead.
+                    Text(session.isOwner ? L("Gérer mes\nannonces") : L("Devenir propriétaire\navec Mobly"))
                         .font(.moblyHeading(19))
                         .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(L("Publiez votre espace, touchez\ndes milliers de locataires"))
+                    Text(session.isOwner
+                         ? L("Suivez vos espaces et vos\ndemandes de visite")
+                         : L("Publiez votre espace, touchez\ndes milliers de locataires"))
                         .font(.moblyBody(12.5))
                         .foregroundStyle(.white.opacity(0.85))
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button(action: { showBecomeOwner = true }) {
-                        Text(L("Commencer"))
+                    Button(action: {
+                        if session.isOwner { showOwnerDashboard = true }
+                        else { showBecomeOwner = true }
+                    }) {
+                        Text(session.isOwner ? L("Ouvrir") : L("Commencer"))
                             .font(.moblyBody(12.5, weight: .semibold))
                             .foregroundStyle(Color.moblyPrimary)
                             .padding(.horizontal, 16).padding(.vertical, 9)
@@ -583,6 +579,9 @@ struct HomeView: View {
         .fullScreenCover(isPresented: $showBecomeOwner) {
             BecomeOwnerView(onClose: { showBecomeOwner = false })
                 .swipeToDismiss(onDismiss: { showBecomeOwner = false })
+        }
+        .fullScreenCover(isPresented: $showOwnerDashboard) {
+            NavigationStack { OwnerDashboardView() }
         }
     }
 

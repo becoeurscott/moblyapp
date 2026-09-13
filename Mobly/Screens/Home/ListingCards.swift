@@ -146,7 +146,7 @@ struct RecommendedCard: View {
                                 .foregroundStyle(Color.moblyPrimary)
                         } else {
                             HStack(spacing: 3) {
-                                Image(systemName: "star.fill").font(.system(size: 10)).foregroundStyle(Color.moblyAccent)
+                                Image(systemName: "star.fill").font(.system(size: 10)).foregroundStyle(Color.moblyPrimary)
                                 Text(listing.rating).font(.moblyBody(12, weight: .semibold)).foregroundStyle(Color.moblyTextPrimary)
                             }
                         }

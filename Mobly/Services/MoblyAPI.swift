@@ -978,6 +978,44 @@ final class MoblyAPI {
         return try decoder.decode(Wrap.self, from: data).avatarUrl
     }
 
+    /// Upload one chat photo and return its hosted URL. Field name `image`.
+    ///
+    /// Chat images used to go through `uploadOwnerPhotos` (`/uploads/photos`),
+    /// which is owner-only — a visitor got a 403 and the photo never left the
+    /// phone. This endpoint is open to any signed-in user, so both sides of a
+    /// conversation can actually send photos.
+    func uploadChatImage(_ jpeg: Data) async throws -> String {
+        let boundary = "Mobly-\(UUID().uuidString)"
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"image\"; filename=\"chat.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(jpeg)
+        body.append("\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+        var req = URLRequest(url: baseURL.appendingPathComponent("uploads/chat-image"))
+        req.httpMethod = "POST"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.timeoutInterval = 90
+
+        let (data, resp) = try await session.upload(for: req, from: body)
+        guard let http = resp as? HTTPURLResponse else {
+            throw APIError(status: 0, code: .unknown, message: "Envoi de la photo impossible",
+                           requestId: nil, fields: [:])
+        }
+        if !(200..<300).contains(http.statusCode) {
+            struct ErrBody: Decodable { let error: String? }
+            let parsed = try? decoder.decode(ErrBody.self, from: data)
+            throw APIError(status: http.statusCode, code: .unknown,
+                           message: parsed?.error ?? "Envoi de la photo impossible (\(http.statusCode))",
+                           requestId: nil, fields: [:])
+        }
+        struct Wrap: Decodable { let url: String }
+        return try decoder.decode(Wrap.self, from: data).url
+    }
+
     /// Upload a voice note and return its hosted URL (plus the duration
     /// Cloudinary measured, which is more trustworthy than the client's timer).
     ///
@@ -1197,6 +1235,10 @@ struct ListingDTO: Codable, Identifiable {
         let id: String
         let fullName: String
         let verified: Bool
+        /// Identity/KYC check — the real "Propriétaire vérifié" trust signal,
+        /// as opposed to `verified` (phone confirmed only). Optional so older
+        /// payloads that predate the field still decode.
+        let identityVerified: Bool?
         let avatarUrl: String?
     }
 }

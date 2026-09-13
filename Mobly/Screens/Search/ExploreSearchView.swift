@@ -130,16 +130,6 @@ struct ExploreSearchView: View {
                 }
                 .buttonStyle(.plain)
             }
-
-            Text("Quartiers populaires")
-                .font(.moblyBody(12.5, weight: .semibold))
-                .foregroundStyle(Color(hex: 0x9A9DAC))
-                .padding(.horizontal, 22)
-                .padding(.top, 12)
-                .padding(.bottom, 6)
-            ForEach(Array(MoblyData.searchableLocations.prefix(6)), id: \.name) { s in
-                suggestionRow(name: s.name, region: s.region, highlight: "")
-            }
         }
     }
 

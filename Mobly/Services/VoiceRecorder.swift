@@ -5,7 +5,7 @@ import Combine
 /// for a real-time waveform in the chat composer. The output is an `.m4a` file
 /// written to the app's caches directory.
 @MainActor
-final class VoiceRecorder: ObservableObject {
+final class VoiceRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
     @Published private(set) var isRecording = false
     @Published private(set) var duration: TimeInterval = 0
     /// Normalised 0-1 audio levels sampled every ~50 ms, used to drive the
@@ -15,6 +15,9 @@ final class VoiceRecorder: ObservableObject {
     private var recorder: AVAudioRecorder?
     private var timer: Timer?
     private var startTime: Date?
+    /// Resolved from `audioRecorderDidFinishRecording`, so a caller only reads
+    /// the `.m4a` once AVAudioRecorder has actually flushed and closed it.
+    private var finishContinuation: CheckedContinuation<Void, Never>?
 
     /// Call once when the chat view appears so the permission dialog shows
     /// early rather than blocking the first recording attempt.
@@ -58,6 +61,7 @@ final class VoiceRecorder: ObservableObject {
 
         do {
             let rec = try AVAudioRecorder(url: url, settings: settings)
+            rec.delegate = self
             rec.isMeteringEnabled = true
             rec.record()
             recorder = rec
@@ -89,7 +93,12 @@ final class VoiceRecorder: ObservableObject {
 
     /// Stop recording and return the audio file URL, the real duration, and
     /// the sampled levels. Returns `nil` if nothing was recording.
-    func stopRecording() -> (url: URL, duration: TimeInterval, samples: [CGFloat])? {
+    ///
+    /// `AVAudioRecorder.stop()` finalises the MPEG-4 container (the `moov`
+    /// atom) asynchronously, so reading the file the instant `stop()` returns
+    /// could ship a truncated or empty note. This awaits the delegate callback
+    /// before handing the URL back, guaranteeing a complete, playable file.
+    func stopRecording() async -> (url: URL, duration: TimeInterval, samples: [CGFloat])? {
         timer?.invalidate()
         timer = nil
         guard let rec = recorder, isRecording else {
@@ -97,13 +106,45 @@ final class VoiceRecorder: ObservableObject {
             return nil
         }
         let d = rec.currentTime
-        rec.stop()
+        let url = rec.url
+        let capturedSamples = samples
         isRecording = false
-        let result = (url: rec.url, duration: d, samples: samples)
+
+        // Wait for the delegate to confirm the file is flushed, BUT never hang
+        // on it: `audioRecorderDidFinishRecording` is not guaranteed to fire
+        // (an interrupted session, or some devices/simulator, simply never call
+        // it). Without a fallback the continuation would never resume and the
+        // whole voice note would silently never send — the "voice ne s'envoie
+        // pas" bug. So we also arm a short timeout; whichever fires first wins,
+        // and `resumeFinish()` guarantees the continuation resumes exactly once.
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            finishContinuation = cont
+            rec.stop() // delegate resolves the continuation (fast path)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.resumeFinish() // safety net if the delegate never fires
+            }
+        }
+
         recorder = nil
         duration = 0
         samples = []
-        return result
+        return (url: url, duration: d, samples: capturedSamples)
+    }
+
+    /// Resume the stop() continuation exactly once, whether woken by the
+    /// delegate or the timeout.
+    private func resumeFinish() {
+        finishContinuation?.resume()
+        finishContinuation = nil
+    }
+
+    // MARK: - AVAudioRecorderDelegate
+
+    nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder,
+                                                     successfully _: Bool) {
+        Task { @MainActor in
+            self.resumeFinish()
+        }
     }
 
     /// Cancel a recording in progress, deleting the temporary file.

@@ -75,7 +75,7 @@ boostRouter.post(
     const updated = await prisma.listing.update({
       where: { id: req.params.listingId },
       data: { status: 'BOOSTED', boostDaysLeft: plan.days, boostExpiresAt: expiresAt },
-      include: { owner: { select: { id: true, fullName: true, verified: true, rating: true, avatarUrl: true } } },
+      include: { owner: { select: { id: true, fullName: true, verified: true, identityVerified: true, rating: true, avatarUrl: true } } },
     });
     cacheBust('listings:'); // boosting changes list ordering
     res.json({ listing: serializeListing(updated) });

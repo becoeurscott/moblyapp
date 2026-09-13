@@ -22,7 +22,7 @@ const LIST_CACHE = 'listings:';
 const LIST_TTL_MS = 60_000;
 
 const ownerSelect = {
-  owner: { select: { id: true, fullName: true, verified: true, rating: true, avatarUrl: true } },
+  owner: { select: { id: true, fullName: true, verified: true, identityVerified: true, rating: true, avatarUrl: true } },
 } as const;
 
 const PUBLIC_LISTING_STATUSES: ListingStatus[] = [ListingStatus.ACTIVE, ListingStatus.BOOSTED];

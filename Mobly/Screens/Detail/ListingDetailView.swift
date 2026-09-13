@@ -122,6 +122,17 @@ struct ListingDetailView: View {
         return listing.tags.map { tag in (iconMap[tag] ?? "checkmark.circle.fill", tag) }
     }
 
+    /// Furnished status for the badge next to the category, drawn from the
+    /// same source the amenities use: an explicit "Non meublé" wins, then a
+    /// "Meublé" in the deals or tags. When neither is set (nothing said either
+    /// way) we show no badge rather than guessing.
+    private enum Furnishing { case meuble, nonMeuble }
+    private var furnishing: Furnishing? {
+        if listing.deals.contains("Non meublé") { return .nonMeuble }
+        if listing.deals.contains("Meublé") || listing.tags.contains("Meublé") { return .meuble }
+        return nil
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             Color.white.ignoresSafeArea()
@@ -382,13 +393,31 @@ struct ListingDetailView: View {
             // Category, directly under the name. The screen knew it all along
             // (it drives "Similaires") but never showed it, so nothing said
             // whether you were looking at a studio, a villa or an office.
-            if !listing.category.isEmpty {
-                Text(LT(listing.category))
-                    .font(.moblyBody(12, weight: .semibold))
-                    .foregroundStyle(Color.moblyPrimary)
-                    .padding(.horizontal, 11).padding(.vertical, 5)
-                    .background(Capsule().fill(Color(hex: 0xEEF0FE)))
-                    .padding(.top, 8)
+            if !listing.category.isEmpty || furnishing != nil {
+                HStack(spacing: 6) {
+                    if !listing.category.isEmpty {
+                        Text(LT(listing.category))
+                            .font(.moblyBody(12, weight: .semibold))
+                            .foregroundStyle(Color.moblyPrimary)
+                            .padding(.horizontal, 11).padding(.vertical, 5)
+                            .background(Capsule().fill(Color(hex: 0xEEF0FE)))
+                    }
+                    // Meublé / Non meublé, right beside the category, so the two
+                    // facts that decide whether a place suits you sit together
+                    // instead of the furnishing hiding down in the amenities.
+                    if let furnishing {
+                        let meuble = furnishing == .meuble
+                        HStack(spacing: 4) {
+                            Image(systemName: "sofa.fill").font(.system(size: 10))
+                            Text(LT(meuble ? "Meublé" : "Non meublé"))
+                        }
+                        .font(.moblyBody(12, weight: .semibold))
+                        .foregroundStyle(meuble ? Color.moblyPrimary : Color(hex: 0x9A9DAC))
+                        .padding(.horizontal, 11).padding(.vertical, 5)
+                        .background(Capsule().fill(Color(hex: meuble ? 0xEEF0FE : 0xF1F2F5)))
+                    }
+                }
+                .padding(.top, 8)
             }
 
             HStack(spacing: 6) {

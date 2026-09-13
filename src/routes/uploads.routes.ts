@@ -123,6 +123,35 @@ uploadsRouter.post(
 );
 
 /**
+ * POST /api/uploads/chat-image — one photo, field name `image`.
+ *
+ * Chat photos used to reuse `/uploads/photos`, which is `requireOwner` +
+ * `LISTING_EDIT`: a visitor (anyone who isn't a propriétaire) got a 403, the
+ * app fell back to caching the JPEG locally, and the recipient never received
+ * anything. Sending a photo in a conversation has nothing to do with owning a
+ * listing, so it lives here — any signed-in user, gated only by the same
+ * `MESSAGE_MEDIA` restriction as voice notes.
+ */
+uploadsRouter.post(
+  '/chat-image',
+  requireAuth,
+  restrictionGate('MESSAGE_MEDIA'),
+  writeLimiter,
+  upload.single('image'),
+  asyncHandler(async (req, res) => {
+    const file = req.file as Express.Multer.File | undefined;
+    if (!file) throw new ApiError(400, 'Aucune image envoyée', 'VALIDATION_FAILED');
+    const uploaded = await uploadOne(file.buffer, req.userId!);
+    res.status(201).json({
+      url: uploaded.url,
+      publicId: uploaded.publicId,
+      width: uploaded.width,
+      height: uploaded.height,
+    });
+  })
+);
+
+/**
  * POST /api/uploads/avatar — one JPEG/PNG/HEIC, field name `avatar`. Any
  * signed-in user (not just owners) can set their profile photo. Uploads to
  * Cloudinary AND persists the resulting URL on the User row so every
@@ -170,15 +199,27 @@ uploadsRouter.post(
     const file = req.file as Express.Multer.File | undefined;
     if (!file) throw new ApiError(400, 'Aucun audio envoyé', 'VALIDATION_FAILED');
 
+    // `resource_type: 'auto'` lets Cloudinary detect the m4a and route it
+    // through the (audio-capable) video pipeline. Using an explicit 'video'
+    // here was silently hanging on the deployed instance — the callback never
+    // fired, so the request never finished, morgan never logged it, and Render's
+    // proxy returned a 502 the app couldn't explain ("voice ne s'envoie pas").
     const uploaded = await new Promise<{ url: string; durationSec: number | null }>(
       (resolve, reject) => {
+        // Hard timeout so a stalled Cloudinary call can never hang the request
+        // indefinitely: fail loud and fast with a diagnosable error instead.
+        const timer = setTimeout(
+          () => reject(new Error('Cloudinary voice upload timed out')),
+          25_000
+        );
         const stream = cloudinary.uploader.upload_stream(
           {
             folder: `${env.cloudinary.folder}/chat/voice/${req.userId!}`,
-            resource_type: 'video',
+            resource_type: 'auto',
             overwrite: false,
           },
           (err, result) => {
+            clearTimeout(timer);
             if (err || !result) return reject(err ?? new Error('Upload failed'));
             resolve({
               url: result.secure_url,
@@ -188,7 +229,12 @@ uploadsRouter.post(
         );
         stream.end(file.buffer);
       }
-    );
+    ).catch((e: unknown) => {
+      // Surface the real reason in the logs (it was invisible before) and hand
+      // the client a clean 502 with a message rather than a silent gateway one.
+      console.error('[uploads/voice] Cloudinary upload failed:', e);
+      throw new ApiError(502, "Envoi de la note vocale impossible", 'INTERNAL');
+    });
 
     res.status(201).json(uploaded);
   })

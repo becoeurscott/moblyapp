@@ -13,7 +13,7 @@ export function formatFcfa(n: number): string {
 
 /** Shape a Listing for the client. Includes both raw + display fields. */
 export function serializeListing(
-  l: Listing & { owner?: Pick<User, 'id' | 'fullName' | 'verified' | 'rating' | 'avatarUrl'> | null }
+  l: Listing & { owner?: Pick<User, 'id' | 'fullName' | 'verified' | 'identityVerified' | 'rating' | 'avatarUrl'> | null }
 ) {
   const deals: string[] = [dealLabel[l.deal] ?? 'À louer'];
   if (l.furnished) deals.push('Meublé');
@@ -57,6 +57,11 @@ export function serializeListing(
           id: l.owner.id,
           fullName: l.owner.fullName,
           verified: l.owner.verified,
+          // The trust badge on the app ("Propriétaire vérifié") means the
+          // identity/KYC check passed, NOT merely a confirmed phone. Exposing
+          // it here keeps the listing badge in step with the owner's own
+          // profile, which reads `identityVerified` too.
+          identityVerified: l.owner.identityVerified,
           rating: l.owner.rating,
           avatarUrl: l.owner.avatarUrl,
         }

@@ -7,7 +7,7 @@ import { serializeListing } from '../lib/serialize';
 export const ownerRouter = Router();
 
 const ownerSelect = {
-  owner: { select: { id: true, fullName: true, verified: true, rating: true, avatarUrl: true } },
+  owner: { select: { id: true, fullName: true, verified: true, identityVerified: true, rating: true, avatarUrl: true } },
 } as const;
 
 /** GET /api/owner/annonces — the owner's own listings (any status). */

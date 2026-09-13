@@ -8,7 +8,7 @@ import { serializeListing } from '../lib/serialize';
 export const favoritesRouter = Router();
 
 const ownerSelect = {
-  owner: { select: { id: true, fullName: true, verified: true, rating: true, avatarUrl: true } },
+  owner: { select: { id: true, fullName: true, verified: true, identityVerified: true, rating: true, avatarUrl: true } },
 } as const;
 
 /** GET /api/favorites — the user's favorite listings. */

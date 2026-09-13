@@ -898,11 +898,16 @@ struct ChatThreadView: View {
                 withAnimation(Motion.quick) { uploadingPreview = nil }
             }
             do {
-                let uploaded = try await MoblyAPI.shared.uploadOwnerPhotos(jpegs)
+                var urls: [String] = []
+                // One photo per request via the chat-image endpoint (open to any
+                // signed-in user), so a visitor's photos actually transmit.
+                for jpeg in jpegs {
+                    urls.append(try await MoblyAPI.shared.uploadChatImage(jpeg))
+                }
                 handOffToOptimisticBubble()
-                for photo in uploaded {
+                for url in urls {
                     await chat.send(threadId: thread.id, text: "📷 Photo",
-                                    myUserId: me, kind: "IMAGE", mediaUrl: photo.url)
+                                    myUserId: me, kind: "IMAGE", mediaUrl: url)
                 }
             } catch {
                 handOffToOptimisticBubble()
@@ -945,20 +950,23 @@ struct ChatThreadView: View {
     }
 
     private func sendVoice() {
-        guard let result = recorder.stopRecording() else { return }
-        guard let me = auth.user?.id else { return }
-        let seconds = Int(result.duration)
-        let label = timeString(seconds)
-        let voiceText = "🎤 Note vocale (\(label))"
-        let audioUrl = result.url
-        let audioSamples = result.samples
+        guard let me = auth.user?.id else { recorder.cancelRecording(); return }
 
         // This used to send a plain TEXT message and keep the recording in a
         // local in-memory map: the sender could replay it, and the recipient
         // got a line of text with nothing behind it. The file has to reach the
         // server for the note to exist for anyone but the person who spoke it.
         Task {
-            guard let data = try? Data(contentsOf: audioUrl) else {
+            // Awaits AVAudioRecorder finishing the file, so the bytes we read
+            // are a complete, playable note rather than a truncated container.
+            guard let result = await recorder.stopRecording() else { return }
+            let seconds = Int(result.duration)
+            let label = timeString(seconds)
+            let voiceText = "🎤 Note vocale (\(label))"
+            let audioUrl = result.url
+            let audioSamples = result.samples
+
+            guard let data = try? Data(contentsOf: audioUrl), !data.isEmpty else {
                 voiceSendError = "Enregistrement introuvable."
                 return
             }
@@ -1066,21 +1074,26 @@ struct MessageBubble: View {
 
             content
 
-            HStack(spacing: 3) {
-                Text(message.time)
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(message.fromMe ? Color.white.opacity(0.7) : Color(hex: 0xB4B7C2))
-                if message.fromMe { statusTicks }
+            // The timestamp/ticks sit below the bubble content for text, voice
+            // and location. For a photo they are drawn ON the image itself (see
+            // the `.image` case) so there is no coloured strip under it.
+            if message.kind != .image {
+                HStack(spacing: 3) {
+                    Text(message.time)
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(message.fromMe ? Color.white.opacity(0.7) : Color(hex: 0xB4B7C2))
+                    if message.fromMe { statusTicks }
+                }
             }
-            .padding(.horizontal, message.kind == .image ? 10 : 0)
-            .padding(.bottom, message.kind == .image ? 6 : 0)
-            .padding(.top, message.kind == .image ? 4 : 0)
         }
         // An image fills its bubble edge to edge. The old 6pt inset let the
         // bubble fill show around the photo, which read as a border/frame.
         .padding(.horizontal, message.kind == .image ? 0 : 12)
         .padding(.vertical, message.kind == .image ? 0 : 9)
-        .background(bubbleShape.fill(message.fromMe ? Color.moblyPrimary : .white))
+        // No bubble fill behind a photo — it used to show a blue strip under
+        // the image (the sender's bubble colour) below the timestamp row.
+        .background(bubbleShape.fill(message.kind == .image ? Color.clear
+                                     : (message.fromMe ? Color.moblyPrimary : .white)))
         // Clip to the bubble so the photo's corners follow the tail, instead of
         // its own 12pt radius sitting inside an 18pt one.
         .clipShape(bubbleShape)
@@ -1109,11 +1122,30 @@ struct MessageBubble: View {
         case .voice:
             VoiceBubble(message: message)
         case .image:
-            if let urlStr = message.mediaUrl, let url = URL(string: urlStr) {
-                CachedChatImage(url: url)
-                    .onTapGesture { onImageTap?(url) }
-            } else {
-                imagePlaceholder
+            Group {
+                if let urlStr = message.mediaUrl, let url = URL(string: urlStr) {
+                    CachedChatImage(url: url)
+                        .onTapGesture { onImageTap?(url) }
+                } else {
+                    imagePlaceholder
+                }
+            }
+            // Time + ticks float over the bottom of the photo on a soft scrim,
+            // WhatsApp-style, so the image can stay full-bleed 9:16 with no
+            // coloured strip beneath it.
+            .overlay(alignment: .bottomTrailing) {
+                HStack(spacing: 3) {
+                    Text(message.time)
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.white)
+                    if message.fromMe { statusTicks }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule().fill(Color.black.opacity(0.35))
+                )
+                .padding(8)
             }
         case .location:
             LocationBubble(message: message)
@@ -2046,12 +2078,17 @@ private struct CachedChatImage: View {
     let url: URL
     @StateObject private var loader = CachedImageLoader()
 
+    // Full-bleed 9:16 portrait, so a photo fills the bubble the way it does in
+    // most chat apps rather than a cropped 4:3 letterbox.
+    private let imgWidth: CGFloat = 220
+    private var imgHeight: CGFloat { imgWidth * 16 / 9 }
+
     var body: some View {
         Group {
             if let img = loader.image {
                 Image(uiImage: img)
                     .resizable().scaledToFill()
-                    .frame(width: 200, height: 150)
+                    .frame(width: imgWidth, height: imgHeight)
                     .clipped()
             } else if loader.failed {
                 ZStack {
@@ -2061,10 +2098,10 @@ private struct CachedChatImage: View {
                         .font(.system(size: 28))
                         .foregroundStyle(Color(hex: 0xC4C7D2))
                 }
-                .frame(width: 200, height: 150)
+                .frame(width: imgWidth, height: imgHeight)
             } else {
                 ShimmerPlaceholder()
-                    .frame(width: 200, height: 150)
+                    .frame(width: imgWidth, height: imgHeight)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }

@@ -55,8 +55,8 @@ struct HomeView: View {
 
             searchBar
                 .padding(.horizontal, 22)
-                .padding(.top, 10)
-                .padding(.bottom, 6)
+                .padding(.top, 16)
+                .padding(.bottom, 14)
                 .zIndex(1)
 
             ZStack(alignment: .top) {
@@ -556,6 +556,19 @@ struct HomeView: View {
                         .foregroundStyle(.white.opacity(0.85))
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
+                    if !session.isOwner {
+                        HStack(spacing: 5) {
+                            Image(systemName: "gift.fill")
+                                .font(.system(size: 10, weight: .bold))
+                            Text(L("7 jours d'essai gratuit"))
+                                .font(.moblyBody(11, weight: .bold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Capsule().fill(.white.opacity(0.22)))
+                        .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 1))
+                        .padding(.top, 1)
+                    }
                     Button(action: {
                         if session.isOwner { showOwnerDashboard = true }
                         else { showBecomeOwner = true }

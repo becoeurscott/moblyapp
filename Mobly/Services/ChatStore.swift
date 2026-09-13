@@ -398,6 +398,24 @@ final class ChatStore: ObservableObject {
         return nil
     }
 
+    /// Delete a conversation for the current user only. Removes it from the
+    /// inbox and drops the local message cache immediately, then tells the
+    /// server to set our `clearedAt` so history stays gone and writing the
+    /// person again starts from scratch. The other participant is unaffected.
+    func clearThread(_ threadId: String) async {
+        threads.removeAll { $0.id == threadId }
+        messages[threadId] = nil
+        lastReadMessageId[threadId] = nil
+        saveToDisk()
+        do {
+            try await api.clearThread(threadId)
+        } catch {
+            // If the server call fails the row will simply resurface on the next
+            // loadThreads(); we don't roll back the optimistic removal.
+            isOffline = (error as? MoblyAPI.APIError)?.isOffline ?? false
+        }
+    }
+
     /// Update the thread's preview + move it to the top of the inbox, so an
     /// outgoing message lands where the eye expects it (last-sent = top).
     private func bumpThreadToTop(_ threadId: String, lastMessage: MessageDTO) {

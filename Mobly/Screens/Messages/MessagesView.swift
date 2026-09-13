@@ -277,10 +277,17 @@ struct MessagesView: View {
             titleVisibility: .visible,
             presenting: confirmDelete
         ) { t in
-            Button("Supprimer", role: .destructive) { prefs.delete(t.id); confirmDelete = nil }
+            Button("Supprimer", role: .destructive) {
+                let id = t.id
+                confirmDelete = nil
+                // Clean up any stale local flags for this thread, then delete it
+                // on the server for us only (per-user clear).
+                prefs.undelete(id)
+                Task { await chat.clearThread(id) }
+            }
             Button("Annuler", role: .cancel) { confirmDelete = nil }
         } message: { _ in
-            Text("Elle sera masquée de votre boîte de réception. Les messages restent sur le serveur.")
+            Text("La conversation sera supprimée de votre côté. Si vous réécrivez, elle repart de zéro. L'autre personne garde sa copie.")
         }
     }
 

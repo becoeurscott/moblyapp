@@ -26,7 +26,12 @@ struct PeerProfileView: View {
     private var peerId: String? { thread.peerId }
     private var peerName: String { loaded?.fullName ?? thread.name }
     private var peerCity: String? { loaded?.city }
-    private var peerVerified: Bool { loaded?.verified ?? thread.verified }
+    // The "vérifié" badge must mean the same thing everywhere: the KYC/identity
+    // check, matching the listing detail's "Propriétaire vérifié". Reading
+    // phone-`verified` here made the profile claim "Vérifié" for an owner the
+    // listing page called "non vérifié". While the server call is in flight we
+    // fall back to what the chat header knew.
+    private var peerVerified: Bool { loaded.map { $0.identityVerified ?? false } ?? thread.verified }
     private var flags: ThreadPrefs.Flags { prefs.flags(for: thread.id) }
     private var isBlocked: Bool { peerId.map { blocked.isBlocked($0) } ?? false }
 

@@ -33,6 +33,17 @@ struct ChatThreadView: View {
     /// Non-nil when a voice note failed to send. Surfaced as an alert: a note
     /// that silently vanishes is worse than one that says why it didn't go.
     @State private var voiceSendError: String?
+    /// Optimistic voice bubble shown the instant recording stops, so the note
+    /// appears in the conversation immediately (with a spinner over it) while
+    /// the file uploads — mirroring `uploadingPreview` for photos. Cleared the
+    /// moment `chat.send` inserts the confirmed bubble, or on failure.
+    @State private var sendingVoice: SendingVoiceNote?
+
+    struct SendingVoiceNote: Identifiable {
+        let id = UUID()
+        let seconds: Int
+        let samples: [CGFloat]
+    }
     /// No camera on this device (simulator, or an iPad without one).
     @State private var cameraUnavailable = false
     @State private var fullScreenImageURL: URL?
@@ -89,7 +100,8 @@ struct ChatThreadView: View {
                 day: Self.dayLabel(dto.createdAt),
                 visitId: dto.visitId,
                 visitAction: dto.visitAction,
-                visitIsMine: dto.senderId == me
+                visitIsMine: dto.senderId == me,
+                createdAt: dto.createdAt
             )
         }
     }
@@ -178,20 +190,48 @@ struct ChatThreadView: View {
         return messages.reversed().first { m in
             guard m.kind == .visit else { return false }
             if terminal.contains(m.visitAction ?? "REQUESTED") { return false }
-            if let scheduled = Self.visitScheduledDate(from: m.text), scheduled < .now { return false }
+            if let scheduled = Self.visitScheduledDate(from: m.text, anchor: m.createdAt),
+               scheduled < .now { return false }
             return true
         }
     }
 
-    private static func visitScheduledDate(from text: String) -> Date? {
+    /// Recover the appointment time from a visit label such as
+    /// "Visite confirmée · lundi 14 sept. · 14h00".
+    ///
+    /// The label carries no year, and its weekday ("lundi") is only correct for
+    /// the year it was written — so parsing it with an `EEEE` format against the
+    /// current year silently returned nil whenever the weekday no longer lined
+    /// up, and the past-date guard never fired: the banner outlived the visit.
+    /// We drop the weekday entirely, parse only day/month/time, and stamp the
+    /// year from the message's own `createdAt` (bumping forward one year if the
+    /// day/month lands before the message — a December message for a January
+    /// visit), so the result is stable regardless of locale weekday quirks.
+    private static func visitScheduledDate(from text: String, anchor: Date) -> Date? {
         let parts = text.components(separatedBy: " · ")
         guard parts.count >= 3 else { return nil }
-        let combined = parts[1] + " · " + parts[2]
+        // parts[1] = "lundi 14 sept." — strip the leading weekday word.
+        let dayMonth = parts[1].split(separator: " ").dropFirst().joined(separator: " ")
+        let time = parts[2] // "14h00"
+
         let df = DateFormatter()
         df.locale = Locale(identifier: "fr_FR")
-        df.defaultDate = Date()
-        df.dateFormat = "EEEE d MMM · HH'h'mm"
-        return df.date(from: combined)
+        df.dateFormat = "d MMM · HH'h'mm"
+        guard let base = df.date(from: "\(dayMonth) · \(time)") else { return nil }
+
+        var cal = Calendar(identifier: .gregorian)
+        cal.locale = Locale(identifier: "fr_FR")
+        let anchorYear = cal.component(.year, from: anchor)
+        var comps = cal.dateComponents([.month, .day, .hour, .minute], from: base)
+        comps.year = anchorYear
+        guard var scheduled = cal.date(from: comps) else { return nil }
+        // A visit is never scheduled before it was booked; if the day/month
+        // resolved to before the message, it belongs to the next year.
+        if scheduled < cal.startOfDay(for: anchor) {
+            comps.year = anchorYear + 1
+            scheduled = cal.date(from: comps) ?? scheduled
+        }
+        return scheduled
     }
 
     private func pinnedVisitCard(_ m: ChatMessage) -> some View {
@@ -534,6 +574,13 @@ struct ChatThreadView: View {
                         }
                         .id("uploading")
                     }
+                    if let sending = sendingVoice {
+                        HStack {
+                            Spacer(minLength: 50)
+                            sendingVoiceBubble(sending)
+                        }
+                        .id("sendingVoice")
+                    }
                     if partnerTyping { TypingIndicator().id("typing") }
                     Color.clear.frame(height: 4).id("bottom")
                 }
@@ -545,6 +592,7 @@ struct ChatThreadView: View {
             .onChange(of: messages.count) { _, _ in scrollDown(proxy) }
             .onChange(of: partnerTyping) { _, _ in scrollDown(proxy) }
             .onChange(of: uploadingPreview == nil) { _, _ in scrollDown(proxy) }
+            .onChange(of: sendingVoice == nil) { _, _ in scrollDown(proxy) }
             .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
         }
     }
@@ -560,7 +608,8 @@ struct ChatThreadView: View {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
-                .frame(width: 200, height: 150)
+                .frame(width: ChatImageSize.width, height: ChatImageSize.height)
+                .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
                     ZStack {
@@ -590,6 +639,48 @@ struct ChatThreadView: View {
                 bottomTrailing: 5, topTrailing: 18))
                 .fill(Color.moblyPrimary)
         )
+    }
+
+    // MARK: Sending voice bubble (optimistic, upload in flight)
+
+    /// The just-recorded note, shown in the sender's bubble with a spinner in
+    /// front while the audio uploads. Same shape and colour as a delivered
+    /// voice note so it doesn't jump when the confirmed bubble replaces it.
+    private func sendingVoiceBubble(_ sending: SendingVoiceNote) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "play.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white.opacity(0.5))
+                .frame(width: 24, height: 24)
+
+            Waveform(tint: .white, dim: Color.white.opacity(0.35), progress: 0,
+                     isPlaying: false, realSamples: sending.samples)
+                .frame(width: 130, height: 24)
+
+            Text(String(format: "%d:%02d", sending.seconds / 60, sending.seconds % 60))
+                .font(.system(size: 11, weight: .medium).monospacedDigit())
+                .foregroundStyle(Color.white.opacity(0.85))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            UnevenRoundedRectangle(cornerRadii: .init(
+                topLeading: 18, bottomLeading: 18,
+                bottomTrailing: 5, topTrailing: 18))
+                .fill(Color.moblyPrimary)
+        )
+        // The loading indicator sits IN FRONT of the note, over a soft scrim,
+        // so it reads as "sending…" rather than a playable bubble.
+        .overlay {
+            ZStack {
+                UnevenRoundedRectangle(cornerRadii: .init(
+                    topLeading: 18, bottomLeading: 18,
+                    bottomTrailing: 5, topTrailing: 18))
+                    .fill(Color.black.opacity(0.18))
+                ProgressView()
+                    .tint(.white)
+            }
+        }
     }
 
     // MARK: Reply preview above composer
@@ -967,12 +1058,26 @@ struct ChatThreadView: View {
             let audioUrl = result.url
             let audioSamples = result.samples
 
+            // Show the note in the conversation immediately, with a spinner over
+            // it, so tapping send never looks like nothing happened while the
+            // upload is in flight (which on a slow link can take seconds).
+            withAnimation(Motion.quick) {
+                sendingVoice = SendingVoiceNote(seconds: max(1, seconds), samples: audioSamples)
+            }
+
+            func clearSending() { withAnimation(Motion.quick) { sendingVoice = nil } }
+
             guard let data = try? Data(contentsOf: audioUrl), !data.isEmpty else {
+                clearSending()
                 voiceSendError = "Enregistrement introuvable."
                 return
             }
             do {
                 let uploaded = try await MoblyAPI.shared.uploadVoiceNote(data)
+                // Upload done: hand off from our spinner bubble to `chat.send`'s
+                // own optimistic bubble, which it inserts synchronously before it
+                // awaits — so there is no gap and no duplicate on screen.
+                clearSending()
                 let sent = await chat.send(
                     threadId: thread.id, text: voiceText, myUserId: me,
                     kind: "VOICE", mediaUrl: uploaded.url,
@@ -987,8 +1092,10 @@ struct ChatThreadView: View {
                                                             samples: audioSamples)
                 }
             } catch let e as MoblyAPI.APIError {
+                clearSending()
                 voiceSendError = e.message
             } catch {
+                clearSending()
                 voiceSendError = "Envoi de la note vocale impossible."
             }
         }
@@ -1172,7 +1279,7 @@ struct MessageBubble: View {
                 .font(.system(size: 28))
                 .foregroundStyle(Color(hex: 0xC4C7D2))
         }
-        .frame(width: 200, height: 150)
+        .frame(width: ChatImageSize.width, height: ChatImageSize.height)
     }
 
     /// Shown when the retention job has deleted an expired photo. A muted 9:16
@@ -1186,7 +1293,7 @@ struct MessageBubble: View {
                 .font(.moblyBody(12.5, weight: .medium))
                 .foregroundStyle(Color(hex: 0x9A9DAC))
         }
-        .frame(width: 220, height: 220 * 16 / 9)
+        .frame(width: ChatImageSize.width, height: ChatImageSize.height)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(hex: 0xF1F2F6)))
     }
 
@@ -2109,14 +2216,23 @@ struct FullScreenImageViewer: View {
 
 // MARK: - Cached chat image (bubble thumbnail)
 
+/// The one size every chat-photo state renders at — the upload preview, the
+/// loading shimmer, the loaded image, the failed/expired placeholders. Sharing
+/// it means the bubble never changes shape between "Envoi…" and the final
+/// photo: what you see while sending is exactly the size that lands.
+enum ChatImageSize {
+    /// Full-bleed 9:16 portrait, so a photo fills the bubble the way it does in
+    /// most chat apps rather than a cropped 4:3 letterbox.
+    static let width: CGFloat = 220
+    static var height: CGFloat { width * 16 / 9 }
+}
+
 private struct CachedChatImage: View {
     let url: URL
     @StateObject private var loader = CachedImageLoader()
 
-    // Full-bleed 9:16 portrait, so a photo fills the bubble the way it does in
-    // most chat apps rather than a cropped 4:3 letterbox.
-    private let imgWidth: CGFloat = 220
-    private var imgHeight: CGFloat { imgWidth * 16 / 9 }
+    private let imgWidth = ChatImageSize.width
+    private var imgHeight: CGFloat { ChatImageSize.height }
 
     var body: some View {
         Group {

@@ -1213,8 +1213,12 @@ struct BecomeOwnerView: View {
     @State private var showCelebration = false
     @State private var showAddListing = false
     @State private var showVerification = false
+    @State private var showPayment = false
+    /// The plan chosen on the pricing step. Defaults to the free trial, which
+    /// is the offer we lead with on the home banner.
+    @State private var selectedPlan: OwnerPlan = .trial
 
-    private let totalSteps = 5
+    private let totalSteps = 6
 
     /// Whether the KYC step applies at all. Driven by the same
     /// `owners.identityRequired` switch the server enforces, so relaxing the
@@ -1287,6 +1291,29 @@ struct BecomeOwnerView: View {
                 onClose()
             })
         }
+        .fullScreenCover(isPresented: $showPayment) {
+            OwnerPaymentView(
+                plan: selectedPlan,
+                onCancel: { showPayment = false },
+                onPaid: {
+                    showPayment = false
+                    // Payment done → identity verification before publishing.
+                    // If KYC is already satisfied, go straight to the celebration.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        if !isIdentityVerified {
+                            showVerification = true
+                        } else {
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            SessionTracker.shared.log("owner.upgrade", ["plan": selectedPlan.analyticsId])
+                            Session.shared.upgradeToOwner()
+                            Task { await AuthStore.shared.becomeOwnerOnServer() }
+                            showCelebration = true
+                        }
+                    }
+                }
+            )
+            .swipeToDismiss(onDismiss: { showPayment = false })
+        }
         .fullScreenCover(isPresented: $showVerification) {
             NavigationStack {
                 IdentityVerificationView()
@@ -1306,7 +1333,20 @@ struct BecomeOwnerView: View {
         }
         .onChange(of: showVerification) { showing in
             if !showing {
-                Task { await auth.bootstrap() }
+                // Verification sheet closed — refresh the user, and if identity
+                // is now confirmed, complete the owner upgrade and celebrate.
+                Task {
+                    await auth.bootstrap()
+                    await MainActor.run {
+                        if isIdentityVerified && !showCelebration && !showAddListing {
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            SessionTracker.shared.log("owner.upgrade", ["plan": selectedPlan.analyticsId])
+                            Session.shared.upgradeToOwner()
+                            Task { await AuthStore.shared.becomeOwnerOnServer() }
+                            showCelebration = true
+                        }
+                    }
+                }
             }
         }
     }
@@ -1361,7 +1401,8 @@ struct BecomeOwnerView: View {
         case 1: StepBenefits()
         case 2: StepHowItWorks()
         case 3: StepSocialProof(listingsCount: listingsCount, citiesCount: citiesCount)
-        default: StepConfirm()
+        case 4: StepConfirm()
+        default: StepPricing(selectedPlan: $selectedPlan)
         }
     }
 
@@ -1373,28 +1414,18 @@ struct BecomeOwnerView: View {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 if step < totalSteps - 1 {
                     withAnimation(Motion.quick) { step += 1 }
-                } else if !isIdentityVerified {
-                    showVerification = true
                 } else {
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    SessionTracker.shared.log("owner.upgrade", [:])
-                    Session.shared.upgradeToOwner()
-                    Task { await AuthStore.shared.becomeOwnerOnServer() }
-                    showCelebration = true
+                    // Last step is the pricing choice → collect payment, then
+                    // (still) run identity verification before publishing.
+                    SessionTracker.shared.log("owner.plan_selected", ["plan": selectedPlan.analyticsId])
+                    showPayment = true
                 }
             } label: {
                 HStack(spacing: 8) {
-                    if step == totalSteps - 1 && !isIdentityVerified {
-                        Text("Vérifier mon identité")
-                            .font(.moblyHeading(15.5))
-                        Image(systemName: "checkmark.shield.fill")
-                            .font(.system(size: 13, weight: .bold))
-                    } else {
-                        Text(step == totalSteps - 1 ? "Publier mon premier espace" : "Suivant")
-                            .font(.moblyHeading(15.5))
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 13, weight: .bold))
-                    }
+                    Text(step == totalSteps - 1 ? selectedPlan.ctaTitle : "Suivant")
+                        .font(.moblyHeading(15.5))
+                    Image(systemName: step == totalSteps - 1 ? "lock.fill" : "arrow.right")
+                        .font(.system(size: 13, weight: .bold))
                 }
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity).frame(height: 56)
@@ -1410,15 +1441,10 @@ struct BecomeOwnerView: View {
             .buttonStyle(.plain)
 
             if step == totalSteps - 1 {
-                if !isIdentityVerified {
-                    Text("La vérification d'identité est obligatoire pour publier")
-                        .font(.moblyBody(11))
-                        .foregroundStyle(Color(hex: 0xE5950C))
-                } else {
-                    Text("Publication gratuite · aucune commission")
-                        .font(.moblyBody(11))
-                        .foregroundStyle(Color(hex: 0x9A9DAC))
-                }
+                Text(selectedPlan.footnote)
+                    .font(.moblyBody(11))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+                    .multilineTextAlignment(.center)
             }
         }
     }
@@ -1962,6 +1988,434 @@ private struct StepConfirm: View {
             Spacer(minLength: 10)
         }
         .onAppear { appear = true }
+    }
+}
+
+// MARK: - Owner plan
+
+/// The two ways to activate an owner account. Both unlock the same features;
+/// the trial simply defers the first `OwnerPlan.monthlyPrice` charge by 7 days.
+enum OwnerPlan {
+    case trial
+    case paid
+
+    /// Monthly subscription price once billing starts, in FCFA.
+    static let monthlyPrice = 5000
+
+    var analyticsId: String { self == .trial ? "trial_7d" : "paid_monthly" }
+
+    var ctaTitle: String {
+        self == .trial ? "Commencer l'essai gratuit" : "Continuer vers le paiement"
+    }
+
+    var footnote: String {
+        self == .trial
+            ? "7 jours gratuits, puis 5 000 FCFA / mois · Annulable à tout moment"
+            : "5 000 FCFA / mois · Annulable à tout moment"
+    }
+}
+
+// MARK: - Step 6: Pricing
+//
+// The offer screen: become an owner from 5 000 FCFA / month, or start with a
+// free 7-day trial. Two tappable cards drive `selectedPlan`, which the footer
+// and the payment page both read.
+private struct StepPricing: View {
+    @Binding var selectedPlan: OwnerPlan
+    @State private var appear = false
+
+    private let perks: [String] = [
+        "Annonces illimitées",
+        "Badge propriétaire vérifié",
+        "Demandes de visite & messagerie",
+        "Statistiques de vos annonces",
+    ]
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 22) {
+                VStack(spacing: 10) {
+                    Text("Devenez propriétaire")
+                        .font(.moblyHeading(27))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                        .multilineTextAlignment(.center)
+                    Text("À partir de 5 000 FCFA / mois,\nou commencez gratuitement.")
+                        .font(.moblyBody(14))
+                        .foregroundStyle(Color(hex: 0x666F80))
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                }
+                .padding(.top, 16)
+                .padding(.horizontal, 30)
+
+                VStack(spacing: 14) {
+                    planCard(
+                        plan: .trial,
+                        badge: "RECOMMANDÉ",
+                        title: "Essai gratuit 7 jours",
+                        price: "0 FCFA",
+                        priceCaption: "aujourd'hui",
+                        subtitle: "Puis 5 000 FCFA / mois. Annulable à tout moment."
+                    )
+                    planCard(
+                        plan: .paid,
+                        badge: nil,
+                        title: "Abonnement mensuel",
+                        price: "5 000 FCFA",
+                        priceCaption: "/ mois",
+                        subtitle: "Facturé dès aujourd'hui, sans période d'essai."
+                    )
+                }
+                .padding(.horizontal, 20)
+
+                VStack(spacing: 10) {
+                    ForEach(Array(perks.enumerated()), id: \.offset) { _, p in
+                        HStack(spacing: 12) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Color(hex: 0x1F8A5B))
+                            Text(p)
+                                .font(.moblyBody(13.5, weight: .medium))
+                                .foregroundStyle(Color.moblyTextPrimary)
+                            Spacer()
+                        }
+                    }
+                }
+                .padding(.horizontal, 34)
+
+                Spacer(minLength: 10)
+            }
+            .opacity(appear ? 1 : 0)
+            .offset(y: appear ? 0 : 10)
+            .animation(Motion.standard, value: appear)
+        }
+        .onAppear { appear = true }
+    }
+
+    private func planCard(plan: OwnerPlan, badge: String?, title: String,
+                          price: String, priceCaption: String, subtitle: String) -> some View {
+        let selected = selectedPlan == plan
+        return Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(Motion.quick) { selectedPlan = plan }
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.moblyHeading(16))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                    if let badge {
+                        Text(badge)
+                            .font(.moblyBody(9.5, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Capsule().fill(Color.moblyAccent))
+                    }
+                    Spacer()
+                    ZStack {
+                        Circle()
+                            .strokeBorder(selected ? Color.moblyPrimary : Color(hex: 0xCED2DE),
+                                          lineWidth: selected ? 7 : 2)
+                            .frame(width: 22, height: 22)
+                    }
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(price)
+                        .font(.moblyHeading(22))
+                        .foregroundStyle(Color.moblyPrimary)
+                    Text(priceCaption)
+                        .font(.moblyBody(12.5))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                }
+                Text(subtitle)
+                    .font(.moblyBody(12.5))
+                    .foregroundStyle(Color(hex: 0x666F80))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 18).fill(.white))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(selected ? Color.moblyPrimary : Color(hex: 0xE7E9F0),
+                            lineWidth: selected ? 2 : 1)
+            )
+            .shadow(color: selected ? Color.moblyPrimary.opacity(0.18) : Color(hex: 0x14152A).opacity(0.04),
+                    radius: selected ? 12 : 5, y: selected ? 6 : 2)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Owner payment page
+//
+// A lightweight mobile-money checkout shown before identity verification.
+// Front-end only — it collects the method and the phone number and simulates
+// the charge; wiring it to a real PSP (MTN MoMo / Orange Money) is a backend
+// task. For the trial the "charge" is 0 today, so the button reads differently
+// but the flow is identical.
+struct OwnerPaymentView: View {
+    let plan: OwnerPlan
+    var onCancel: () -> Void = {}
+    var onPaid: () -> Void = {}
+
+    @ObservedObject private var auth = AuthStore.shared
+
+    enum Method: String, CaseIterable {
+        case mtn = "MTN Mobile Money"
+        case orange = "Orange Money"
+
+        var tint: Color { self == .mtn ? Color(hex: 0xFFCC00) : Color(hex: 0xFF6600) }
+        var glyph: String { self == .mtn ? "M" : "O" }
+    }
+
+    @State private var method: Method = .mtn
+    @State private var phone = ""
+    @State private var processing = false
+    @State private var done = false
+
+    private var amountToday: Int { plan == .trial ? 0 : OwnerPlan.monthlyPrice }
+
+    private var phoneValid: Bool {
+        phone.filter(\.isNumber).count >= 9
+    }
+
+    var body: some View {
+        ZStack {
+            Color(hex: 0xF7F8FA).ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                header
+
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 18) {
+                        summaryCard
+                        methodPicker
+                        phoneField
+                        secureNote
+                        Spacer(minLength: 20)
+                    }
+                    .padding(20)
+                }
+
+                payButton
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 30)
+            }
+
+            if done { successOverlay }
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            Button {
+                onCancel()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(.white))
+                    .shadow(color: Color(hex: 0x14152A).opacity(0.06), radius: 6, y: 2)
+            }
+            Spacer()
+            Text("Paiement")
+                .font(.moblyHeading(16))
+                .foregroundStyle(Color.moblyTextPrimary)
+            Spacer()
+            Color.clear.frame(width: 40, height: 40)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
+    }
+
+    private var summaryCard: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text(plan == .trial ? "Essai gratuit 7 jours" : "Abonnement propriétaire")
+                    .font(.moblyBody(14, weight: .semibold))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                Spacer()
+                Text(plan == .trial ? "0 FCFA" : "5 000 FCFA")
+                    .font(.moblyHeading(16))
+                    .foregroundStyle(Color.moblyPrimary)
+            }
+            Rectangle().fill(Color(hex: 0xF1F2F6)).frame(height: 1)
+            HStack {
+                Text("À payer aujourd'hui")
+                    .font(.moblyBody(13))
+                    .foregroundStyle(Color(hex: 0x666F80))
+                Spacer()
+                Text("\(amountToday.formattedFcfa) FCFA")
+                    .font(.moblyHeading(18))
+                    .foregroundStyle(Color.moblyTextPrimary)
+            }
+            if plan == .trial {
+                Text("Vous ne serez pas débité aujourd'hui. Le premier paiement de 5 000 FCFA aura lieu dans 7 jours, sauf annulation.")
+                    .font(.moblyBody(11.5))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 18).fill(.white))
+        .shadow(color: Color(hex: 0x14152A).opacity(0.04), radius: 6, y: 2)
+    }
+
+    private var methodPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Moyen de paiement")
+                .font(.moblyBody(12.5, weight: .semibold))
+                .foregroundStyle(Color(hex: 0x9A9DAC))
+            ForEach(Method.allCases, id: \.self) { m in
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(Motion.quick) { method = m }
+                } label: {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 9).fill(m.tint)
+                            Text(m.glyph)
+                                .font(.moblyHeading(17))
+                                .foregroundStyle(.white)
+                        }
+                        .frame(width: 38, height: 38)
+                        Text(m.rawValue)
+                            .font(.moblyBody(14, weight: .medium))
+                            .foregroundStyle(Color.moblyTextPrimary)
+                        Spacer()
+                        Circle()
+                            .strokeBorder(method == m ? Color.moblyPrimary : Color(hex: 0xCED2DE),
+                                          lineWidth: method == m ? 7 : 2)
+                            .frame(width: 20, height: 20)
+                    }
+                    .padding(14)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(.white))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(method == m ? Color.moblyPrimary : Color(hex: 0xE7E9F0),
+                                    lineWidth: method == m ? 2 : 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var phoneField: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Numéro \(method.rawValue)")
+                .font(.moblyBody(12.5, weight: .semibold))
+                .foregroundStyle(Color(hex: 0x9A9DAC))
+            HStack(spacing: 8) {
+                Text("+237")
+                    .font(.moblyBody(14, weight: .semibold))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                TextField("6 XX XX XX XX", text: $phone)
+                    .font(.moblyBody(14))
+                    .keyboardType(.numberPad)
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 14).fill(.white))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: 0xE7E9F0), lineWidth: 1))
+        }
+    }
+
+    private var secureNote: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(Color(hex: 0x1F8A5B))
+            Text("Paiement sécurisé. Vous confirmerez sur votre téléphone.")
+                .font(.moblyBody(11.5))
+                .foregroundStyle(Color(hex: 0x9A9DAC))
+            Spacer()
+        }
+    }
+
+    private var payButton: some View {
+        Button {
+            guard phoneValid, !processing else { return }
+            startPayment()
+        } label: {
+            HStack(spacing: 8) {
+                if processing {
+                    ProgressView().tint(.white)
+                } else {
+                    Image(systemName: "lock.fill").font(.system(size: 13, weight: .bold))
+                }
+                Text(processing
+                     ? "Traitement…"
+                     : (plan == .trial ? "Démarrer l'essai gratuit" : "Payer 5 000 FCFA"))
+                    .font(.moblyHeading(15.5))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity).frame(height: 56)
+            .background(
+                LinearGradient(colors: [Color.moblyPrimary, Color(hex: 0x5B6BF5)],
+                               startPoint: .leading, endPoint: .trailing)
+            )
+            .clipShape(Capsule())
+            .opacity(phoneValid ? 1 : 0.5)
+            .shadow(color: Color.moblyPrimary.opacity(0.35), radius: 14, y: 8)
+        }
+        .buttonStyle(.plain)
+        .disabled(!phoneValid || processing)
+    }
+
+    private var successOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.35).ignoresSafeArea()
+            VStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(Color(hex: 0x1F8A5B)).frame(width: 72, height: 72)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                Text(plan == .trial ? "Essai activé" : "Paiement confirmé")
+                    .font(.moblyHeading(19))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                Text("Vérification d'identité…")
+                    .font(.moblyBody(13))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+            }
+            .padding(28)
+            .background(RoundedRectangle(cornerRadius: 22).fill(.white))
+            .padding(40)
+        }
+        .transition(.opacity)
+    }
+
+    private func startPayment() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        processing = true
+        SessionTracker.shared.log("owner.payment_started", [
+            "plan": plan.analyticsId,
+            "method": method.rawValue,
+            "amount": String(amountToday),
+        ])
+        // Simulate the mobile-money round trip (USSD push + confirmation).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            processing = false
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            SessionTracker.shared.log("owner.payment_succeeded", ["plan": plan.analyticsId])
+            withAnimation(Motion.standard) { done = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { onPaid() }
+        }
+    }
+}
+
+private extension Int {
+    /// "5000" → "5 000" (thin-space grouping used across the app's prices).
+    var formattedFcfa: String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.groupingSeparator = " "
+        return f.string(from: NSNumber(value: self)) ?? String(self)
     }
 }
 

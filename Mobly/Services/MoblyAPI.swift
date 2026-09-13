@@ -781,6 +781,10 @@ final class MoblyAPI {
         let avatarUrl: String?
         let avatarColor: String?
         let verified: Bool
+        /// KYC/identity check — the trust signal the listing detail shows as
+        /// "Propriétaire vérifié", distinct from `verified` (phone only).
+        /// Optional so older payloads that predate the field still decode.
+        let identityVerified: Bool?
         let isOwner: Bool
         let city: String?
         let region: String?
@@ -803,6 +807,15 @@ final class MoblyAPI {
     func deleteAccount() async throws {
         _ = try await request("users/me", method: "DELETE", authorized: true) as EmptyResponse
         clearSession()
+    }
+
+    /// DELETE /threads/:id — delete the conversation for the current user only.
+    ///
+    /// Server-side this sets the caller's `clearedAt`: their history and inbox
+    /// row before now are hidden, so writing the person again starts from
+    /// scratch. The other participant keeps the full conversation.
+    func clearThread(_ threadId: String) async throws {
+        _ = try await request("threads/\(threadId)", method: "DELETE", authorized: true) as EmptyResponse
     }
 
     /// PATCH /listings/:id/availability — flip disponible / indisponible.

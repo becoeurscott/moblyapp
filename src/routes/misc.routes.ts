@@ -177,6 +177,10 @@ usersRouter.get(
         avatarUrl: true,
         avatarColor: true,
         verified: true,
+        // The KYC/identity check — the real "vérifié" trust signal the listing
+        // detail shows. Sent here too so the profile agrees with it instead of
+        // reading phone-`verified` and disagreeing.
+        identityVerified: true,
         isOwner: true,
         city: true,
         region: true,

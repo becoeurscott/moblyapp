@@ -421,7 +421,11 @@ struct ListingDetailView: View {
             }
 
             HStack(spacing: 6) {
-                if listing.rating.isEmpty {
+                // Once the real avis have landed, the header must agree with the
+                // Avis section below it: show the average of the loaded reviews,
+                // not the static `listing.rating` the feed shipped with (which
+                // left the top saying "4.7" while the section averaged "4.5").
+                if reviews.isEmpty && listing.rating.isEmpty {
                     Text("Nouveau")
                         .font(.moblyBody(13, weight: .semibold))
                         .foregroundStyle(Color.moblyPrimary)
@@ -431,7 +435,7 @@ struct ListingDetailView: View {
                 } else {
                     Image(systemName: "star.fill")
                         .font(.system(size: 12)).foregroundStyle(Color.moblyPrimary)
-                    Text(listing.rating)
+                    Text(reviews.isEmpty ? listing.rating : String(format: "%.1f", averageRating))
                         .font(.moblyBody(13, weight: .semibold))
                         .foregroundStyle(Color.moblyTextPrimary)
                     Text("(\(reviews.isEmpty ? listing.reviewCount : reviews.count) avis)")

@@ -523,6 +523,10 @@ model ThreadParticipant {
   unreadCount Int       @default(0)
   lastReadAt  DateTime?
   muted       Boolean   @default(false)
+  /// Set when this user deletes the conversation. Their history before this
+  /// moment is hidden from them (messages + inbox row), so writing again starts
+  /// from scratch — while the other participant keeps the full conversation.
+  clearedAt   DateTime?
 
   thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)

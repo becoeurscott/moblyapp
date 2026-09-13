@@ -158,6 +158,9 @@ struct ChatMessage: Identifiable, Equatable {
     /// on `ChatMessage` because SYSTEM messages track who *originated* the
     /// visit transition — the "other party" is the one who acts on the card.
     var visitIsMine: Bool = false
+    /// Raw server timestamp for this message. Used to anchor the year when a
+    /// visit's scheduled date is read back out of its (year-less) label text.
+    var createdAt: Date = .distantPast
 
     static func == (a: ChatMessage, b: ChatMessage) -> Bool { a.id == b.id }
 }

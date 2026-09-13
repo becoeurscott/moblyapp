@@ -56,22 +56,31 @@ chatRouter.get(
       orderBy: { thread: { updatedAt: 'desc' } },
     });
 
-    const items = parts.map((p) => {
-      const t = p.thread;
-      const others = t.participants.filter((x) => x.userId !== req.userId!).map((x) => x.user);
-      const last = t.messages[0];
-      return {
-        id: t.id,
-        listing: t.listing,
-        participants: others.map((u) => ({ ...u, online: isOnline(u.id) })),
-        lastMessage: last ? serializeMessage(last) : null,
-        // Read straight off the participant row. The previous version counted
-        // unread within the single most recent message it had fetched, so it
-        // could only ever report 0 or 1.
-        unread: p.unreadCount,
-        updatedAt: t.updatedAt,
-      };
-    });
+    const items = parts
+      // A conversation the user deleted stays hidden until something new arrives:
+      // if the latest message is at or before their `clearedAt`, there is nothing
+      // for them since the clear, so drop it from the inbox.
+      .filter((p) => {
+        if (!p.clearedAt) return true;
+        const last = p.thread.messages[0];
+        return last != null && last.createdAt > p.clearedAt;
+      })
+      .map((p) => {
+        const t = p.thread;
+        const others = t.participants.filter((x) => x.userId !== req.userId!).map((x) => x.user);
+        const last = t.messages[0];
+        return {
+          id: t.id,
+          listing: t.listing,
+          participants: others.map((u) => ({ ...u, online: isOnline(u.id) })),
+          lastMessage: last ? serializeMessage(last) : null,
+          // Read straight off the participant row. The previous version counted
+          // unread within the single most recent message it had fetched, so it
+          // could only ever report 0 or 1.
+          unread: p.unreadCount,
+          updatedAt: t.updatedAt,
+        };
+      });
     res.json({ items });
   })
 );
@@ -238,7 +247,7 @@ chatRouter.get(
   '/:id/messages',
   requireAuth,
   asyncHandler(async (req, res) => {
-    await assertParticipant(req.params.id, req.userId!);
+    const me = await assertParticipant(req.params.id, req.userId!);
     const { limit, before } = z
       .object({
         limit: z.coerce.number().min(1).max(100).default(50),
@@ -246,11 +255,17 @@ chatRouter.get(
       })
       .parse(req.query);
 
+    // Both `before` (pagination) and `clearedAt` (per-user delete) constrain
+    // createdAt, so merge them into one range filter.
+    const createdAt: { lt?: Date; gt?: Date } = {};
+    if (before) createdAt.lt = new Date(before);
+    if (me.clearedAt) createdAt.gt = me.clearedAt;
+
     const messages = await prisma.message.findMany({
       where: {
         threadId: req.params.id,
         deletedAt: null,
-        ...(before ? { createdAt: { lt: new Date(before) } } : {}),
+        ...(createdAt.lt || createdAt.gt ? { createdAt } : {}),
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -262,6 +277,28 @@ chatRouter.get(
       items: ordered.map(serializeMessage),
       nextBefore: messages.length === limit ? messages[messages.length - 1].createdAt : null,
     });
+  })
+);
+
+/**
+ * DELETE /api/threads/:id — delete the conversation for the caller only.
+ *
+ * Per-user: sets the caller's `clearedAt` to now (and zeroes their unread), so
+ * their history and inbox row before this moment disappear and writing again
+ * starts from scratch. The other participant keeps the full conversation. The
+ * thread row itself is never destroyed — that would take the other person's
+ * copy with it.
+ */
+chatRouter.delete(
+  '/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    await assertParticipant(req.params.id, req.userId!);
+    await prisma.threadParticipant.update({
+      where: { threadId_userId: { threadId: req.params.id, userId: req.userId! } },
+      data: { clearedAt: new Date(), unreadCount: 0 },
+    });
+    res.json({ ok: true });
   })
 );
 

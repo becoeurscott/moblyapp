@@ -246,6 +246,9 @@
     "+%lld" : {
 
     },
+    "+237" : {
+
+    },
     "+237 6 77 12 34 56 ou e-mail" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -340,6 +343,9 @@
     "0" : {
 
     },
+    "0 FCFA" : {
+
+    },
     "1 nouvelle demande" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -391,7 +397,13 @@
         }
       }
     },
+    "5 000 FCFA" : {
+
+    },
     "6 77 12 34 56" : {
+
+    },
+    "6 XX XX XX XX" : {
 
     },
     "7 derniers jours" : {
@@ -502,6 +514,12 @@
         }
       }
     },
+    "À partir de 5 000 FCFA / mois,\nou commencez gratuitement." : {
+
+    },
+    "À payer aujourd'hui" : {
+
+    },
     "À propos de Mobly" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -552,6 +570,9 @@
           }
         }
       }
+    },
+    "Abonnement propriétaire" : {
+
     },
     "Accepter" : {
       "extractionState" : "manual",
@@ -3480,6 +3501,9 @@
         }
       }
     },
+    "Démarrer l'essai gratuit" : {
+
+    },
     "Des centaines de propriétaires font déjà confiance à Mobly." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3550,6 +3574,9 @@
           }
         }
       }
+    },
+    "Devenez propriétaire" : {
+
     },
     "Devenez propriétaire\nsur Mobly" : {
       "extractionState" : "manual",
@@ -4336,6 +4363,12 @@
           }
         }
       }
+    },
+    "Essai activé" : {
+
+    },
+    "Essai gratuit 7 jours" : {
+
     },
     "Essayez un autre quartier ou une ville." : {
       "extractionState" : "manual",
@@ -5126,6 +5159,9 @@
         }
       }
     },
+    "La conversation sera supprimée de votre côté. Si vous réécrivez, elle repart de zéro. L'autre personne garde sa copie." : {
+
+    },
     "La demande repassera « en attente » côté visiteur." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5159,9 +5195,6 @@
           }
         }
       }
-    },
-    "La vérification d'identité est obligatoire pour publier" : {
-
     },
     "Laisser un avis" : {
       "extractionState" : "manual",
@@ -6078,6 +6111,9 @@
         }
       }
     },
+    "Moyen de paiement" : {
+
+    },
     "Nom complet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6350,6 +6386,9 @@
           }
         }
       }
+    },
+    "Numéro %@" : {
+
     },
     "Numéro de téléphone" : {
       "extractionState" : "manual",
@@ -6666,6 +6705,12 @@
     "Ouvrir Réglages" : {
 
     },
+    "Paiement" : {
+
+    },
+    "Paiement confirmé" : {
+
+    },
     "Paiement Mobile Money · sans engagement" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6682,6 +6727,9 @@
           }
         }
       }
+    },
+    "Paiement sécurisé. Vous confirmerez sur votre téléphone." : {
+
     },
     "Partagez votre expérience…" : {
       "extractionState" : "manual",
@@ -6853,6 +6901,9 @@
         }
       }
     },
+    "Payer 5 000 FCFA" : {
+
+    },
     "Pays" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6903,6 +6954,9 @@
           }
         }
       }
+    },
+    "Photo expirée" : {
+
     },
     "Photos" : {
 
@@ -7683,9 +7737,6 @@
           }
         }
       }
-    },
-    "Publier mon premier espace" : {
-
     },
     "Publier un espace" : {
       "extractionState" : "manual",
@@ -9582,6 +9633,9 @@
         }
       }
     },
+    "Traitement…" : {
+
+    },
     "Trier" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9996,6 +10050,9 @@
         }
       }
     },
+    "Vérification d'identité…" : {
+
+    },
     "Vérification en cours…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10085,9 +10142,6 @@
       }
     },
     "Vérifier maintenant" : {
-
-    },
-    "Vérifier mon identité" : {
 
     },
     "Vérifiez et enregistrez" : {
@@ -10956,6 +11010,9 @@
           }
         }
       }
+    },
+    "Vous ne serez pas débité aujourd'hui. Le premier paiement de 5 000 FCFA aura lieu dans 7 jours, sauf annulation." : {
+
     },
     "Vous recevrez à nouveau ses messages." : {
       "extractionState" : "manual",

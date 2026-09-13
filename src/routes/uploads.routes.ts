@@ -6,7 +6,6 @@ import { requireAuth, requireOwner } from '../middleware/auth';
 import { writeLimiter } from '../middleware/security';
 import { restrictionGate } from '../middleware/gates';
 import { env } from '../config/env';
-import { uploadChatMedia } from '../lib/supabaseStorage';
 
 export const uploadsRouter = Router();
 
@@ -68,13 +67,17 @@ const uploadAudio = multer({
  * so we never write to /tmp. Resolves to the parts of the response the client
  * actually needs.
  */
-async function uploadOne(buffer: Buffer, ownerId: string): Promise<{
+async function uploadOne(
+  buffer: Buffer,
+  ownerId: string,
+  subfolder = 'owner'
+): Promise<{
   url: string; publicId: string; width: number; height: number;
 }> {
   return await new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       {
-        folder: `${env.cloudinary.folder}/owner/${ownerId}`,
+        folder: `${env.cloudinary.folder}/${subfolder}/${ownerId}`,
         resource_type: 'image',
         // No public_id: let Cloudinary mint one so parallel uploads never
         // race on the same slot.
@@ -133,8 +136,8 @@ uploadsRouter.post(
  * listing, so it lives here — any signed-in user, gated only by the same
  * `MESSAGE_MEDIA` restriction as voice notes.
  *
- * Stored on Supabase Storage (not Cloudinary): chat media is auto-expired by
- * the retention job, so it belongs in the cheap, disposable bucket.
+ * Stored under the `chat/` folder so the retention job can expire it after
+ * CHAT_MEDIA_RETENTION_DAYS without touching permanent listing photos.
  */
 uploadsRouter.post(
   '/chat-image',
@@ -145,8 +148,8 @@ uploadsRouter.post(
   asyncHandler(async (req, res) => {
     const file = req.file as Express.Multer.File | undefined;
     if (!file) throw new ApiError(400, 'Aucune image envoyée', 'VALIDATION_FAILED');
-    const url = await uploadChatMedia(file.buffer, 'image/jpeg', 'jpg', req.userId!);
-    res.status(201).json({ url });
+    const uploaded = await uploadOne(file.buffer, req.userId!, 'chat');
+    res.status(201).json({ url: uploaded.url, publicId: uploaded.publicId });
   })
 );
 
@@ -179,9 +182,9 @@ uploadsRouter.post(
 /**
  * POST /api/uploads/voice — one recording, field name `voice`.
  *
- * Stored on Supabase Storage (chat media bucket), same as chat images, so it
- * is covered by the retention job. The client measures the note's length, so we
- * return `durationSec: null` and the app falls back to its own timer value.
+ * Stored on Cloudinary under `chat/voice/` so the retention job can expire it.
+ * `resource_type: 'auto'` lets Cloudinary detect the m4a and route it through
+ * the audio-capable video pipeline, which also returns `duration`.
  */
 uploadsRouter.post(
   '/voice',
@@ -192,12 +195,37 @@ uploadsRouter.post(
   asyncHandler(async (req, res) => {
     const file = req.file as Express.Multer.File | undefined;
     if (!file) throw new ApiError(400, 'Aucun audio envoyé', 'VALIDATION_FAILED');
-    try {
-      const url = await uploadChatMedia(file.buffer, 'audio/mp4', 'm4a', req.userId!);
-      res.status(201).json({ url, durationSec: null });
-    } catch (e) {
-      console.error('[uploads/voice] Supabase upload failed:', e);
+
+    const uploaded = await new Promise<{ url: string; publicId: string; durationSec: number | null }>(
+      (resolve, reject) => {
+        // Hard timeout so a stalled Cloudinary call can't hang the request.
+        const timer = setTimeout(
+          () => reject(new Error('Cloudinary voice upload timed out')),
+          25_000
+        );
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: `${env.cloudinary.folder}/chat/voice/${req.userId!}`,
+            resource_type: 'auto',
+            overwrite: false,
+          },
+          (err, result) => {
+            clearTimeout(timer);
+            if (err || !result) return reject(err ?? new Error('Upload failed'));
+            resolve({
+              url: result.secure_url,
+              publicId: result.public_id,
+              durationSec: result.duration ? Math.round(result.duration) : null,
+            });
+          }
+        );
+        stream.end(file.buffer);
+      }
+    ).catch((e: unknown) => {
+      console.error('[uploads/voice] Cloudinary upload failed:', e);
       throw new ApiError(502, 'Envoi de la note vocale impossible', 'INTERNAL');
-    }
+    });
+
+    res.status(201).json(uploaded);
   })
 );

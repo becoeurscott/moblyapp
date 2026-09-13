@@ -657,6 +657,14 @@ final class MoblyAPI {
         return w.user
     }
 
+    /// Pay the one-time owner inscription fee. Flips `ownerPaid` server-side and
+    /// returns the refreshed user (now `ownerActive`).
+    func activateOwnerInscription() async throws -> UserDTO {
+        struct Wrap: Decodable { let user: UserDTO }
+        let w: Wrap = try await request("owner/activate", method: "POST", authorized: true)
+        return w.user
+    }
+
     // MARK: - Listings
 
     func searchListings(query: String? = nil, category: String? = nil,
@@ -1185,6 +1193,18 @@ struct UserDTO: Decodable, Identifiable {
     /// True for the small handful of accounts with the Mobly admin flag. Gates
     /// the entry point to AdminDashboardView on the Profile screen.
     let isAdmin: Bool?
+    /// Owner monetization. `ownerActive` is false when the 7-day free trial has
+    /// lapsed and the one-time inscription fee (`ownerPaid`) hasn't been paid —
+    /// the dashboard is then locked, listings hidden and contact disabled.
+    /// `ownerTrialDaysLeft` is non-nil only while a trial is running.
+    let ownerPaid: Bool?
+    let ownerActive: Bool?
+    let ownerTrialDaysLeft: Int?
+    let ownerTrialEndsAt: String?
+
+    /// Whether owner features are usable right now. Defaults to true so a
+    /// payload predating these fields (or a non-owner) is never wrongly locked.
+    var isOwnerActive: Bool { ownerActive ?? true }
 }
 
 struct IdentitySessionDTO: Decodable {
@@ -1253,6 +1273,10 @@ struct ListingDTO: Codable, Identifiable {
         /// payloads that predate the field still decode.
         let identityVerified: Bool?
         let avatarUrl: String?
+        /// False when this owner's free trial lapsed unpaid — the app hides the
+        /// contact CTAs and shows "Contact désactivé". Optional so older
+        /// payloads decode (treated as active).
+        let active: Bool?
     }
 }
 

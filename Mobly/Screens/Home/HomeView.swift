@@ -315,10 +315,18 @@ struct HomeView: View {
 
     // MARK: Header (greeting + bell)
 
+    /// First name for the greeting: an explicitly-passed `userName` wins,
+    /// otherwise the signed-in user's first name. Empty when signed out, in
+    /// which case the header greets with a plain "Salut".
+    private var greetingName: String {
+        let passed = userName.trimmingCharacters(in: .whitespaces)
+        return passed.isEmpty ? session.firstName : passed
+    }
+
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("\(L("Bonjour")), \(userName)")
+                Text(greetingName.isEmpty ? L("Salut") : "\(L("Salut")) \(greetingName)")
                     .font(.moblyHeading(20))
                     .foregroundStyle(Color.moblyTextPrimary)
                 Text(L("Où cherchez-vous un espace ?"))
@@ -556,30 +564,42 @@ struct HomeView: View {
                         .foregroundStyle(.white.opacity(0.85))
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
-                    if !session.isOwner {
-                        HStack(spacing: 5) {
-                            Image(systemName: "gift.fill")
-                                .font(.system(size: 10, weight: .bold))
-                            Text(L("7 jours d'essai gratuit"))
-                                .font(.moblyBody(11, weight: .bold))
+                    HStack(spacing: 10) {
+                        Button(action: {
+                            if session.isOwner { showOwnerDashboard = true }
+                            else { showBecomeOwner = true }
+                        }) {
+                            if session.isOwner {
+                                Text(L("Ouvrir"))
+                                    .font(.moblyBody(12.5, weight: .semibold))
+                                    .foregroundStyle(Color.moblyPrimary)
+                                    .padding(.horizontal, 16).padding(.vertical, 9)
+                                    .background(Capsule().fill(.white))
+                            } else {
+                                // Arrow-only pill instead of a "Commencer" label.
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(Color.moblyPrimary)
+                                    .frame(width: 30, height: 30)
+                                    .background(Circle().fill(.white))
+                            }
                         }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Capsule().fill(.white.opacity(0.22)))
-                        .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 1))
-                        .padding(.top, 1)
+                        .buttonStyle(.plain)
+
+                        // Trial badge sits beside the button, not above it.
+                        if !session.isOwner {
+                            HStack(spacing: 5) {
+                                Image(systemName: "gift.fill")
+                                    .font(.system(size: 10, weight: .bold))
+                                Text(L("7 jours d'essai gratuit"))
+                                    .font(.moblyBody(11, weight: .bold))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Capsule().fill(.white.opacity(0.22)))
+                            .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 1))
+                        }
                     }
-                    Button(action: {
-                        if session.isOwner { showOwnerDashboard = true }
-                        else { showBecomeOwner = true }
-                    }) {
-                        Text(session.isOwner ? L("Ouvrir") : L("Commencer"))
-                            .font(.moblyBody(12.5, weight: .semibold))
-                            .foregroundStyle(Color.moblyPrimary)
-                            .padding(.horizontal, 16).padding(.vertical, 9)
-                            .background(Capsule().fill(.white))
-                    }
-                    .buttonStyle(.plain)
                     .padding(.top, 2)
                 }
                 Spacer(minLength: 8)

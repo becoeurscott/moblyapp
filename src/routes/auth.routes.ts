@@ -347,6 +347,10 @@ authRouter.patch(
 
     if (body.fullName) assertNotBlocked(body.fullName);
 
+    // First time becoming an owner starts the 7-day free trial. `ownerPaid`
+    // stays false until they pay the one-time inscription fee.
+    const startingOwnerTrial = body.isOwner === true && !req.user?.isOwner;
+
     const user = await prisma.user.update({
       where: { id: req.userId! },
       data: {
@@ -358,6 +362,7 @@ authRouter.patch(
         city: body.city,
         region: body.region,
         passwordHash: body.password ? await bcrypt.hash(body.password, 10) : undefined,
+        ...(startingOwnerTrial ? { ownerTrialStartedAt: new Date(), ownerPaid: false } : {}),
       },
     });
     res.json({ user: serializeUser(user) });

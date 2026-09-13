@@ -136,6 +136,7 @@ extension ListingDTO {
             // "Propriétaire vérifié" reflects the identity/KYC check, matching
             // the owner's own profile badge — not merely a confirmed phone.
             ownerVerified: owner?.identityVerified ?? false,
+            ownerContactActive: owner?.active ?? true,
             category: category,
             subtitle: subtitle,
             about: about,

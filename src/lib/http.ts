@@ -29,6 +29,7 @@ export type ErrorCode =
   | 'OTP_EXPIRED'
   | 'OTP_LOCKED'
   | 'OWNER_REQUIRED'
+  | 'OWNER_INACTIVE'
   | 'IDENTITY_REQUIRED'
   | 'CONFLICT'
   | 'MAINTENANCE'

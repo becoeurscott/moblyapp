@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
 import { serializeMessage } from '../lib/serialize';
+import { ownerActive } from '../lib/ownerTrial';
 import { requireAuth } from '../middleware/auth';
 import { writeLimiter } from '../middleware/security';
 import { broadcastMessage, isOnline, emitToUsers } from '../realtime/hub';
@@ -121,6 +122,15 @@ chatRouter.post(
     }
     if (peerId === req.userId!) {
       throw new ApiError(422, 'Vous ne pouvez pas vous écrire à vous-même', 'VALIDATION_FAILED');
+    }
+    // Block contacting an owner whose free trial lapsed without paying the
+    // one-time inscription fee — their account is deactivated until they pay.
+    const peerOwner = await prisma.user.findUnique({
+      where: { id: peerId },
+      select: { isOwner: true, ownerPaid: true, ownerTrialStartedAt: true },
+    });
+    if (peerOwner && !ownerActive(peerOwner)) {
+      throw new ApiError(403, "Ce propriétaire n'est plus disponible.", 'OWNER_INACTIVE');
     }
     // An explicit peer is client-supplied. Accepting it unconditionally would
     // turn this route into "DM any user id you can guess" — an unsolicited-

@@ -144,6 +144,14 @@ model User {
   // Role. `isOwner` drives the app's visitor ↔ propriétaire switch.
   isOwner    Boolean @default(false)
   isAdmin    Boolean @default(false)
+  /// Owner monetization: becoming an owner starts a 7-day free trial
+  /// (`ownerTrialStartedAt` = now). After the trial the owner must pay a
+  /// one-time inscription fee (`ownerPaid` = true) to stay active. An owner
+  /// who is neither in-trial nor paid is "inactive": their listings are hidden
+  /// from every public query and they cannot be contacted. Null trial start =
+  /// legacy owner, treated as active (grandfathered).
+  ownerTrialStartedAt DateTime?
+  ownerPaid           Boolean   @default(false)
   /// The shared "Support Mobly" identity. Exactly one row carries this, and it
   /// is the other participant in every support conversation — so whoever is on
   /// duty answers, and the user always sees one consistent contact rather than

@@ -491,6 +491,20 @@ final class AuthStore: ObservableObject {
         }
     }
 
+    /// Pay the one-time owner inscription fee (unlocks the dashboard after the
+    /// free trial). Refreshes the local user so `ownerActive` flips to true.
+    @discardableResult
+    func payOwnerInscription() async -> Bool {
+        guard api.isAuthenticated else { return false }
+        do {
+            let updated = try await api.activateOwnerInscription()
+            user = updated
+            return true
+        } catch {
+            return false
+        }
+    }
+
     func signOut(allDevices: Bool = false) async {
         // ORDER MATTERS. Unregister the push device FIRST, while the access
         // token is still valid — `api.logout()` clears the session, and a

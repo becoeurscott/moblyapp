@@ -18,6 +18,10 @@ struct Listing: Identifiable, Hashable {
     /// Owner's display name, from the server. Nil for locally-built listings.
     var ownerName: String? = nil
     var ownerVerified: Bool = false
+    /// False when the owner's free trial lapsed without paying the inscription
+    /// fee: the detail screen then hides contact CTAs and shows "Contact
+    /// désactivé". Defaults true for locally-built / legacy listings.
+    var ownerContactActive: Bool = true
     /// Owner-uploaded cover photo. When set, UI renders this instead of `imageName`.
     /// Data is Hashable so `Listing` keeps its synthesized conformances.
     var customImageData: Data? = nil

@@ -1,4 +1,5 @@
 import type { Listing, User } from '@prisma/client';
+import { ownerActive, ownerTrialDaysLeft, ownerTrialEndsAt } from './ownerTrial';
 
 const dealLabel: Record<string, string> = {
   RENT: 'À louer',
@@ -13,7 +14,14 @@ export function formatFcfa(n: number): string {
 
 /** Shape a Listing for the client. Includes both raw + display fields. */
 export function serializeListing(
-  l: Listing & { owner?: Pick<User, 'id' | 'fullName' | 'verified' | 'identityVerified' | 'rating' | 'avatarUrl'> | null }
+  l: Listing & {
+    owner?:
+      | (Pick<User, 'id' | 'fullName' | 'verified' | 'identityVerified' | 'rating' | 'avatarUrl'> &
+          // Optional: only the public listing queries select these, and they're
+          // all that `ownerActive` needs to decide the "Contact désactivé" flag.
+          Partial<Pick<User, 'isOwner' | 'ownerPaid' | 'ownerTrialStartedAt'>>)
+      | null;
+  }
 ) {
   const deals: string[] = [dealLabel[l.deal] ?? 'À louer'];
   if (l.furnished) deals.push('Meublé');
@@ -64,6 +72,17 @@ export function serializeListing(
           identityVerified: l.owner.identityVerified,
           rating: l.owner.rating,
           avatarUrl: l.owner.avatarUrl,
+          // False when the owner's free trial lapsed unpaid: the app then hides
+          // contact CTAs and shows "Contact désactivé". Queries that don't
+          // select the trial fields (favourites, boost) report active=true.
+          active:
+            l.owner.isOwner === undefined
+              ? true
+              : ownerActive({
+                  isOwner: l.owner.isOwner,
+                  ownerPaid: l.owner.ownerPaid ?? false,
+                  ownerTrialStartedAt: l.owner.ownerTrialStartedAt ?? null,
+                }),
         }
       : undefined,
     createdAt: l.createdAt,
@@ -91,6 +110,12 @@ export function serializeUser(u: User) {
     membershipTier: u.membershipTier,
     moblyScore: u.moblyScore,
     createdAt: u.createdAt,
+    // Owner monetization state, so the app can show the trial countdown and,
+    // once it lapses, lock the dashboard behind the one-time inscription fee.
+    ownerPaid: u.ownerPaid,
+    ownerActive: ownerActive(u),
+    ownerTrialDaysLeft: ownerTrialDaysLeft(u),
+    ownerTrialEndsAt: ownerTrialEndsAt(u.ownerTrialStartedAt),
   };
 }
 

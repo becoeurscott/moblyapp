@@ -968,16 +968,39 @@ struct ListingDetailView: View {
         .background(RoundedRectangle(cornerRadius: 13).fill(Color(hex: 0xF1F2F6)))
     }
 
+    /// Passive bottom label (no CTA) — own listing, or an owner whose account
+    /// is deactivated and can no longer be contacted.
+    private var passiveBar: Bool { isOwnListing || !listing.ownerContactActive }
+
+    private var contactDisabledNotice: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "bubble.left.slash.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color(hex: 0x6B6F80))
+            Text("Contact désactivé — ce propriétaire n'est plus disponible")
+                .font(.moblyBody(13, weight: .medium))
+                .foregroundStyle(Color(hex: 0x6B6F80))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 13)
+        .frame(height: 38)
+        .background(RoundedRectangle(cornerRadius: 13).fill(Color(hex: 0xF1F2F6)))
+    }
+
     private var stickyBar: some View {
         Group {
             if isOwnListing {
                 ownListingNotice
+            } else if !listing.ownerContactActive {
+                contactDisabledNotice
             } else {
                 stickyCTARow
             }
         }
         .padding(.horizontal, 22)
-        .padding(.top, isOwnListing ? 9 : 14)
+        .padding(.top, passiveBar ? 9 : 14)
         // The CTA row keeps a comfortable 30pt above the home indicator so the
         // buttons are not mis-tapped. The own-listing notice is a passive
         // label with nothing to hit, so it drops to the safe-area inset alone
@@ -987,7 +1010,7 @@ struct ListingDetailView: View {
         // hit, so it drops to just above the indicator instead of floating on a
         // band of blur.
         // Content clears the home indicator...
-        .padding(.bottom, (isOwnListing ? 2 : 2) + safeAreaBottom)
+        .padding(.bottom, 2 + safeAreaBottom)
         .background(
             Rectangle().fill(.ultraThinMaterial)
                 .shadow(color: Color(hex: 0x14152A).opacity(0.08), radius: 16, y: -4)

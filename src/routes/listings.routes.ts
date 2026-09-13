@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
 import { optionalAuth, requireAuth, requireOwner, requireVerified } from '../middleware/auth';
 import { serializeListing } from '../lib/serialize';
+import { activeOwnerRelationWhere } from '../lib/ownerTrial';
 import { cacheGet, cacheSet, cacheBust } from '../lib/cache';
 import {
   featureGate,
@@ -22,7 +23,13 @@ const LIST_CACHE = 'listings:';
 const LIST_TTL_MS = 60_000;
 
 const ownerSelect = {
-  owner: { select: { id: true, fullName: true, verified: true, identityVerified: true, rating: true, avatarUrl: true } },
+  owner: {
+    select: {
+      id: true, fullName: true, verified: true, identityVerified: true, rating: true, avatarUrl: true,
+      // Drives the "Contact désactivé" state on the client.
+      isOwner: true, ownerPaid: true, ownerTrialStartedAt: true,
+    },
+  },
 } as const;
 
 const PUBLIC_LISTING_STATUSES: ListingStatus[] = [ListingStatus.ACTIVE, ListingStatus.BOOSTED];
@@ -59,6 +66,9 @@ listingsRouter.get(
     const where: Prisma.ListingWhereInput = {
       available: true,
       status: { in: PUBLIC_LISTING_STATUSES },
+      // Hide listings whose owner's free trial lapsed without paying the
+      // one-time inscription fee. Legacy owners (no trial start) stay visible.
+      owner: activeOwnerRelationWhere(),
     };
     if (q.category && q.category !== 'Tous') where.category = q.category;
     if (q.region) where.region = q.region;

@@ -6,6 +6,7 @@ import SwiftUI
 struct OwnerDashboardView: View {
     @ObservedObject private var store = OwnerListings.shared
     @ObservedObject private var visits = VisitRequestStore.shared
+    @ObservedObject private var auth = AuthStore.shared
     /// Aggregate figures + real 30-day deltas from /owner/overview.
     @State private var overview: MoblyAPI.OwnerOverview?
     @State private var showAddListing = false
@@ -14,6 +15,16 @@ struct OwnerDashboardView: View {
     @State private var statsAnnonce: OwnerAnnonce?
     @State private var boostAnnonce: OwnerAnnonce?
     @State private var editAnnonce: OwnerAnnonce?
+    @State private var showReactivate = false
+
+    /// The free trial ran out and the one-time inscription fee hasn't been paid:
+    /// the whole dashboard is locked behind the paywall.
+    private var ownerLocked: Bool {
+        auth.user?.isOwner == true && auth.user?.isOwnerActive == false
+    }
+
+    /// Non-nil while the free trial is still running — drives the countdown banner.
+    private var trialDaysLeft: Int? { auth.user?.ownerTrialDaysLeft }
 
     private enum Filter: CaseIterable {
         case all, active, boosted, pending
@@ -28,33 +39,38 @@ struct OwnerDashboardView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 18) {
-                    performanceCard
-                    visitsCard
-                    filterBar
-                    LazyVStack(spacing: 16) {
-                        ForEach(filtered) { annonce in
-                            AnnonceCard(
-                                annonce: annonce,
-                                onToggleAvailability: {
-                                    withAnimation(Motion.standard) { store.toggleAvailability(annonce) }
-                                },
-                                onBoost: { boostAnnonce = annonce },
-                                onStats: { statsAnnonce = annonce },
-                                onEdit: { editAnnonce = annonce },
-                                onDelete: { store.remove(annonce) }
-                            )
+            if ownerLocked {
+                lockedView
+            } else {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 18) {
+                        if let days = trialDaysLeft { trialBanner(days) }
+                        performanceCard
+                        visitsCard
+                        filterBar
+                        LazyVStack(spacing: 16) {
+                            ForEach(filtered) { annonce in
+                                AnnonceCard(
+                                    annonce: annonce,
+                                    onToggleAvailability: {
+                                        await store.toggleAvailabilityAsync(annonce)
+                                    },
+                                    onBoost: { boostAnnonce = annonce },
+                                    onStats: { statsAnnonce = annonce },
+                                    onEdit: { editAnnonce = annonce },
+                                    onDelete: { store.remove(annonce) }
+                                )
+                            }
                         }
+                        if filtered.isEmpty { emptyState }
                     }
-                    if filtered.isEmpty { emptyState }
+                    .padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 40)
                 }
-                .padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 40)
-            }
-            .refreshable {
-                await UserDataStore.shared.loadMyListings()
-                OwnerListings.shared.load(from: UserDataStore.shared.myListings)
-                await loadOverview()
+                .refreshable {
+                    await UserDataStore.shared.loadMyListings()
+                    OwnerListings.shared.load(from: UserDataStore.shared.myListings)
+                    await loadOverview()
+                }
             }
         }
         .background(Color.moblySurface)
@@ -111,6 +127,129 @@ struct OwnerDashboardView: View {
             .presentationDetents([.height(620), .large])
             .presentationDragIndicator(.visible)
         }
+        .fullScreenCover(isPresented: $showReactivate) {
+            OwnerPaymentView(
+                plan: .paid,
+                oneTime: true,
+                onCancel: { showReactivate = false },
+                onPaid: {
+                    showReactivate = false
+                    Task {
+                        await auth.payOwnerInscription()
+                        // Bring the (now visible again) listings + figures back.
+                        await UserDataStore.shared.loadMyListings()
+                        OwnerListings.shared.load(from: UserDataStore.shared.myListings)
+                        await loadOverview()
+                    }
+                }
+            )
+            .swipeToDismiss(onDismiss: { showReactivate = false })
+        }
+    }
+
+    // MARK: Trial banner + locked paywall
+
+    private func trialBanner(_ days: Int) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "gift.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.22)))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(days <= 0 ? "Dernier jour d'essai gratuit"
+                               : "Essai gratuit · \(days) jour\(days > 1 ? "s" : "") restant\(days > 1 ? "s" : "")")
+                    .font(.moblyHeading(14.5)).foregroundStyle(.white)
+                Text("Payez une fois pour garder votre compte actif.")
+                    .font(.moblyBody(12)).foregroundStyle(.white.opacity(0.85))
+            }
+            Spacer(minLength: 6)
+            Button { showReactivate = true } label: {
+                Text("Payer")
+                    .font(.moblyHeading(13))
+                    .foregroundStyle(Color.moblyAccent)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Capsule().fill(.white))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 18)
+            .fill(LinearGradient(colors: [Color.moblyAccent, Color(hex: 0xE85A1A)],
+                                 startPoint: .topLeading, endPoint: .bottomTrailing)))
+        .shadow(color: Color.moblyAccent.opacity(0.25), radius: 14, y: 6)
+    }
+
+    private var lockedView: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 22) {
+                ZStack {
+                    Circle().fill(Color(hex: 0xFFF3EC)).frame(width: 108, height: 108)
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 44, weight: .semibold))
+                        .foregroundStyle(Color.moblyAccent)
+                }
+                .padding(.top, 40)
+
+                VStack(spacing: 10) {
+                    Text("Votre essai gratuit est terminé")
+                        .font(.moblyHeading(22))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                        .multilineTextAlignment(.center)
+                    Text("Payez les frais d'inscription uniques de 5 000 FCFA pour réactiver votre compte propriétaire.")
+                        .font(.moblyBody(14))
+                        .foregroundStyle(Color.moblyTextSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 30)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    lockedConsequence("eye.slash.fill", "Vos annonces sont masquées", "Elles n'apparaissent plus dans la recherche.")
+                    lockedConsequence("bubble.left.slash.fill", "Personne ne peut vous contacter", "Votre profil affiche « Contact désactivé ».")
+                    lockedConsequence("bolt.fill", "Réactivation immédiate", "Tout revient dès le paiement effectué.")
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 18).fill(.white)
+                    .shadow(color: Color(hex: 0x14152A).opacity(0.05), radius: 12, y: 4))
+                .padding(.horizontal, 20)
+
+                Button { showReactivate = true } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "lock.open.fill").font(.system(size: 14, weight: .bold))
+                        Text("Payer 5 000 FCFA").font(.moblyHeading(15.5))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 56)
+                    .background(LinearGradient(colors: [Color.moblyPrimary, Color(hex: 0x5B6BF5)],
+                                               startPoint: .leading, endPoint: .trailing))
+                    .clipShape(Capsule())
+                    .shadow(color: Color.moblyPrimary.opacity(0.35), radius: 14, y: 8)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
+
+                Spacer(minLength: 30)
+            }
+        }
+    }
+
+    private func lockedConsequence(_ icon: String, _ title: String, _ subtitle: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.moblyAccent)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.moblyHeading(14)).foregroundStyle(Color.moblyTextPrimary)
+                Text(subtitle).font(.moblyBody(12.5)).foregroundStyle(Color.moblyTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     private var filtered: [OwnerAnnonce] {
@@ -136,15 +275,15 @@ struct OwnerDashboardView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var topBar: some View {
-        VStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack {
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Color.moblyTextPrimary)
-                        .frame(width: 42, height: 42)
-                        .background(RoundedRectangle(cornerRadius: 14).fill(.white)
-                            .shadow(color: Color(hex: 0x14152A).opacity(0.06), radius: 8, y: 2))
+                        .frame(width: 40, height: 40)
+                        .background(Circle().fill(.white)
+                            .shadow(color: Color(hex: 0x14152A).opacity(0.05), radius: 8, y: 2))
                 }
                 Spacer()
                 Button { showAddListing = true } label: {
@@ -158,13 +297,64 @@ struct OwnerDashboardView: View {
                     .shadow(color: Color.moblyPrimary.opacity(0.3), radius: 10, y: 5)
                 }
             }
-            HStack {
-                Text("Mes annonces")
-                    .font(.moblyHeading(26)).foregroundStyle(Color.moblyTextPrimary)
-                Spacer()
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    (Text(greeting).foregroundColor(Color.moblyTextPrimary)
+                        + Text("  👋"))
+                        .font(.moblyHeading(26))
+                    Text("Voici un aperçu de vos annonces et de vos performances.")
+                        .font(.moblyBody(13.5))
+                        .foregroundStyle(Color.moblyTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                avatarView
             }
         }
-        .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 10)
+        .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 12)
+    }
+
+    /// "Bonjour Alex" — first name only, greeting alone when we have no name.
+    private var greeting: String {
+        let full = (auth.user?.fullName ?? "").trimmingCharacters(in: .whitespaces)
+        let first = full.split(separator: " ").first.map(String.init) ?? ""
+        return first.isEmpty ? "Bonjour" : "Bonjour \(first)"
+    }
+
+    private var avatarInitials: String {
+        let full = (auth.user?.fullName ?? "").trimmingCharacters(in: .whitespaces)
+        return full.isEmpty ? "M" : String(full.prefix(2)).uppercased()
+    }
+
+    /// Uploaded photo takes precedence; otherwise the deterministic palette
+    /// gradient with initials — same treatment as the profile header.
+    private var avatarView: some View {
+        ZStack {
+            if let url = auth.user?.avatarUrl, let u = URL(string: url) {
+                AsyncImage(url: u) { phase in
+                    switch phase {
+                    case .success(let img): img.resizable().scaledToFill()
+                    default: avatarFallback
+                    }
+                }
+            } else {
+                avatarFallback
+            }
+        }
+        .frame(width: 54, height: 54)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(.white, lineWidth: 2))
+        .shadow(color: Color(hex: 0x14152A).opacity(0.12), radius: 8, y: 3)
+    }
+
+    private var avatarFallback: some View {
+        ZStack {
+            LinearGradient(
+                colors: AvatarPalette.gradient(for: auth.user?.id ?? "self",
+                                               stored: auth.user?.avatarColor),
+                startPoint: .topLeading, endPoint: .bottomTrailing)
+            Text(avatarInitials).font(.moblyHeading(18)).foregroundStyle(.white)
+        }
     }
 
     /// Best-effort: on failure the card falls back to the listing totals and
@@ -179,53 +369,88 @@ struct OwnerDashboardView: View {
     // MARK: Performance card
 
     private var performanceCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Performances · 30 derniers jours")
-                .font(.moblyBody(12.5)).foregroundStyle(.white.opacity(0.8))
-            HStack(alignment: .top, spacing: 8) {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 10) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.18)))
+                Text("Performances · 30 derniers jours")
+                    .font(.moblyHeading(14.5)).foregroundStyle(.white)
+                Spacer(minLength: 4)
+            }
+            HStack(alignment: .top, spacing: 0) {
                 // Totals come from the listings; the 30-day window and its
                 // deltas come from the raw event tables via /owner/overview.
-                perfStat((overview?.last30d.views ?? store.totalViews).formattedGrouped,
+                perfStat("eye.fill",
+                         (overview?.last30d.views ?? store.totalViews).formattedGrouped,
                          "Vues totales", overview?.deltas30d.views)
-                perfStat("\(overview?.last30d.contacts ?? store.totalContacts)",
+                perfDivider
+                perfStat("bubble.left.fill",
+                         "\(overview?.last30d.contacts ?? store.totalContacts)",
                          "Contacts", overview?.deltas30d.contacts)
-                perfStat("\(overview?.last30d.favorites ?? store.totalFavorites)",
+                perfDivider
+                perfStat("bookmark.fill",
+                         "\(overview?.last30d.favorites ?? store.totalFavorites)",
                          "Ajouts en préférés", overview?.deltas30d.favorites)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
-        .background(RoundedRectangle(cornerRadius: 22)
+        .background(RoundedRectangle(cornerRadius: 24)
             .fill(LinearGradient(colors: [Color.moblyPrimary, Color(hex: 0x5B6BF5)],
                                  startPoint: .topLeading, endPoint: .bottomTrailing)))
-        .shadow(color: Color.moblyPrimary.opacity(0.25), radius: 16, y: 8)
+        .shadow(color: Color.moblyPrimary.opacity(0.28), radius: 20, y: 10)
+    }
+
+    private var perfDivider: some View {
+        Rectangle().fill(.white.opacity(0.16)).frame(width: 1, height: 58)
     }
 
     /// `delta` is nil when there is no previous 30-day period to compare
     /// against — a brand-new annonce has no trend, and inventing one is how
     /// the old hardcoded "+18%" ended up sitting next to a metric that had
     /// actually fallen. Nil renders no badge at all.
-    private func perfStat(_ value: String, _ label: String, _ delta: Int?) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(value).font(.moblyHeading(27)).foregroundStyle(.white)
+    private func perfStat(_ icon: String, _ value: String, _ label: String, _ delta: Int?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+            Text(value).font(.moblyHeading(24)).foregroundStyle(.white)
                 .contentTransition(.numericText())
                 .animation(Motion.content, value: value)
-            Text(LT(label)).font(.moblyBody(11.5)).foregroundStyle(.white.opacity(0.8))
+            Text(LT(label)).font(.moblyBody(11)).foregroundStyle(.white.opacity(0.8))
+                .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-            if let d = delta {
-                let up = d >= 0
+            deltaBadge(delta)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+    }
+
+    @ViewBuilder
+    private func deltaBadge(_ delta: Int?) -> some View {
+        if let d = delta {
+            if d == 0 {
                 HStack(spacing: 3) {
-                    Image(systemName: up ? "arrow.up" : "arrow.down")
+                    Image(systemName: "minus").font(.system(size: 9, weight: .bold))
+                    Text("0%").font(.moblyBody(11, weight: .semibold))
+                }
+                .foregroundStyle(.white.opacity(0.7))
+            } else {
+                let up = d > 0
+                HStack(spacing: 3) {
+                    Image(systemName: up ? "arrow.up.right" : "arrow.down.right")
                         .font(.system(size: 9, weight: .bold))
                     Text("\(up ? "+" : "")\(d)%").font(.moblyBody(11, weight: .semibold))
                 }
                 .foregroundStyle(up ? Color(hex: 0x9CFFC9) : Color(hex: 0xFFC2C4))
-            } else {
-                // Keeps the three columns vertically aligned without a badge.
-                Color.clear.frame(height: 14)
             }
+        } else {
+            // Keeps the three columns vertically aligned without a badge.
+            Color.clear.frame(height: 14)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: Visits card
@@ -317,13 +542,14 @@ struct OwnerDashboardView: View {
 
 private struct AnnonceCard: View {
     let annonce: OwnerAnnonce
-    var onToggleAvailability: () -> Void
+    var onToggleAvailability: () async -> Void
     var onBoost: () -> Void
     var onStats: () -> Void
     var onEdit: () -> Void
     var onDelete: () -> Void
 
     @State private var confirmDelete = false
+    @State private var toggling = false
 
     private var dimmed: Bool { !annonce.available }
 
@@ -338,9 +564,9 @@ private struct AnnonceCard: View {
             Divider().padding(.horizontal, 14)
             actionRow.padding(14)
         }
-        .background(RoundedRectangle(cornerRadius: 20).fill(dimmed ? Color(hex: 0xF1F2F5) : .white)
-            .shadow(color: Color(hex: 0x14152A).opacity(dimmed ? 0.03 : 0.06), radius: 12, y: 4))
-        .overlay(RoundedRectangle(cornerRadius: 20)
+        .background(RoundedRectangle(cornerRadius: 22).fill(dimmed ? Color(hex: 0xF1F2F5) : .white)
+            .shadow(color: Color(hex: 0x14152A).opacity(dimmed ? 0.03 : 0.05), radius: 16, y: 6))
+        .overlay(RoundedRectangle(cornerRadius: 22)
             .stroke(Color(hex: 0xE2E4EC), lineWidth: dimmed ? 1 : 0))
         .animation(Motion.standard, value: annonce.available)
         .contextMenu {
@@ -360,35 +586,63 @@ private struct AnnonceCard: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 13) {
-            ListingCover(listing: annonce.listing)
-                .frame(width: 76, height: 76).clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 15))
-                .saturation(dimmed ? 0 : 1)
-                .opacity(dimmed ? 0.55 : 1)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(annonce.listing.title).font(.moblyHeading(16.5))
-                        .foregroundStyle(dimmed ? Color.moblyTextSecondary : Color.moblyTextPrimary)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    Text(annonce.status.label)
-                        .font(.moblyBody(12, weight: .bold))
-                        .foregroundStyle(statusColor)
+        Button(action: onStats) {
+            HStack(alignment: .top, spacing: 13) {
+                ZStack(alignment: .topLeading) {
+                    ListingCover(listing: annonce.listing)
+                        .frame(width: 84, height: 84).clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .saturation(dimmed ? 0 : 1)
+                        .opacity(dimmed ? 0.55 : 1)
+                    if annonce.listing.photos.count > 1 {
+                        Text("1/\(annonce.listing.photos.count)")
+                            .font(.moblyBody(10, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(Capsule().fill(.black.opacity(0.5)))
+                            .padding(6)
+                    }
                 }
-                Text(annonce.listing.price + LT(annonce.listing.priceUnit))
-                    .font(.moblyHeading(15))
-                    .foregroundStyle(dimmed ? Color(hex: 0x9A9DAC) : Color.moblyPrimary)
-                HStack(spacing: 8) {
-                    metricPill("eye.fill", annonce.views.formattedGrouped, 0x9A9DAC, 0xF1F2F6)
-                    metricPill("bubble.left.fill", "\(annonce.contacts)", 0x1F8A5B, 0xE9F9EF)
-                    metricPill("heart.fill", "\(annonce.favorites)", 0xE5484D, 0xFDEDED)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(annonce.listing.title).font(.moblyHeading(17))
+                                .foregroundStyle(dimmed ? Color.moblyTextSecondary : Color.moblyTextPrimary)
+                                .lineLimit(1)
+                            Text(annonce.listing.price + LT(annonce.listing.priceUnit))
+                                .font(.moblyHeading(15))
+                                .foregroundStyle(dimmed ? Color(hex: 0x9A9DAC) : Color.moblyPrimary)
+                        }
+                        Spacer(minLength: 6)
+                        statusPill
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color(hex: 0xC4C7D2))
+                            .padding(.top, 3)
+                    }
+                    HStack(spacing: 8) {
+                        metricPill("eye.fill", annonce.views.formattedGrouped, 0x9A9DAC, 0xF1F2F6)
+                        metricPill("bubble.left.fill", "\(annonce.contacts)", 0x1F8A5B, 0xE9F9EF)
+                        metricPill("heart.fill", "\(annonce.favorites)", 0xE5484D, 0xFDEDED)
+                    }
+                    .opacity(dimmed ? 0.5 : 1)
                 }
-                .opacity(dimmed ? 0.5 : 1)
             }
-            Spacer(minLength: 0)
+            .padding(14)
+            .contentShape(Rectangle())
         }
-        .padding(14)
+        .buttonStyle(.plain)
+    }
+
+    private var statusPill: some View {
+        HStack(spacing: 5) {
+            Circle().fill(statusColor).frame(width: 6, height: 6)
+            Text(annonce.status.label)
+                .font(.moblyBody(10.5, weight: .bold))
+                .foregroundStyle(statusColor)
+        }
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(Capsule().fill(statusColor.opacity(0.12)))
     }
 
     private var statusColor: Color {
@@ -423,10 +677,30 @@ private struct AnnonceCard: View {
             .background(RoundedRectangle(cornerRadius: 11)
                 .fill(annonce.available ? Color(hex: 0xE9F9EF) : Color(hex: 0xF1F2F6)))
             Spacer()
-            Button(action: onToggleAvailability) {
-                Text(annonce.available ? "Rendre indisponible" : "Rendre disponible")
-                    .font(.moblyHeading(13)).foregroundStyle(Color.moblyPrimary)
+            Button {
+                guard !toggling else { return }
+                Task {
+                    toggling = true
+                    await onToggleAvailability()
+                    toggling = false
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    if toggling {
+                        ProgressView().controlSize(.mini).tint(Color.moblyPrimary)
+                    } else {
+                        Image(systemName: annonce.available ? "eye.slash" : "eye")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    Text(toggling
+                         ? "Mise à jour…"
+                         : (annonce.available ? "Rendre indisponible" : "Rendre disponible"))
+                        .font(.moblyHeading(13))
+                }
+                .foregroundStyle(toggling ? Color.moblyTextSecondary : Color.moblyPrimary)
             }
+            .disabled(toggling)
+            .animation(Motion.quick, value: toggling)
         }
     }
 

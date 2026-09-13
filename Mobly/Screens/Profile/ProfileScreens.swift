@@ -1415,16 +1415,16 @@ struct BecomeOwnerView: View {
                 if step < totalSteps - 1 {
                     withAnimation(Motion.quick) { step += 1 }
                 } else {
-                    // Last step is the pricing choice → collect payment, then
-                    // (still) run identity verification before publishing.
+                    // Free activation — no payment required. Identity
+                    // verification still runs before publishing when KYC applies.
                     SessionTracker.shared.log("owner.plan_selected", ["plan": selectedPlan.analyticsId])
-                    showPayment = true
+                    activateOwner()
                 }
             } label: {
                 HStack(spacing: 8) {
                     Text(step == totalSteps - 1 ? selectedPlan.ctaTitle : "Suivant")
                         .font(.moblyHeading(15.5))
-                    Image(systemName: step == totalSteps - 1 ? "lock.fill" : "arrow.right")
+                    Image(systemName: step == totalSteps - 1 ? "checkmark" : "arrow.right")
                         .font(.system(size: 13, weight: .bold))
                 }
                 .foregroundStyle(.white)
@@ -1446,6 +1446,21 @@ struct BecomeOwnerView: View {
                     .foregroundStyle(Color(hex: 0x9A9DAC))
                     .multilineTextAlignment(.center)
             }
+        }
+    }
+
+    /// Activate the owner account for free (no payment). If KYC is required and
+    /// not yet done, run identity verification first; otherwise upgrade and
+    /// celebrate straight away.
+    private func activateOwner() {
+        if !isIdentityVerified {
+            showVerification = true
+        } else {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            SessionTracker.shared.log("owner.upgrade", ["plan": selectedPlan.analyticsId])
+            Session.shared.upgradeToOwner()
+            Task { await AuthStore.shared.becomeOwnerOnServer() }
+            showCelebration = true
         }
     }
 }
@@ -2010,7 +2025,7 @@ enum OwnerPlan {
 
     var footnote: String {
         self == .trial
-            ? "7 jours gratuits, puis 5 000 FCFA / mois · Annulable à tout moment"
+            ? "Essai gratuit · Aucun paiement requis · Annulable à tout moment"
             : "5 000 FCFA / mois · Annulable à tout moment"
     }
 }
@@ -2039,7 +2054,7 @@ private struct StepPricing: View {
                         .font(.moblyHeading(27))
                         .foregroundStyle(Color.moblyTextPrimary)
                         .multilineTextAlignment(.center)
-                    Text("À partir de 5 000 FCFA / mois,\nou commencez gratuitement.")
+                    Text("Commencez gratuitement,\naucun paiement requis.")
                         .font(.moblyBody(14))
                         .foregroundStyle(Color(hex: 0x666F80))
                         .multilineTextAlignment(.center)
@@ -2051,19 +2066,11 @@ private struct StepPricing: View {
                 VStack(spacing: 14) {
                     planCard(
                         plan: .trial,
-                        badge: "RECOMMANDÉ",
+                        badge: "GRATUIT",
                         title: "Essai gratuit 7 jours",
                         price: "0 FCFA",
                         priceCaption: "aujourd'hui",
-                        subtitle: "Puis 5 000 FCFA / mois. Annulable à tout moment."
-                    )
-                    planCard(
-                        plan: .paid,
-                        badge: nil,
-                        title: "Abonnement mensuel",
-                        price: "5 000 FCFA",
-                        priceCaption: "/ mois",
-                        subtitle: "Facturé dès aujourd'hui, sans période d'essai."
+                        subtitle: "Activez votre compte gratuitement. Aucun paiement requis, annulable à tout moment."
                     )
                 }
                 .padding(.horizontal, 20)
@@ -2156,6 +2163,9 @@ private struct StepPricing: View {
 // but the flow is identical.
 struct OwnerPaymentView: View {
     let plan: OwnerPlan
+    /// One-time inscription fee (used by the post-trial reactivation paywall)
+    /// instead of the subscription/trial framing.
+    var oneTime: Bool = false
     var onCancel: () -> Void = {}
     var onPaid: () -> Void = {}
 
@@ -2174,7 +2184,7 @@ struct OwnerPaymentView: View {
     @State private var processing = false
     @State private var done = false
 
-    private var amountToday: Int { plan == .trial ? 0 : OwnerPlan.monthlyPrice }
+    private var amountToday: Int { oneTime ? OwnerPlan.monthlyPrice : (plan == .trial ? 0 : OwnerPlan.monthlyPrice) }
 
     private var phoneValid: Bool {
         phone.filter(\.isNumber).count >= 9
@@ -2234,11 +2244,12 @@ struct OwnerPaymentView: View {
     private var summaryCard: some View {
         VStack(spacing: 12) {
             HStack {
-                Text(plan == .trial ? "Essai gratuit 7 jours" : "Abonnement propriétaire")
+                Text(oneTime ? "Frais d'inscription propriétaire"
+                             : (plan == .trial ? "Essai gratuit 7 jours" : "Abonnement propriétaire"))
                     .font(.moblyBody(14, weight: .semibold))
                     .foregroundStyle(Color.moblyTextPrimary)
                 Spacer()
-                Text(plan == .trial ? "0 FCFA" : "5 000 FCFA")
+                Text(oneTime ? "5 000 FCFA" : (plan == .trial ? "0 FCFA" : "5 000 FCFA"))
                     .font(.moblyHeading(16))
                     .foregroundStyle(Color.moblyPrimary)
             }
@@ -2252,7 +2263,13 @@ struct OwnerPaymentView: View {
                     .font(.moblyHeading(18))
                     .foregroundStyle(Color.moblyTextPrimary)
             }
-            if plan == .trial {
+            if oneTime {
+                Text("Paiement unique. Réactive votre compte et rend vos annonces à nouveau visibles.")
+                    .font(.moblyBody(11.5))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if plan == .trial {
                 Text("Vous ne serez pas débité aujourd'hui. Le premier paiement de 5 000 FCFA aura lieu dans 7 jours, sauf annulation.")
                     .font(.moblyBody(11.5))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
@@ -2349,7 +2366,8 @@ struct OwnerPaymentView: View {
                 }
                 Text(processing
                      ? "Traitement…"
-                     : (plan == .trial ? "Démarrer l'essai gratuit" : "Payer 5 000 FCFA"))
+                     : (oneTime ? "Payer 5 000 FCFA"
+                                : (plan == .trial ? "Démarrer l'essai gratuit" : "Payer 5 000 FCFA")))
                     .font(.moblyHeading(15.5))
             }
             .foregroundStyle(.white)
@@ -2376,10 +2394,10 @@ struct OwnerPaymentView: View {
                         .font(.system(size: 32, weight: .bold))
                         .foregroundStyle(.white)
                 }
-                Text(plan == .trial ? "Essai activé" : "Paiement confirmé")
+                Text(oneTime ? "Compte réactivé" : (plan == .trial ? "Essai activé" : "Paiement confirmé"))
                     .font(.moblyHeading(19))
                     .foregroundStyle(Color.moblyTextPrimary)
-                Text("Vérification d'identité…")
+                Text(oneTime ? "Réactivation…" : "Vérification d'identité…")
                     .font(.moblyBody(13))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
             }

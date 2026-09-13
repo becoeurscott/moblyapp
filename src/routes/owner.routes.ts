@@ -2,13 +2,37 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
 import { requireAuth, requireOwner } from '../middleware/auth';
-import { serializeListing } from '../lib/serialize';
+import { serializeListing, serializeUser } from '../lib/serialize';
 
 export const ownerRouter = Router();
 
 const ownerSelect = {
-  owner: { select: { id: true, fullName: true, verified: true, identityVerified: true, rating: true, avatarUrl: true } },
+  owner: {
+    select: {
+      id: true, fullName: true, verified: true, identityVerified: true, rating: true, avatarUrl: true,
+      // Needed to compute the owner's "active" state (trial / paid) on each listing.
+      isOwner: true, ownerPaid: true, ownerTrialStartedAt: true,
+    },
+  },
 } as const;
+
+/** POST /api/owner/activate — pay the one-time inscription fee.
+ *
+ *  Called after the client-side mobile-money checkout confirms. Flips
+ *  `ownerPaid` so the account is active for good: dashboard unlocked, listings
+ *  visible again, contact re-enabled. Idempotent — paying twice is harmless. */
+ownerRouter.post(
+  '/activate',
+  requireAuth,
+  requireOwner,
+  asyncHandler(async (req, res) => {
+    const user = await prisma.user.update({
+      where: { id: req.userId! },
+      data: { ownerPaid: true },
+    });
+    res.json({ user: serializeUser(user) });
+  })
+);
 
 /** GET /api/owner/annonces — the owner's own listings (any status). */
 ownerRouter.get(

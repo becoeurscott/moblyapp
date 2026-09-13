@@ -220,6 +220,25 @@ final class OwnerListings: ObservableObject {
         }
     }
 
+    /// Awaitable variant so the calling view can show a spinner for the
+    /// duration of the server round-trip. Same optimistic-flip + revert-on-
+    /// failure behaviour as `toggleAvailability`, but the caller can `await`
+    /// it to know when the save has actually landed.
+    @MainActor
+    func toggleAvailabilityAsync(_ annonce: OwnerAnnonce) async {
+        guard let i = annonces.firstIndex(where: { $0.id == annonce.id }) else { return }
+        withAnimation(Motion.standard) { annonces[i].available.toggle() }
+        let target = annonces[i].available
+        let id = annonce.listing.id
+        do {
+            _ = try await MoblyAPI.shared.setListingAvailability(id: id, available: target)
+            await ListingStore.shared.refresh()
+        } catch {
+            guard let j = annonces.firstIndex(where: { $0.id == annonce.id }) else { return }
+            withAnimation(Motion.standard) { annonces[j].available = !target }
+        }
+    }
+
     func boost(_ annonce: OwnerAnnonce, days: Int = 30) {
         guard let i = annonces.firstIndex(where: { $0.id == annonce.id }) else { return }
         annonces[i].boostDaysLeft = days

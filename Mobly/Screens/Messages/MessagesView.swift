@@ -5,9 +5,14 @@ struct MessagesView: View {
     @ObservedObject private var auth = AuthStore.shared
     @ObservedObject private var prefs = ThreadPrefs.shared
     @ObservedObject private var push = PushService.shared
+    @ObservedObject private var visits = VisitRequestStore.shared
     @State private var openThread: ChatThread?
     @State private var searchText = ""
     @State private var showArchived = false
+    @State private var showVisits = false
+    @State private var pendingListingId: String?
+    /// Driven from outside (a notification that points at a visit).
+    var openVisits: Binding<Bool>? = nil
     @State private var confirmDelete: ChatThread?
 
     /// Rows come from the server, mapped per render — there is no local copy
@@ -44,6 +49,11 @@ struct MessagesView: View {
 
     /// Count of archived threads currently in the inbox — drives the pinned
     /// "Archivés" row at the top when we're on the main inbox.
+    /// Requests still awaiting the owner's answer — the badge on the header.
+    private var pendingVisits: Int {
+        visits.items.filter { $0.status == "REQUESTED" }.count
+    }
+
     private var archivedCount: Int {
         chat.threads.filter { !prefs.deleted.contains($0.id) && prefs.flags(for: $0.id).archived }.count
     }
@@ -178,6 +188,29 @@ struct MessagesView: View {
         }
         .background(Color.white)
         .refreshable { await chat.loadThreads() }
+        .onChange(of: openVisits?.wrappedValue ?? false) { _, wants in
+            guard wants else { return }
+            showVisits = true
+            openVisits?.wrappedValue = false
+        }
+        .fullScreenCover(isPresented: $showVisits) {
+            VisitsHubView(
+                onClose: { showVisits = false },
+                onOpenListing: { id in
+                    showVisits = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        pendingListingId = id
+                    }
+                }
+            )
+                .swipeToDismiss(onDismiss: { showVisits = false })
+        }
+        // The header badge has to be right the moment the inbox opens.
+        .task {
+            guard auth.isSignedIn else { return }
+            await visits.refresh(silent: true)
+            await visits.refreshMine(silent: true)
+        }
         .task {
             // Debug: auto-open the first thread whose last message is a visit
             // system message — for screenshotting the visit card. Runs even
@@ -207,6 +240,12 @@ struct MessagesView: View {
             guard auth.isSignedIn else { return }
             Task { await chat.loadThreads(silent: true) }
             chat.reconnectSocket()
+        }
+        .fullScreenCover(item: Binding(
+            get: { pendingListingId.flatMap { id in MoblyData.all.first { $0.id == id } } },
+            set: { if $0 == nil { pendingListingId = nil } }
+        )) { listing in
+            ListingDetailView(listing: listing, onClose: { pendingListingId = nil })
         }
         .fullScreenCover(item: $openThread) { thread in
             ChatThreadView(thread: thread, onBack: { openThread = nil })
@@ -361,11 +400,27 @@ struct MessagesView: View {
                     .font(.moblyHeading(26))
                     .foregroundStyle(Color.moblyTextPrimary)
                 Spacer()
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(Color.moblyTextPrimary)
-                    .frame(width: 42, height: 42)
-                    .background(RoundedRectangle(cornerRadius: 14).fill(Color(hex: 0xF4F5F8)))
+                // Was a decorative `square.and.pencil` that wasn't even a
+                // button. Visits now live here: an owner reviews what came in,
+                // a visitor follows what they asked for.
+                Button { showVisits = true } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(Color.moblyTextPrimary)
+                            .frame(width: 42, height: 42)
+                            .background(RoundedRectangle(cornerRadius: 14).fill(Color(hex: 0xF4F5F8)))
+                        if pendingVisits > 0 {
+                            Text("\(min(pendingVisits, 9))")
+                                .font(.moblyBody(10, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 17, height: 17)
+                                .background(Circle().fill(Color.moblyAccent))
+                                .offset(x: 5, y: -4)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
             }
 
             HStack(spacing: 10) {

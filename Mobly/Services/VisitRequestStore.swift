@@ -7,7 +7,11 @@ import SwiftUI
 final class VisitRequestStore: ObservableObject {
     static let shared = VisitRequestStore()
 
+    /// Requests **received** — the owner's inbox.
     @Published private(set) var items: [VisitRequestDTO] = []
+    /// Requests **made** by this user as a visitor. Separate list: an owner is
+    /// usually also a visitor somewhere else, so the two can't share storage.
+    @Published private(set) var myRequests: [VisitRequestDTO] = []
     @Published private(set) var isLoading = false
     @Published private(set) var lastError: String?
 
@@ -24,7 +28,23 @@ final class VisitRequestStore: ObservableObject {
     /// the device briefly sees the previous owner's visit requests.
     func clearAll() {
         items = []
+        myRequests = []
         lastError = nil
+    }
+
+    /// Visits this user asked for. Every signed-in user has these, owner or not.
+    func refreshMine(silent: Bool = false) async {
+        guard MoblyAPI.shared.isAuthenticated else { return }
+        do {
+            let fresh = try await MoblyAPI.shared.myVisits()
+            if fresh.map({ "\($0.id)\($0.status)" }) != myRequests.map({ "\($0.id)\($0.status)" }) {
+                withAnimation(Motion.content) { myRequests = fresh }
+            } else {
+                myRequests = fresh
+            }
+        } catch let e as MoblyAPI.APIError {
+            if !silent && !e.isCancelled { lastError = e.message }
+        } catch {}
     }
 
     /// `silent` = a background poll: no spinner, no error surfaced, and the

@@ -587,12 +587,84 @@ struct NotificationsSettingsView: View {
 // MARK: - Saved searches
 
 struct SavedSearchesView: View {
+    /// Read the real store. This screen used to render `FavoritesData.searches`
+    /// — a hardcoded empty array — so it was permanently blank no matter how
+    /// many searches the user had saved from Explore.
+    @ObservedObject private var store = SavedSearchStore.shared
+
     var body: some View {
         ProfileScaffold(title: "Recherches enregistrées") {
             VStack(spacing: 12) {
-                ForEach(FavoritesData.searches) { s in SavedSearchWideCard(search: s) }
+                if store.items.isEmpty {
+                    emptyState
+                } else {
+                    ForEach(store.items) { item in
+                        SavedSearchManageRow(item: item) { store.remove(item) }
+                    }
+                }
             }
         }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 30, weight: .medium))
+                .foregroundStyle(Color(hex: 0xD5D8E2))
+            Text("Aucune recherche enregistrée")
+                .font(.moblyBody(14, weight: .medium))
+                .foregroundStyle(Color(hex: 0x9A9DAC))
+            Text("Lancez une recherche depuis Explorer : elle sera gardée ici.")
+                .font(.moblyBody(12.5))
+                .foregroundStyle(Color(hex: 0xB0B3BF))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+}
+
+/// One saved search, with the filters it carries and a way to delete it.
+private struct SavedSearchManageRow: View {
+    let item: SavedSearchItem
+    var onDelete: () -> Void
+
+    private var summary: String {
+        let n = item.filters.count
+        if n == 0 { return "Aucun filtre" }
+        return n == 1 ? "1 filtre" : "\(n) filtres"
+    }
+
+    var body: some View {
+        HStack(spacing: 13) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 13).fill(Color.moblySurfaceTint)
+                    .frame(width: 48, height: 48)
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color.moblyPrimary)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.label)
+                    .font(.moblyHeading(15))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                Text(LT(summary))
+                    .font(.moblyBody(11.5))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+            }
+            Spacer()
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color(hex: 0xE5484D))
+                    .frame(width: 38, height: 38)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(hex: 0xFDEDED)))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(13)
+        .background(RoundedRectangle(cornerRadius: 18).fill(.white))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(hex: 0xEFF0F4), lineWidth: 1))
     }
 }
 
@@ -785,6 +857,8 @@ struct PrivacySecurityView: View {
     @State private var showBlocked = false
     @State private var showExportShare: URL?
     @State private var confirmDelete = false
+    @State private var deleting = false
+    @State private var deleteError: String?
     @State private var busyExport = false
 
     var body: some View {
@@ -844,11 +918,32 @@ struct PrivacySecurityView: View {
         .alert("Supprimer votre compte ?",
                isPresented: $confirmDelete) {
             Button("Supprimer", role: .destructive) {
-                Task { await AuthStore.shared.signOut(allDevices: true) }
+                // This used only to sign out, while promising the account and
+                // its data were gone — the user stayed fully intact on the
+                // server and could sign straight back in.
+                Task {
+                    deleting = true
+                    defer { deleting = false }
+                    do {
+                        try await MoblyAPI.shared.deleteAccount()
+                        await AuthStore.shared.signOut(allDevices: true)
+                    } catch let e as MoblyAPI.APIError {
+                        deleteError = e.message
+                    } catch {
+                        deleteError = "Suppression impossible. Réessayez."
+                    }
+                }
             }
             Button("Annuler", role: .cancel) {}
         } message: {
-            Text("Vos annonces, favoris et messages seront retirés. Vous serez déconnecté immédiatement.")
+            Text("Votre compte, vos annonces, vos favoris et vos messages seront définitivement supprimés. Cette action est irréversible.")
+        }
+        .alert("Suppression impossible", isPresented: Binding(
+            get: { deleteError != nil }, set: { if !$0 { deleteError = nil } }
+        )) {
+            Button("OK", role: .cancel) { deleteError = nil }
+        } message: {
+            Text(deleteError ?? "")
         }
     }
 
@@ -1236,7 +1331,7 @@ struct BecomeOwnerView: View {
             HStack(spacing: 6) {
                 ForEach(0..<totalSteps, id: \.self) { i in
                     Capsule()
-                        .fill(i <= step ? Color.moblyAccent : Color(hex: 0xE2E4EC))
+                        .fill(i <= step ? Color.moblyPrimary : Color(hex: 0xE2E4EC))
                         .frame(height: 5)
                         .animation(Motion.quick, value: step)
                 }
@@ -1305,12 +1400,12 @@ struct BecomeOwnerView: View {
                 .frame(maxWidth: .infinity).frame(height: 56)
                 .background(
                     LinearGradient(
-                        colors: [Color.moblyAccent, Color(hex: 0xE85A1A)],
+                        colors: [Color.moblyPrimary, Color(hex: 0x5B6BF5)],
                         startPoint: .leading, endPoint: .trailing
                     )
                 )
                 .clipShape(Capsule())
-                .shadow(color: Color.moblyAccent.opacity(0.4), radius: 14, y: 8)
+                .shadow(color: Color.moblyPrimary.opacity(0.35), radius: 14, y: 8)
             }
             .buttonStyle(.plain)
 
@@ -1341,7 +1436,7 @@ private struct StepIntro: View {
 
             ZStack {
                 Circle()
-                    .fill(LinearGradient(colors: [Color.moblyAccent.opacity(0.35), Color.moblyAccent.opacity(0)],
+                    .fill(LinearGradient(colors: [Color.moblyPrimary.opacity(0.30), Color.moblyPrimary.opacity(0)],
                                          startPoint: .top, endPoint: .bottom))
                     .frame(width: 240, height: 240)
                     .blur(radius: 40)

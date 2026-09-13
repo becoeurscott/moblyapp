@@ -177,4 +177,40 @@ struct NotificationDTO: Decodable, Identifiable {
     var kind: String? { type }
     var read: Bool
     let createdAt: Date
+    /// Deep-link target the server attaches (`listingId`, `threadId`,
+    /// `visitId`…). The column has existed since the table was created and is
+    /// documented as "deep-link target", but the client never decoded it — so
+    /// every notification was a dead end that went nowhere when tapped.
+    let payload: [String: String]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, body, type, read, createdAt, payload
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        body = try c.decodeIfPresent(String.self, forKey: .body)
+        type = try c.decodeIfPresent(String.self, forKey: .type)
+        read = try c.decode(Bool.self, forKey: .read)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        // Payload values are ids, but a stray number or bool must not fail the
+        // whole notification — coerce what we can and drop the rest.
+        payload = (try? c.decode([String: LooseString].self, forKey: .payload))
+            .map { $0.compactMapValues(\.value) }
+    }
+
+    /// Accepts a string, number or bool and yields a string.
+    struct LooseString: Decodable {
+        let value: String?
+        init(from decoder: Decoder) throws {
+            let c = try decoder.singleValueContainer()
+            if let s = try? c.decode(String.self) { value = s }
+            else if let i = try? c.decode(Int.self) { value = String(i) }
+            else if let d = try? c.decode(Double.self) { value = String(d) }
+            else if let b = try? c.decode(Bool.self) { value = String(b) }
+            else { value = nil }
+        }
+    }
 }

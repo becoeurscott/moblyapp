@@ -141,6 +141,31 @@ reviewsRouter.post(
 // leak private data across users.
 export const usersRouter = Router();
 
+/**
+ * DELETE /api/users/me — permanent account deletion.
+ *
+ * The app offered "Supprimer mon compte" and only signed the user out, while
+ * telling them their annonces, favourites and messages were gone. Nothing was.
+ *
+ * Every relation that belongs to the person cascades from the `User` row
+ * (listings, favourites, messages, threads, sessions, refresh tokens), so the
+ * single delete is the whole job. Reviews they wrote about other people's
+ * spaces cascade too, which is the right call for a deletion request.
+ */
+usersRouter.delete(
+  '/me',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const userId = req.userId!;
+    // Revoke first: if the delete somehow fails the tokens are already dead,
+    // which fails closed rather than leaving a live session on a half-deleted
+    // account.
+    await prisma.refreshToken.deleteMany({ where: { userId } });
+    await prisma.user.delete({ where: { id: userId } });
+    res.json({ ok: true });
+  })
+);
+
 usersRouter.get(
   '/:id',
   asyncHandler(async (req, res) => {

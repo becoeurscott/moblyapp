@@ -42,6 +42,27 @@ const upload = multer({
 });
 
 /**
+ * Voice notes. Separate from `upload` because that one's fileFilter rejects
+ * anything that isn't an image, and because a chat recording is small: the
+ * app records AAC mono at 12 kHz, so a 60s note is ~100 KB. 10 MB is already
+ * far more than any note the recorder can produce.
+ */
+const uploadAudio = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    // iOS sends m4a as audio/m4a, audio/x-m4a or (when the extension is all
+    // it has to go on) application/octet-stream. Accept the audio family plus
+    // that fallback rather than bouncing a perfectly good recording.
+    const ok = /^audio\//.test(file.mimetype)
+      || file.mimetype === 'application/octet-stream'
+      || file.mimetype === 'video/mp4'; // m4a shares the MPEG-4 container
+    if (!ok) return cb(new ApiError(400, 'Fichier audio invalide', 'VALIDATION_FAILED'));
+    cb(null, true);
+  },
+});
+
+/**
  * Upload one photo buffer to Cloudinary using the SDK's upload_stream helper,
  * so we never write to /tmp. Resolves to the parts of the response the client
  * actually needs.
@@ -124,5 +145,51 @@ uploadsRouter.post(
       data: { avatarUrl: uploaded.url },
     });
     res.status(201).json({ avatarUrl: uploaded.url });
+  })
+);
+
+/**
+ * POST /api/uploads/voice — one recording, field name `voice`.
+ *
+ * Voice notes used to never leave the sender's phone: the app sent a plain
+ * TEXT message reading "🎤 Note vocale (0:05)" and kept the audio in a local
+ * in-memory map, so the sender could replay it and the recipient received a
+ * line of text with nothing to play. This is the missing half — the file goes
+ * to Cloudinary and the returned URL travels on the message as `mediaUrl`.
+ *
+ * `resource_type: 'video'` is not a typo: Cloudinary handles audio through its
+ * video pipeline, and it is what makes `duration` come back on the response.
+ */
+uploadsRouter.post(
+  '/voice',
+  requireAuth,
+  restrictionGate('MESSAGE_MEDIA'),
+  writeLimiter,
+  uploadAudio.single('voice'),
+  asyncHandler(async (req, res) => {
+    const file = req.file as Express.Multer.File | undefined;
+    if (!file) throw new ApiError(400, 'Aucun audio envoyé', 'VALIDATION_FAILED');
+
+    const uploaded = await new Promise<{ url: string; durationSec: number | null }>(
+      (resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: `${env.cloudinary.folder}/chat/voice/${req.userId!}`,
+            resource_type: 'video',
+            overwrite: false,
+          },
+          (err, result) => {
+            if (err || !result) return reject(err ?? new Error('Upload failed'));
+            resolve({
+              url: result.secure_url,
+              durationSec: result.duration ? Math.round(result.duration) : null,
+            });
+          }
+        );
+        stream.end(file.buffer);
+      }
+    );
+
+    res.status(201).json(uploaded);
   })
 );

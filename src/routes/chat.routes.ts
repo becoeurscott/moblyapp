@@ -46,7 +46,7 @@ chatRouter.get(
         thread: {
           include: {
             listing: {
-              select: { id: true, title: true, imageName: true, coverUrl: true, priceFcfa: true, ownerId: true },
+              select: { id: true, title: true, imageName: true, coverUrl: true, priceFcfa: true, priceUnit: true, ownerId: true },
             },
             participants: { include: { user: { select: userSelect } } },
             messages: { orderBy: { createdAt: 'desc' }, take: 1 },
@@ -160,7 +160,7 @@ chatRouter.post(
      */
     const include = {
       listing: {
-        select: { id: true, title: true, imageName: true, coverUrl: true, priceFcfa: true, ownerId: true },
+        select: { id: true, title: true, imageName: true, coverUrl: true, priceFcfa: true, priceUnit: true, ownerId: true },
       },
       participants: { include: { user: { select: userSelect } } },
       messages: { orderBy: { createdAt: 'desc' as const }, take: 1 },

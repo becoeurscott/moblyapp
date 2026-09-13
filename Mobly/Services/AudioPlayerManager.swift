@@ -32,6 +32,8 @@ final class AudioPlayerManager: ObservableObject {
     private var audioUrls: [String: URL] = [:]
     /// Message id -> normalised samples captured during recording
     private var audioSamples: [String: [CGFloat]] = [:]
+    /// Downloads in flight, so a bubble redrawing mid-fetch doesn't start a second one.
+    private var remoteFetches: Set<String> = []
 
     private init() {}
 
@@ -41,6 +43,50 @@ final class AudioPlayerManager: ObservableObject {
     func registerAudio(id: String, url: URL, samples: [CGFloat]) {
         audioUrls[id] = url
         audioSamples[id] = samples
+    }
+
+    /// Carry a registration across the optimistic → confirmed id swap, so the
+    /// sender's own note keeps playing from the local file it was recorded to
+    /// rather than waiting on a download of what it just uploaded.
+    func rekeyAudio(from oldId: String, to newId: String) {
+        guard oldId != newId else { return }
+        if let url = audioUrls[oldId] { audioUrls[newId] = url }
+        if let s = audioSamples[oldId] { audioSamples[newId] = s }
+    }
+
+    /// Register a note that lives on the server (i.e. one we received).
+    ///
+    /// `AVAudioPlayer` cannot stream: it needs bytes on disk. The file is
+    /// fetched once into Caches and keyed by message id, so replaying a note —
+    /// or scrolling past it again — costs nothing.
+    func registerRemote(id: String, urlString: String) {
+        guard audioUrls[id] == nil, remoteFetches.contains(id) == false,
+              let remote = URL(string: urlString), remote.scheme?.hasPrefix("http") == true
+        else { return }
+
+        let cached = Self.cacheURL(for: id, ext: remote.pathExtension.isEmpty ? "m4a" : remote.pathExtension)
+        if FileManager.default.fileExists(atPath: cached.path) {
+            audioUrls[id] = cached
+            return
+        }
+
+        remoteFetches.insert(id)
+        Task { [weak self] in
+            defer { Task { @MainActor in self?.remoteFetches.remove(id) } }
+            guard let (data, resp) = try? await URLSession.shared.data(from: remote),
+                  (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
+                  (try? data.write(to: cached)) != nil
+            else { return }
+            await MainActor.run { self?.audioUrls[id] = cached }
+        }
+    }
+
+    private static func cacheURL(for id: String, ext: String) -> URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("voice-notes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // Message ids are cuid/uuid — filesystem-safe as-is.
+        return dir.appendingPathComponent("\(id).\(ext)")
     }
 
     /// Return the recorded waveform samples for a message, if available.

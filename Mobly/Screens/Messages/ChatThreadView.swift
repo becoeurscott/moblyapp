@@ -30,6 +30,11 @@ struct ChatThreadView: View {
     @State private var visitActionBusy = false
     @State private var isUploading = false
     @State private var uploadingPreview: UIImage?
+    /// Non-nil when a voice note failed to send. Surfaced as an alert: a note
+    /// that silently vanishes is worse than one that says why it didn't go.
+    @State private var voiceSendError: String?
+    /// No camera on this device (simulator, or an iPad without one).
+    @State private var cameraUnavailable = false
     @State private var fullScreenImageURL: URL?
     @State private var fullScreenLocalImage: UIImage?
     /// Server-reported availability of the listing this conversation is
@@ -242,12 +247,22 @@ struct ChatThreadView: View {
                 // empty card — a placeholder cover, a blank title, and a
                 // chevron that led nowhere.
                 if thread.hasListing { listingPill }
+                // Live visit appointment, pinned above the transcript so both
+                // parties always see the current state (and the owner gets
+                // Accepter / Refuser) without scrolling to find the request.
+                if let visit = latestVisitMessage { pinnedVisitCard(visit) }
                 messagesList
+                    // Tap anywhere on the thread to put the keyboard away.
+                    // `.scrollDismissesKeyboard` only covers the swipe.
+                    .simultaneousGesture(TapGesture().onEnded {
+                        if inputFocused { inputFocused = false }
+                    })
                 if replyingTo != nil { replyPreview }
-                // Hidden while recording (the waveform takes the space) and while
-                // the user is already typing, where a row of canned openers is
-                // just noise over the keyboard.
-                if !recorder.isRecording && draft.isEmpty { quickReplies }
+                // Hidden only while recording, where the waveform takes the
+                // space. They used to vanish the moment you typed a character,
+                // which is why they seemed to have moved away from the bottom
+                // of the conversation.
+                if !recorder.isRecording { quickReplies }
                 composer
             }
             .background(Color(hex: 0xF4F5F8))
@@ -334,6 +349,19 @@ struct ChatThreadView: View {
             Button("Annuler", role: .cancel) {}
         } message: {
             Text("Autorisez l'accès au microphone dans Réglages pour enregistrer des notes vocales.")
+        }
+        .alert("Appareil photo indisponible", isPresented: $cameraUnavailable) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Cet appareil n'a pas d'appareil photo. Choisissez une photo dans la galerie.")
+        }
+        .alert("Note vocale non envoyée", isPresented: Binding(
+            get: { voiceSendError != nil },
+            set: { if !$0 { voiceSendError = nil } }
+        )) {
+            Button("OK", role: .cancel) { voiceSendError = nil }
+        } message: {
+            Text(voiceSendError ?? "")
         }
     }
 
@@ -756,6 +784,14 @@ struct ChatThreadView: View {
                     }
                 }
                 attachItem("camera.fill", "Caméra", 0x1F8A5B) {
+                    // The simulator (and an iPad without a rear camera) has no
+                    // camera to present; asking for one there is a guaranteed
+                    // crash rather than a picker.
+                    guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+                        activeSheet = nil
+                        cameraUnavailable = true
+                        return
+                    }
                     activeSheet = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                         activeSheet = .camera
@@ -916,13 +952,35 @@ struct ChatThreadView: View {
         let voiceText = "🎤 Note vocale (\(label))"
         let audioUrl = result.url
         let audioSamples = result.samples
+
+        // This used to send a plain TEXT message and keep the recording in a
+        // local in-memory map: the sender could replay it, and the recipient
+        // got a line of text with nothing behind it. The file has to reach the
+        // server for the note to exist for anyone but the person who spoke it.
         Task {
-            await chat.send(threadId: thread.id, text: voiceText, myUserId: me)
-            // Register audio under whatever id the message now has (could be
-            // the optimistic local id or the server-confirmed id).
-            if let newest = (chat.messages[thread.id] ?? [])
-                .last(where: { $0.text == voiceText && $0.senderId == me }) {
-                AudioPlayerManager.shared.registerAudio(id: newest.id, url: audioUrl, samples: audioSamples)
+            guard let data = try? Data(contentsOf: audioUrl) else {
+                voiceSendError = "Enregistrement introuvable."
+                return
+            }
+            do {
+                let uploaded = try await MoblyAPI.shared.uploadVoiceNote(data)
+                let sent = await chat.send(
+                    threadId: thread.id, text: voiceText, myUserId: me,
+                    kind: "VOICE", mediaUrl: uploaded.url,
+                    durationSec: uploaded.durationSec ?? max(1, seconds)
+                )
+                // Play from the local file rather than re-downloading what we
+                // just uploaded — keyed to the confirmed id when we have one.
+                let id = sent?.id ?? (chat.messages[thread.id] ?? [])
+                    .last(where: { $0.text == voiceText && $0.senderId == me })?.id
+                if let id {
+                    AudioPlayerManager.shared.registerAudio(id: id, url: audioUrl,
+                                                            samples: audioSamples)
+                }
+            } catch let e as MoblyAPI.APIError {
+                voiceSendError = e.message
+            } catch {
+                voiceSendError = "Envoi de la note vocale impossible."
             }
         }
     }
@@ -1168,6 +1226,12 @@ struct VoiceBubble: View {
     @ObservedObject private var player = AudioPlayerManager.shared
 
     private var total: Int { message.voiceSeconds ?? 5 }
+    /// Voice notes that arrived from someone else carry a hosted URL. Pull it
+    /// down (once, cached) so the play button has real audio behind it.
+    private func prepareRemoteAudio() {
+        guard let url = message.mediaUrl, !url.isEmpty else { return }
+        player.registerRemote(id: message.id, urlString: url)
+    }
     private var progress: Double { player.progress(for: message.id) }
     private var isPlaying: Bool { player.isPlaying(id: message.id) }
     private var displaySeconds: Int {
@@ -1197,6 +1261,7 @@ struct VoiceBubble: View {
                      isPlaying: isPlaying,
                      realSamples: player.samples(for: message.id))
                 .frame(width: 130, height: 24)
+                .onAppear { prepareRemoteAudio() }
 
             Text(formatMinSec(displaySeconds))
                 .font(.system(size: 11, weight: .medium).monospacedDigit())

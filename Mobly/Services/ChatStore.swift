@@ -45,6 +45,10 @@ struct ThreadListingDTO: Codable, Equatable {
     let imageName: String?
     let coverUrl: String?
     let priceFcfa: Int?
+    /// PER_MONTH | PER_DAY | TOTAL. Without it the chat showed a bare
+    /// "50 000 FCFA", which reads as a monthly rent even when the space is a
+    /// 50 000/night short stay — a factor-of-thirty difference.
+    let priceUnit: String?
     /// Lets the client tell whether *I* own this listing, which decides
     /// whether the quick replies are questions or answers.
     let ownerId: String?
@@ -342,14 +346,16 @@ final class ChatStore: ObservableObject {
     /// replaced by the server's row when it confirms. Because the server keys
     /// on that same `clientId`, a retry after a dropped connection resolves to
     /// the existing message rather than posting twice.
+    @discardableResult
     func send(threadId: String, text: String, myUserId: String,
               kind: String = "TEXT", mediaUrl: String? = nil,
-              replyToId: String? = nil) async {
+              durationSec: Int? = nil,
+              replyToId: String? = nil) async -> MessageDTO? {
         let clientId = UUID().uuidString
         let optimistic = MessageDTO(
             id: "local-\(clientId)", threadId: threadId, senderId: myUserId,
             clientId: clientId, kind: kind, text: text, mediaUrl: mediaUrl,
-            durationSec: nil, replyToId: replyToId, visitId: nil, visitAction: nil,
+            durationSec: durationSec, replyToId: replyToId, visitId: nil, visitAction: nil,
             read: false, readAt: nil, createdAt: Date()
         )
         messages[threadId, default: []].append(optimistic)
@@ -358,13 +364,14 @@ final class ChatStore: ObservableObject {
         do {
             struct Body: Encodable {
                 let text: String; let clientId: String; let kind: String
-                let mediaUrl: String?; let replyToId: String?
+                let mediaUrl: String?; let durationSec: Int?; let replyToId: String?
             }
             struct Wrap: Decodable { let message: MessageDTO }
             let w: Wrap = try await api.request(
                 "threads/\(threadId)/messages", method: "POST",
                 body: Body(text: text, clientId: clientId, kind: kind,
-                           mediaUrl: mediaUrl, replyToId: replyToId),
+                           mediaUrl: mediaUrl, durationSec: durationSec,
+                           replyToId: replyToId),
                 authorized: true
             )
             // Swap the placeholder for the confirmed row.
@@ -377,11 +384,15 @@ final class ChatStore: ObservableObject {
             // owner has an obvious reason to want the reply, so the prompt lands
             // far better than a cold one on first open.
             await PushService.shared.requestIfAppropriate()
+            // The confirmed row carries the server id, which the caller needs to
+            // key anything it cached against the optimistic one (voice audio).
+            return w.message
         } catch {
             // Leave the optimistic bubble in place — it still carries the text,
             // and the same clientId makes a later retry safe.
             isOffline = (error as? MoblyAPI.APIError)?.isOffline ?? false
         }
+        return nil
     }
 
     /// Update the thread's preview + move it to the top of the inbox, so an

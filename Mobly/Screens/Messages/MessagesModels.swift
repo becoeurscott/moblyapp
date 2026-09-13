@@ -57,10 +57,12 @@ extension ChatThread {
             verified: peer?.verified ?? false,
             online: peer?.online ?? false,
             time: Self.relativeTime(dto.lastMessage?.createdAt ?? dto.updatedAt),
-            listing: [dto.listing?.title, dto.listing?.priceFcfa.map(Self.formatFcfa)]
+            listing: [dto.listing?.title,
+                      dto.listing?.priceFcfa.map { Self.formatFcfa($0, unit: dto.listing?.priceUnit) }]
                 .compactMap { $0 }.joined(separator: " · "),
             listingTitle: dto.listing?.title ?? "",
-            listingPrice: dto.listing?.priceFcfa.map(Self.formatFcfa) ?? "",
+            listingPrice: dto.listing?.priceFcfa
+                .map { Self.formatFcfa($0, unit: dto.listing?.priceUnit) } ?? "",
             listingImage: dto.listing?.imageName ?? "ListingGreen",
             isSupport: dto.participants.first?.isSupport ?? false,
             hasListing: dto.listing != nil,
@@ -84,14 +86,27 @@ extension ChatThread {
         return palette[abs(id.hashValue) % palette.count]
     }
 
-    private static func formatFcfa(_ n: Int) -> String {
+    /// "50 000 FCFA /mois". The unit was missing everywhere in chat, so a
+    /// nightly price and a monthly rent looked identical.
+    private static func formatFcfa(_ n: Int, unit: String? = nil) -> String {
         let s = String(n)
         var out = ""
         for (i, c) in s.reversed().enumerated() {
             if i > 0 && i % 3 == 0 { out.append(" ") }
             out.append(c)
         }
-        return String(out.reversed()) + " FCFA"
+        return String(out.reversed()) + " FCFA" + Self.unitSuffix(unit)
+    }
+
+    private static func unitSuffix(_ unit: String?) -> String {
+        switch (unit ?? "").uppercased() {
+        case "PER_DAY":   return " /jour"
+        case "TOTAL":     return ""          // sale price — no period
+        case "PER_MONTH": return " /mois"
+        // Older backends send no unit at all; the pilot is monthly rentals, so
+        // that is the safe reading rather than showing nothing.
+        default:          return " /mois"
+        }
     }
 
     static func relativeTime(_ date: Date) -> String {

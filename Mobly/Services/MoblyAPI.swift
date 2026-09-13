@@ -796,6 +796,15 @@ final class MoblyAPI {
         return w.user
     }
 
+    /// DELETE /users/me — permanent account deletion.
+    ///
+    /// The app's "Supprimer mon compte" used to just sign out while telling the
+    /// user their data was gone, which was simply untrue.
+    func deleteAccount() async throws {
+        _ = try await request("users/me", method: "DELETE", authorized: true) as EmptyResponse
+        clearSession()
+    }
+
     /// PATCH /listings/:id/availability — flip disponible / indisponible.
     /// The server's public search excludes `available=false`, so this is what
     /// actually pulls the annonce off the map, home feed and search list.
@@ -967,6 +976,48 @@ final class MoblyAPI {
         }
         struct Wrap: Decodable { let avatarUrl: String }
         return try decoder.decode(Wrap.self, from: data).avatarUrl
+    }
+
+    /// Upload a voice note and return its hosted URL (plus the duration
+    /// Cloudinary measured, which is more trustworthy than the client's timer).
+    ///
+    /// Without this a voice note never left the phone: the app sent a text
+    /// message reading "🎤 Note vocale (0:05)" and kept the audio locally, so
+    /// only the sender could ever play it back.
+    func uploadVoiceNote(_ audio: Data, filename: String = "voice.m4a")
+        async throws -> (url: String, durationSec: Int?)
+    {
+        let boundary = "Mobly-\(UUID().uuidString)"
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"voice\"; filename=\"\(filename)\"\r\n"
+            .data(using: .utf8)!)
+        body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
+        body.append(audio)
+        body.append("\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+        var req = URLRequest(url: baseURL.appendingPathComponent("uploads/voice"))
+        req.httpMethod = "POST"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.timeoutInterval = 60
+
+        let (data, resp) = try await session.upload(for: req, from: body)
+        guard let http = resp as? HTTPURLResponse else {
+            throw APIError(status: 0, code: .unknown, message: "Envoi audio impossible",
+                           requestId: nil, fields: [:])
+        }
+        if !(200..<300).contains(http.statusCode) {
+            struct ErrBody: Decodable { let error: String? }
+            let parsed = try? decoder.decode(ErrBody.self, from: data)
+            throw APIError(status: http.statusCode, code: .unknown,
+                           message: parsed?.error ?? "Envoi audio impossible (\(http.statusCode))",
+                           requestId: nil, fields: [:])
+        }
+        struct Wrap: Decodable { let url: String; let durationSec: Int? }
+        let w = try decoder.decode(Wrap.self, from: data)
+        return (w.url, w.durationSec)
     }
 
     // MARK: - Owner

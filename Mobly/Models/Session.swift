@@ -73,6 +73,20 @@ enum AnnonceStatus: Hashable {
     }
 }
 
+/// Where an annonce created on this device is in its trip to the server.
+enum PublishState: Hashable {
+    /// Photos and details are still being sent.
+    case uploading
+    /// The send failed; the message is shown on the card with a retry.
+    case failed(String)
+}
+
+/// Result of one publish attempt, reported back to the publish sheet.
+enum PublishOutcome {
+    case published
+    case failed(String)
+}
+
 /// An owner's published space plus its performance metrics. Wraps a `Listing`
 /// so it renders anywhere a listing does, while carrying host-only data.
 struct OwnerAnnonce: Identifiable, Hashable {
@@ -83,6 +97,11 @@ struct OwnerAnnonce: Identifiable, Hashable {
     var available: Bool = true
     var boostDaysLeft: Int? = nil          // non-nil ⇒ boosted
     var status: AnnonceStatus = .active
+    /// Non-nil only for an annonce published from this device that the server
+    /// hasn't confirmed yet. Server-backed annonces are always nil.
+    var publishState: PublishState? = nil
+
+    var isPublishing: Bool { publishState == .uploading }
 
     var id: String { listing.id }
     var isBoosted: Bool { boostDaysLeft != nil }
@@ -90,9 +109,9 @@ struct OwnerAnnonce: Identifiable, Hashable {
     var contactRate: Double { views > 0 ? Double(contacts) / Double(views) : 0 }
 }
 
-/// In-memory store of the spaces this owner has published. Seeded with demo
-/// annonces so the dashboard has content; newly published spaces prepend as
-/// "en attente" (pending review). No backend — session-only.
+/// The owner's annonces, loaded from the server. A space published from this
+/// device appears at the top immediately as "Publication…" while it is sent in
+/// the background, then turns into the server's row once it's accepted.
 final class OwnerListings: ObservableObject {
     static let shared = OwnerListings()
     @Published var annonces: [OwnerAnnonce] = []
@@ -106,7 +125,10 @@ final class OwnerListings: ObservableObject {
     /// performance numbers attached.
     @MainActor
     func load(from dtos: [ListingDTO]) {
-        annonces = dtos.map { dto in
+        // An annonce still being sent (or whose send failed) isn't on the server
+        // yet, so a refresh must not wipe it off the dashboard.
+        let inFlight = annonces.filter { $0.publishState != nil }
+        annonces = inFlight + dtos.map { dto in
             OwnerAnnonce(
                 listing: dto.asListing,
                 views: dto.views,
@@ -131,6 +153,7 @@ final class OwnerListings: ObservableObject {
     }
 
     func add(_ listing: Listing) {
+        guard !annonces.contains(where: { $0.id == listing.id }) else { return }
         annonces.insert(
             OwnerAnnonce(listing: listing, views: 0, contacts: 0, favorites: 0,
                          available: true, boostDaysLeft: nil, status: .pending),
@@ -138,7 +161,146 @@ final class OwnerListings: ObservableObject {
         )
     }
 
+    /// Clear everything — on sign-out, so a publish still running for the
+    /// previous account can't land in (or post under) the next one.
+    func reset() {
+        annonces = []
+        publishJobs = [:]
+    }
+
+    // MARK: Background publish
+
+    /// Everything needed to send (or re-send) an annonce created on this device.
+    private struct PublishJob {
+        var listing: Listing
+        let photos: [Data]
+        /// Remote URLs from a successful photo upload, kept so a retry after a
+        /// later failure doesn't upload the same photos twice.
+        var uploadedURLs: [String]?
+        let makeBody: (_ photos: [String], _ cover: String?) -> MoblyAPI.CreateListingBody
+    }
+    private var publishJobs: [String: PublishJob] = [:]
+
+    /// Show the annonce on the dashboard right away as "Publication…" and send
+    /// it in the background. The returned task finishes when the server has
+    /// accepted it (the card then turns active) or the send has failed.
+    @MainActor
+    func startPublishing(_ listing: Listing, photos: [Data],
+                         makeBody: @escaping ([String], String?) -> MoblyAPI.CreateListingBody)
+        -> Task<PublishOutcome, Never>
+    {
+        publishJobs[listing.id] = PublishJob(listing: listing, photos: photos, uploadedURLs: nil, makeBody: makeBody)
+        let placeholder = OwnerAnnonce(listing: listing, views: 0, contacts: 0, favorites: 0,
+                                       available: true, boostDaysLeft: nil, status: .pending,
+                                       publishState: .uploading)
+        if let i = annonces.firstIndex(where: { $0.id == listing.id }) {
+            annonces[i] = placeholder
+        } else {
+            annonces.insert(placeholder, at: 0)
+        }
+        return runPublish(localId: listing.id)
+    }
+
+    @MainActor
+    func retryPublishing(_ id: String) {
+        guard publishJobs[id] != nil, let i = annonces.firstIndex(where: { $0.id == id }) else { return }
+        withAnimation(Motion.standard) { annonces[i].publishState = .uploading }
+        _ = runPublish(localId: id)
+    }
+
+    /// Drop an annonce that never reached the server.
+    @MainActor
+    func discardPublishing(_ id: String) {
+        publishJobs[id] = nil
+        withAnimation(Motion.standard) { annonces.removeAll { $0.id == id } }
+        OwnerPhotoStore.clear(id: id)
+    }
+
+    @MainActor
+    private func runPublish(localId: String) -> Task<PublishOutcome, Never> {
+        Task { @MainActor in
+            guard var job = publishJobs[localId] else { return .failed("Publication annulée.") }
+
+            // 1) Photos → Cloudinary. The wizard requires photos, so a failed
+            //    upload fails the publish (and a retry re-sends them) rather
+            //    than putting an annonce online without its pictures.
+            if job.uploadedURLs == nil && !job.photos.isEmpty {
+                do {
+                    let uploaded = try await MoblyAPI.shared.uploadOwnerPhotos(job.photos)
+                    job.uploadedURLs = uploaded.map { $0.url }
+                    guard publishJobs[localId] != nil else { return .failed("Publication annulée.") }
+                    publishJobs[localId] = job
+                    SessionTracker.shared.log("owner.photos_uploaded", ["count": uploaded.count, "listingId": localId])
+                } catch {
+                    SessionTracker.shared.log("owner.photos_upload_failed", ["listingId": localId])
+                    return failPublishing(localId, Self.publishMessage(error, fallback: "Envoi des photos impossible. Réessayez."))
+                }
+            }
+
+            // 2) The owner flag may exist locally before the server catches up;
+            //    sync it first so the POST doesn't 403 OWNER_REQUIRED.
+            if AuthStore.shared.user?.isOwner == false {
+                _ = await AuthStore.shared.becomeOwnerOnServer()
+            }
+            guard publishJobs[localId] != nil else { return .failed("Publication annulée.") }
+
+            // 3) Create the annonce. A verified owner's annonce is live at once.
+            let urls = job.uploadedURLs ?? []
+            do {
+                let dto = try await MoblyAPI.shared.createListing(job.makeBody(urls, urls.first))
+                guard publishJobs.removeValue(forKey: localId) != nil else { return .published }
+
+                // Server id and status, local presentation details (the server
+                // doesn't store the wizard's subtitle / features) and the local
+                // photo bytes so the cover renders without a download.
+                var listing = dto.asListing
+                listing.subtitle = job.listing.subtitle
+                listing.deals = job.listing.deals
+                listing.features = job.listing.features
+                listing.tags = job.listing.tags
+                listing.rating = job.listing.rating
+                listing.customImageData = job.listing.customImageData
+                listing.customPhotos = job.listing.customPhotos
+                if listing.photos.isEmpty { listing.photos = job.listing.photos }
+
+                let published = OwnerAnnonce(listing: listing, views: dto.views, contacts: dto.contacts,
+                                             favorites: dto.favorites, available: dto.available,
+                                             boostDaysLeft: dto.boostDaysLeft,
+                                             status: Self.status(from: dto.status), publishState: nil)
+                withAnimation(Motion.standard) {
+                    if let i = annonces.firstIndex(where: { $0.id == localId }) {
+                        annonces[i] = published
+                    } else {
+                        annonces.insert(published, at: 0)
+                    }
+                }
+                SessionTracker.shared.log("owner.published", ["listingId": dto.id, "status": dto.status])
+                Task { await ListingStore.shared.refresh() }
+                return .published
+            } catch {
+                SessionTracker.shared.log("owner.publish_failed", ["listingId": localId])
+                return failPublishing(localId, Self.publishMessage(error, fallback: "Publication impossible. Réessayez."))
+            }
+        }
+    }
+
+    @MainActor
+    private func failPublishing(_ id: String, _ message: String) -> PublishOutcome {
+        if let i = annonces.firstIndex(where: { $0.id == id }) {
+            withAnimation(Motion.standard) { annonces[i].publishState = .failed(message) }
+        }
+        return .failed(message)
+    }
+
+    private static func publishMessage(_ error: Error, fallback: String) -> String {
+        if let e = error as? MoblyAPI.APIError {
+            return e.isOffline ? "Pas de connexion. Réessayez une fois connecté." : e.message
+        }
+        return fallback
+    }
+
     func remove(_ annonce: OwnerAnnonce) {
+        publishJobs[annonce.id] = nil
         annonces.removeAll { $0.id == annonce.id }
         // Free the on-disk photos this listing owned. Safe to call even for
         // remote/imported listings — those write nothing to Caches.

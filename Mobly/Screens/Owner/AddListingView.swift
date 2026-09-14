@@ -884,13 +884,6 @@ struct AddListingView: View {
             .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8)
             .opacity(canAdvance && !isPublishing ? 1 : 0.5)
             .allowsHitTesting(canAdvance && !isPublishing)
-
-            if isPublishing {
-                Text("Publication en cours… vos photos sont envoyées sur le serveur.")
-                    .font(.moblyBody(11))
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
-                    .padding(.bottom, 6)
-            }
         }
         .background(Color.moblySurface)
     }
@@ -1115,7 +1108,7 @@ struct AddListingView: View {
         let displayName = me?.fullName
             ?? (Session.shared.fullName.isEmpty ? nil : Session.shared.fullName)
         var listing = Listing(
-            id: existing?.id ?? "own-\(title.hashValue)-\(priceValue)",
+            id: existing?.id ?? "own-\(UUID().uuidString)",
             title: title,
             location: locationLabel,
             price: formattedPrice,
@@ -1144,6 +1137,11 @@ struct AddListingView: View {
         // the source Data is still on `customPhotos` for a re-upload later.
         let fileURLs = OwnerPhotoStore.save(uploadedPhotos, id: listing.id)
         listing.photos = fileURLs.map { $0.absoluteString }
+
+        if editing == nil {
+            publishInBackground(listing)
+            return
+        }
 
         isPublishing = true
         Task {
@@ -1183,6 +1181,79 @@ struct AddListingView: View {
                 // Otherwise dismiss straight to the dashboard.
                 if publishError == nil { dismiss() }
             }
+        }
+    }
+
+    /// A new annonce never makes the owner wait on the upload. The owner store
+    /// sends it in the background and the dashboard shows it as "Publication…".
+    /// This sheet stays up for at most 5 seconds: if the server answers sooner
+    /// it closes right away; otherwise it closes at 5 s and the card turns
+    /// active when the send completes. A failure *within* those 5 seconds keeps
+    /// the sheet open with the reason (e.g. price out of range) so it can be
+    /// fixed; a later failure shows on the card with a retry.
+    private func publishInBackground(_ listing: Listing) {
+        guard MoblyAPI.shared.isAuthenticated else {
+            publishError = "Connectez-vous pour publier votre annonce en ligne."
+            return
+        }
+        let priceFcfa = Int(digits(priceValue)) ?? 0
+        guard priceFcfa > 0 else {
+            publishError = "Indiquez un prix pour publier votre annonce."
+            return
+        }
+
+        let l = listing
+        let deal = l.deals.contains("Acheter") ? "SALE" : "RENT"
+        let regionValue = region.trimmingCharacters(in: .whitespaces)
+        let neighborhoodValue = neighborhood.trimmingCharacters(in: .whitespaces)
+        let cityValue = city
+        let roomsValue = max(0, rooms)
+        let makeBody: ([String], String?) -> MoblyAPI.CreateListingBody = { photos, cover in
+            MoblyAPI.CreateListingBody(
+                title: l.title,
+                category: l.category,
+                deal: deal,
+                region: regionValue.isEmpty ? nil : regionValue,
+                city: cityValue,
+                neighborhood: neighborhoodValue.isEmpty ? nil : neighborhoodValue,
+                priceFcfa: priceFcfa,
+                furnished: !l.deals.contains("Non meublé"),
+                rooms: roomsValue,
+                about: l.about.isEmpty ? nil : l.about,
+                tags: l.tags,
+                coverUrl: cover,
+                imageName: nil,
+                photos: photos,
+                lat: l.lat,
+                lng: l.lng
+            )
+        }
+
+        isPublishing = true
+        let send = OwnerListings.shared.startPublishing(l, photos: uploadedPhotos, makeBody: makeBody)
+        let localId = l.id
+
+        // Whichever comes first: the server's answer…
+        Task { @MainActor in
+            let outcome = await send.value
+            guard isPublishing else { return }          // already handed off at 5 s
+            isPublishing = false
+            switch outcome {
+            case .published:
+                onCommit(l)
+                dismiss()
+            case .failed(let message):
+                OwnerListings.shared.discardPublishing(localId)
+                publishError = message
+            }
+        }
+        // …or 5 seconds, after which the dashboard takes over.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard isPublishing else { return }
+            isPublishing = false
+            onCommit(l)
+            dismiss()
         }
     }
 

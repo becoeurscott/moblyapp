@@ -610,8 +610,15 @@ struct HomeView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .shadow(color: Color.moblyPrimary.opacity(0.25), radius: 16, y: 10)
         .fullScreenCover(isPresented: $showBecomeOwner) {
-            BecomeOwnerView(onClose: { showBecomeOwner = false })
-                .swipeToDismiss(onDismiss: { showBecomeOwner = false })
+            BecomeOwnerView(
+                onClose: { showBecomeOwner = false },
+                onPublished: {
+                    showBecomeOwner = false
+                    // After the cover finishes dismissing, land on the dashboard.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { showOwnerDashboard = true }
+                }
+            )
+            .swipeToDismiss(onDismiss: { showBecomeOwner = false })
         }
         .fullScreenCover(isPresented: $showOwnerDashboard) {
             NavigationStack { OwnerDashboardView() }

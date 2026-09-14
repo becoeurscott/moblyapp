@@ -1200,6 +1200,10 @@ struct AboutView: View {
 
 struct BecomeOwnerView: View {
     var onClose: () -> Void = {}
+    /// Called instead of `onClose` once the first annonce has been handed to
+    /// the publisher, so the presenter can open the owner dashboard where it
+    /// shows as "Publication…". Falls back to `onClose` when nil.
+    var onPublished: (() -> Void)? = nil
 
     @ObservedObject private var listingStore = ListingStore.shared
     @ObservedObject private var auth = AuthStore.shared
@@ -1281,10 +1285,10 @@ struct BecomeOwnerView: View {
                     showAddListing = false
                     onClose()
                 }
-            ) { newListing in
-                OwnerListings.shared.add(newListing)
+            ) { _ in
+                // The publish sheet already put the annonce on the dashboard.
                 showAddListing = false
-                onClose()
+                if let onPublished { onPublished() } else { onClose() }
             }
             .swipeToDismiss(onDismiss: {
                 showAddListing = false

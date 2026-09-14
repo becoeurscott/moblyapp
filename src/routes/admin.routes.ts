@@ -6,6 +6,7 @@ import { requireAuth, requireAdmin, requirePermission } from '../middleware/auth
 import { can } from '../lib/permissions';
 import { audit, diff } from '../lib/audit';
 import { cacheBust } from '../lib/cache';
+import { notifyNewListing } from '../services/listingNotify';
 import { notifyUser, pushConfigured } from '../services/push';
 import { adminIpGate, adminWriteLimiter } from '../middleware/adminSecurity';
 import { adminUsersRouter } from './admin/users.routes';
@@ -816,37 +817,6 @@ adminRouter.delete(
 // a registered device, excluding the listing owner.
 // ═════════════════════════════════════════════════════════════
 
-async function notifyNewListing(
-  listing: { id: string; title: string; city: string; neighborhood?: string | null; priceFcfa: number },
-  ownerId: string,
-) {
-  if (!pushConfigured()) return;
-
-  const price = new Intl.NumberFormat('fr-FR').format(listing.priceFcfa) + ' FCFA';
-  const where = listing.neighborhood
-    ? `${listing.neighborhood}, ${listing.city}`
-    : listing.city;
-
-  const users = await prisma.user.findMany({
-    where: {
-      id: { not: ownerId },
-      city: listing.city,
-      devices: { some: { pushToken: { not: null } } },
-    },
-    select: { id: true },
-    take: 500,
-  });
-
-  for (const u of users) {
-    await notifyUser({
-      userId: u.id,
-      type: 'new_listing',
-      title: `Nouvelle annonce à ${where} 🏠`,
-      body: `${listing.title} — ${price}. Découvrez-la maintenant !`,
-      payload: { listingId: listing.id },
-    }).catch(() => {});
-  }
-}
 
 // ═════════════════════════════════════════════════════════════
 // Broadcast notifications — announcements, promos, incident

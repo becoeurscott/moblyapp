@@ -21,6 +21,8 @@ struct ProfileView: View {
     @ObservedObject private var lang = AppLang.shared
 
     @State private var showBecomeOwner = false
+    /// Opened after a first annonce is published from the become-owner flow.
+    @State private var goToOwnerDashboard = false
     /// Tapped "Devenir propriétaire" without a verified identity.
     @State private var askIdentityFirst = false
     @State private var goToIdentity = false
@@ -83,6 +85,7 @@ struct ProfileView: View {
                         case .ownerDashboard: OwnerDashboardView()
                         }
                     }
+                    .navigationDestination(isPresented: $goToOwnerDashboard) { OwnerDashboardView() }
             }
 
             if loggingOut || saidGoodbye { logoutOverlay }
@@ -105,8 +108,15 @@ struct ProfileView: View {
         }
         .navigationDestination(isPresented: $goToIdentity) { IdentityVerificationView() }
         .fullScreenCover(isPresented: $showBecomeOwner) {
-            BecomeOwnerView(onClose: { showBecomeOwner = false })
-                .swipeToDismiss(onDismiss: { showBecomeOwner = false })
+            BecomeOwnerView(
+                onClose: { showBecomeOwner = false },
+                onPublished: {
+                    showBecomeOwner = false
+                    // After the cover finishes dismissing, land on the dashboard.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { goToOwnerDashboard = true }
+                }
+            )
+            .swipeToDismiss(onDismiss: { showBecomeOwner = false })
         }
 
         .onAppear {

@@ -524,7 +524,7 @@ final class AuthStore: ObservableObject {
         ChatStore.shared.stop()
         ChatStore.shared.clearLocal()          // threads + messages + disk cache
         UserDataStore.shared.clear()           // favourites + notifications
-        OwnerListings.shared.annonces = []     // owner's published annonces
+        OwnerListings.shared.reset()           // owner's annonces + any publish still running
         SavedSearchStore.shared.clear()        // saved recherches
         ThreadPrefs.shared.clearAll()          // pin / mute / archive / deleted
         BlockedUsers.shared.clearAll()         // blocked peers

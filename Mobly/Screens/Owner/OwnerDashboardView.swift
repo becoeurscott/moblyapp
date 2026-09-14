@@ -65,7 +65,9 @@ struct OwnerDashboardView: View {
                                     onBoost: { boostAnnonce = annonce },
                                     onStats: { statsAnnonce = annonce },
                                     onEdit: { editAnnonce = annonce },
-                                    onDelete: { store.remove(annonce) }
+                                    onDelete: { store.remove(annonce) },
+                                    onRetry: { store.retryPublishing(annonce.id) },
+                                    onDiscard: { store.discardPublishing(annonce.id) }
                                 )
                             }
                         }
@@ -116,7 +118,9 @@ struct OwnerDashboardView: View {
             }
         }
         .fullScreenCover(isPresented: $showAddListing) {
-            AddListingView { store.add($0) }
+            // The publish sheet inserts the annonce itself (as "Publication…")
+            // and hands off to this dashboard; nothing to add here.
+            AddListingView { _ in }
                 .swipeToDismiss(onDismiss: { showAddListing = false })
         }
         .fullScreenCover(isPresented: $showVisits) {
@@ -554,31 +558,47 @@ private struct AnnonceCard: View {
     var onStats: () -> Void
     var onEdit: () -> Void
     var onDelete: () -> Void
+    var onRetry: () -> Void = {}
+    var onDiscard: () -> Void = {}
 
     @State private var confirmDelete = false
     @State private var toggling = false
 
     private var dimmed: Bool { !annonce.available }
 
+    /// Not on the server yet (sending, or the send failed).
+    private var local: Bool { annonce.publishState != nil }
+    private var failureMessage: String? {
+        if case .failed(let m) = annonce.publishState { return m }
+        return nil
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider().padding(.horizontal, 14)
-            statusRow.padding(14)
-            if annonce.isBoosted && annonce.available {
-                boostRow.padding(.horizontal, 14).padding(.bottom, 14)
+            if local {
+                publishRow.padding(14)
+            } else {
+                statusRow.padding(14)
+                if annonce.isBoosted && annonce.available {
+                    boostRow.padding(.horizontal, 14).padding(.bottom, 14)
+                }
+                Divider().padding(.horizontal, 14)
+                actionRow.padding(14)
             }
-            Divider().padding(.horizontal, 14)
-            actionRow.padding(14)
         }
+        .animation(Motion.standard, value: annonce.publishState)
         .background(RoundedRectangle(cornerRadius: 22).fill(dimmed ? Color(hex: 0xF1F2F5) : .white)
             .shadow(color: Color(hex: 0x14152A).opacity(dimmed ? 0.03 : 0.05), radius: 16, y: 6))
         .overlay(RoundedRectangle(cornerRadius: 22)
             .stroke(Color(hex: 0xE2E4EC), lineWidth: dimmed ? 1 : 0))
         .animation(Motion.standard, value: annonce.available)
         .contextMenu {
-            Button(role: .destructive, action: onDelete) {
-                Label("Supprimer l'annonce", systemImage: "trash")
+            if !annonce.isPublishing {
+                Button(role: .destructive, action: local ? onDiscard : onDelete) {
+                    Label("Supprimer l'annonce", systemImage: "trash")
+                }
             }
         }
         .confirmationDialog("Supprimer « \(annonce.listing.title) » ?",
@@ -601,6 +621,14 @@ private struct AnnonceCard: View {
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .saturation(dimmed ? 0 : 1)
                         .opacity(dimmed ? 0.55 : 1)
+                        .overlay {
+                            if annonce.isPublishing {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 16).fill(.black.opacity(0.35))
+                                    ProgressView().tint(.white)
+                                }
+                            }
+                        }
                     if annonce.listing.photos.count > 1 {
                         Text("1/\(annonce.listing.photos.count)")
                             .font(.moblyBody(10, weight: .semibold))
@@ -622,10 +650,12 @@ private struct AnnonceCard: View {
                         }
                         Spacer(minLength: 6)
                         statusPill
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color(hex: 0xC4C7D2))
-                            .padding(.top, 3)
+                        if !local {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Color(hex: 0xC4C7D2))
+                                .padding(.top, 3)
+                        }
                     }
                     HStack(spacing: 8) {
                         metricPill("eye.fill", annonce.views.formattedGrouped, 0x9A9DAC, 0xF1F2F6)
@@ -639,17 +669,82 @@ private struct AnnonceCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // No stats page for an annonce the server hasn't created yet. Blocks the
+        // tap without `.disabled`'s dimming, which would grey the whole card.
+        .allowsHitTesting(!local)
     }
 
     private var statusPill: some View {
         HStack(spacing: 5) {
-            Circle().fill(statusColor).frame(width: 6, height: 6)
-            Text(annonce.status.label)
+            if annonce.isPublishing {
+                ProgressView().controlSize(.mini).tint(Color.moblyPrimary)
+            } else {
+                Circle().fill(pillColor).frame(width: 6, height: 6)
+            }
+            Text(pillLabel)
                 .font(.moblyBody(10.5, weight: .bold))
-                .foregroundStyle(statusColor)
+                .foregroundStyle(pillColor)
+                .lineLimit(1)
+                .fixedSize()
         }
         .padding(.horizontal, 9).padding(.vertical, 5)
-        .background(Capsule().fill(statusColor.opacity(0.12)))
+        .background(Capsule().fill(pillColor.opacity(0.12)))
+    }
+
+    private var pillLabel: String {
+        switch annonce.publishState {
+        case .uploading: return "ENVOI…"
+        case .failed:    return "ÉCHEC"
+        case nil:        return annonce.status.label
+        }
+    }
+
+    private var pillColor: Color {
+        switch annonce.publishState {
+        case .uploading: return Color.moblyPrimary
+        case .failed:    return Color(hex: 0xE5484D)
+        case nil:        return statusColor
+        }
+    }
+
+    /// Replaces the availability + action rows while the annonce isn't on the
+    /// server yet: a progress line while sending, the reason + retry on failure.
+    @ViewBuilder
+    private var publishRow: some View {
+        if let message = failureMessage {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color(hex: 0xE5484D))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("La publication a échoué")
+                            .font(.moblyHeading(13.5)).foregroundStyle(Color.moblyTextPrimary)
+                        Text(LT(message))
+                            .font(.moblyBody(12)).foregroundStyle(Color.moblyTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 10) {
+                    actionButton("Réessayer", "arrow.clockwise", fg: 0x3A4FF0, bg: 0xEEF0FE, action: onRetry)
+                    actionButton("Supprimer", "trash.fill", fg: 0xE5484D, bg: 0xFDEDED, action: onDiscard)
+                }
+            }
+        } else {
+            HStack(spacing: 10) {
+                ProgressView().tint(Color.moblyPrimary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Publication en cours…")
+                        .font(.moblyHeading(13.5)).foregroundStyle(Color.moblyTextPrimary)
+                    Text("Votre annonce sera active dès que l'envoi sera terminé.")
+                        .font(.moblyBody(12)).foregroundStyle(Color.moblyTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 2)
+        }
     }
 
     private var statusColor: Color {

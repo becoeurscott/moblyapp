@@ -15,6 +15,7 @@ import {
   assertMax,
 } from '../middleware/gates';
 import { configSnapshot } from '../services/config';
+import { notifyNewListing } from '../services/listingNotify';
 
 export const listingsRouter = Router();
 
@@ -184,7 +185,7 @@ const listingBody = z.object({
   lng: z.number().optional(),
 });
 
-/** POST /api/listings — publish (owner). Starts as PENDING review. */
+/** POST /api/listings — publish (owner). Live immediately for verified owners. */
 listingsRouter.post(
   '/',
   requireAuth,
@@ -234,11 +235,22 @@ listingsRouter.post(
       );
     }
 
+    // Publishing already requires a verified identity (owners.identityRequired),
+    // so a verified owner's annonce goes live immediately — no manual approval
+    // queue. Only an unverified account (possible when that switch is off)
+    // still lands in review.
+    const goesLive = req.user?.identityVerified === true;
     const listing = await prisma.listing.create({
-      data: { ...body, ownerId: req.userId!, status: 'PENDING' },
+      data: {
+        ...body,
+        ownerId: req.userId!,
+        status: goesLive ? 'ACTIVE' : 'PENDING',
+        ...(goesLive ? { publishedAt: new Date() } : {}),
+      },
       include: ownerSelect,
     });
     cacheBust(LIST_CACHE);
+    if (goesLive) notifyNewListing(listing, req.userId!).catch(() => {});
     res.status(201).json({ listing: serializeListing(listing) });
   })
 );

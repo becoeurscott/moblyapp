@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
+import { cacheBust } from '../lib/cache';
 import { requireAuth } from '../middleware/auth';
 import { featureGate, restrictionGate } from '../middleware/gates';
 import { createSession, retrieveDecision, mapStatus, verifyWebhook } from '../services/didit';
@@ -239,6 +240,20 @@ async function applyDecision(
       where: { id: check.userId },
       data: { identityVerified: true, verifiedAt: new Date() },
     });
+    // A new listing goes straight to ACTIVE only when its owner is already
+    // identity-verified (see listings.routes `goesLive`). An owner who
+    // published BEFORE verifying had those annonces parked in PENDING, and
+    // nothing ever moved them — they sat on "En attente" in the dashboard
+    // forever and never appeared publicly. Now that the badge is earned,
+    // release every one of their pending annonces.
+    const released = await prisma.listing.updateMany({
+      where: { ownerId: check.userId, status: 'PENDING' },
+      data: { status: 'ACTIVE', publishedAt: new Date() },
+    });
+    // The public listing feed is cached (60s TTL, keyed 'listings:'); drop it
+    // so the freshly released annonces show up right away instead of after the
+    // window. Mirrors `LIST_CACHE` in listings.routes.
+    if (released.count > 0) cacheBust('listings:');
   }
 
   return check;

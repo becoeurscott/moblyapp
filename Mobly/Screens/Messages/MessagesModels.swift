@@ -54,7 +54,10 @@ extension ChatThread {
             initial: String(name.prefix(1)).uppercased(),
             color: AvatarPalette.color(for: peer?.id ?? dto.id, stored: peer?.avatarColor),
             name: name,
-            verified: peer?.verified ?? false,
+            // The badge must mean identity-verified, not phone-verified,
+            // matching the peer profile. Phone `verified` was lighting it up
+            // beside owners who never passed the KYC check.
+            verified: peer?.identityVerified ?? false,
             online: peer?.online ?? false,
             time: Self.relativeTime(dto.lastMessage?.createdAt ?? dto.updatedAt),
             listing: [dto.listing?.title,

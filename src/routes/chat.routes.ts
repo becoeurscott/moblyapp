@@ -27,6 +27,10 @@ const userSelect = {
   avatarUrl: true,
   avatarColor: true,
   verified: true,
+  // The badge shown next to a name must mean identity/KYC-verified, not merely
+  // phone-confirmed (`verified`). Sent so the inbox row and chat header agree
+  // with the peer profile, which already keys the "Vérifié" badge off this.
+  identityVerified: true,
   // Lets the app recognise the support desk and drop the affordances that
   // make no sense there — a listing header, and calling it.
   isSupport: true,

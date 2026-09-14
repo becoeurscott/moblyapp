@@ -36,6 +36,9 @@ struct ThreadPeerDTO: Codable, Identifiable, Equatable {
     let avatarUrl: String?
     let avatarColor: String?
     let verified: Bool
+    /// Identity/KYC verification — the real "Vérifié" trust signal. Optional so
+    /// an older backend that predates the field still decodes.
+    var identityVerified: Bool?
     var online: Bool?
     /// True for the Mobly support desk. Optional so a build talking to an
     /// older backend still decodes.

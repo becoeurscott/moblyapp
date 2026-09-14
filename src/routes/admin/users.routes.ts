@@ -37,6 +37,7 @@ const userSelect = {
   avatarUrl: true, avatarColor: true, membershipTier: true, membershipExpires: true,
   moblyScore: true, rating: true, adminNote: true,
   failedLoginCount: true, lockedUntil: true,
+  ownerPaid: true, ownerTrialStartedAt: true,
   createdAt: true, lastSeenAt: true,
 } as const;
 
@@ -138,6 +139,10 @@ const editable = z.object({
   isOwner: z.boolean().optional(),
   verified: z.boolean().optional(),
   identityVerified: z.boolean().optional(),
+  // Owner monetization: mark the inscription fee paid, or move the trial start
+  // (null = grandfathered, a past date > 7 days ago = expired / locked).
+  ownerPaid: z.boolean().optional(),
+  ownerTrialStartedAt: z.coerce.date().nullish(),
 });
 
 /** PATCH /admin/users/:id — edit any profile field. */
@@ -628,10 +633,16 @@ adminUsersRouter.post(
   })
 );
 
-/** GET /admin/restrictions — every active restriction, across all users. */
+/** GET /admin/restrictions — every active restriction, across all users.
+ *
+ *  This router is mounted on both `/users` and `/restrictions`, ahead of the
+ *  users list in admin.routes.ts. Without the baseUrl check below, a plain
+ *  `GET /admin/users` landed here and returned the (usually empty) restriction
+ *  list instead of the accounts — so the dashboard showed no users at all. */
 adminUsersRouter.get(
   '/',
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req, res, next) => {
+    if (!req.baseUrl.endsWith('/restrictions')) return next();
     const { kind, page = 0, pageSize = 50 } = z
       .object({
         kind: z.nativeEnum(RestrictionKind).optional(),

@@ -2,7 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
-import { requireAuth, requireAdmin } from '../middleware/auth';
+import { requireAuth, requireAdmin, requirePermission } from '../middleware/auth';
+import { can } from '../lib/permissions';
+import { audit, diff } from '../lib/audit';
+import { cacheBust } from '../lib/cache';
 import { notifyUser, pushConfigured } from '../services/push';
 import { adminIpGate, adminWriteLimiter } from '../middleware/adminSecurity';
 import { adminUsersRouter } from './admin/users.routes';
@@ -356,8 +359,9 @@ adminRouter.get(
       ];
     }
     if (q.data.status && q.data.status !== 'all') where.status = q.data.status;
-    if (q.data.category && q.data.category !== 'all') where.category = q.data.category;
-    if (q.data.city && q.data.city !== 'all') where.city = q.data.city;
+    // Partial, case-insensitive — an operator types "douala" or "appart".
+    if (q.data.category && q.data.category !== 'all') where.category = { contains: q.data.category.trim(), mode: 'insensitive' };
+    if (q.data.city && q.data.city !== 'all') where.city = { contains: q.data.city.trim(), mode: 'insensitive' };
 
     const page = q.data.page ?? 0;
     const pageSize = q.data.pageSize ?? 20;
@@ -377,45 +381,122 @@ adminRouter.get(
   })
 );
 
-/** PATCH /api/admin/listings/:id — moderation flags + status. */
-adminRouter.patch(
+/** Every column an operator may change on a listing, validated. */
+const listingEditable = z.object({
+  // moderation (listing.moderate)
+  status: z.enum(['DRAFT', 'PENDING', 'ACTIVE', 'BOOSTED', 'PAUSED', 'REJECTED', 'ARCHIVED']).optional(),
+  available: z.boolean().optional(),
+  verified: z.boolean().optional(),
+  adminNote: z.string().max(2000).nullish(),
+  // content (listing.edit)
+  title: z.string().trim().min(1).max(160).optional(),
+  category: z.string().trim().min(1).max(60).optional(),
+  deal: z.enum(['RENT', 'BUY', 'SHORT']).optional(),
+  about: z.string().max(5000).nullish(),
+  region: z.string().max(80).nullish(),
+  city: z.string().trim().min(1).max(80).optional(),
+  neighborhood: z.string().max(80).nullish(),
+  address: z.string().max(200).nullish(),
+  lat: z.number().min(-90).max(90).nullish(),
+  lng: z.number().min(-180).max(180).nullish(),
+  priceFcfa: z.number().int().min(0).max(10_000_000_000).optional(),
+  priceUnit: z.enum(['PER_MONTH', 'PER_DAY', 'TOTAL']).optional(),
+  negotiable: z.boolean().optional(),
+  furnished: z.boolean().optional(),
+  rooms: z.number().int().min(0).max(100).optional(),
+  bathrooms: z.number().int().min(0).max(100).nullish(),
+  sizeSqm: z.number().int().min(0).max(1_000_000).nullish(),
+  minDurationMonths: z.number().int().min(0).max(120).nullish(),
+  availableFrom: z.coerce.date().nullish(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(40).optional(),
+  photos: z.array(z.string().url()).max(60).optional(),
+  coverUrl: z.string().url().nullish(),
+  rating: z.number().min(0).max(5).nullish(),
+});
+
+const MODERATION_KEYS = new Set(['status', 'available', 'verified', 'adminNote']);
+
+const listingDetailSelect = {
+  id: true, title: true, category: true, deal: true, status: true,
+  region: true, city: true, neighborhood: true, address: true, lat: true, lng: true,
+  priceFcfa: true, priceUnit: true, currency: true, negotiable: true, furnished: true,
+  rooms: true, bathrooms: true, sizeSqm: true, minDurationMonths: true,
+  about: true, tags: true, coverUrl: true, imageName: true, photos: true,
+  verified: true, rating: true, reviewCount: true, available: true, availableFrom: true,
+  views: true, contacts: true, favorites: true,
+  boostDaysLeft: true, boostExpiresAt: true, pinnedAt: true, pinnedUntil: true,
+  adminNote: true, publishedAt: true, archivedAt: true, createdAt: true, updatedAt: true,
+  ownerId: true,
+  owner: { select: { id: true, fullName: true, phone: true, email: true, avatarUrl: true, avatarColor: true } },
+} as const;
+
+/** GET /api/admin/listings/:id — every editable field, for the edit form. */
+adminRouter.get(
   '/listings/:id',
   asyncHandler(async (req, res) => {
-    const body = z
-      .object({
-        status: z.enum(['DRAFT', 'PENDING', 'ACTIVE', 'BOOSTED', 'PAUSED', 'REJECTED', 'ARCHIVED']).optional(),
-        available: z.boolean().optional(),
-        verified: z.boolean().optional(),
-      })
-      .safeParse(req.body);
-    if (!body.success) throw new ApiError(400, 'Données invalides', 'VALIDATION_FAILED');
+    const listing = await prisma.listing.findUnique({ where: { id: req.params.id }, select: listingDetailSelect });
+    if (!listing) throw new ApiError(404, 'Annonce introuvable', 'NOT_FOUND');
+    res.json({ listing });
+  })
+);
 
-    const prev = body.data.status
-      ? await prisma.listing.findUnique({ where: { id: req.params.id }, select: { status: true, ownerId: true } })
-      : null;
-
-    const listing = await prisma.listing.update({
-      where: { id: req.params.id },
-      data: body.data,
-      select: listingSummarySelect,
-    });
-
-    // When a listing goes ACTIVE for the first time, notify users in the same city.
-    if (body.data.status === 'ACTIVE' && prev && prev.status !== 'ACTIVE') {
-      notifyNewListing(listing as any, prev.ownerId).catch(() => {});
+/** PATCH /api/admin/listings/:id — edit any field.
+ *
+ *  Moderation fields (status, availability, verified badge, note) need
+ *  `listing.moderate`; anything that rewrites the annonce itself needs
+ *  `listing.edit`. Every change is audited and busts the public feed cache so
+ *  the app shows the edit on its next fetch. */
+adminRouter.patch(
+  '/listings/:id',
+  requirePermission('listing.moderate'),
+  asyncHandler(async (req, res) => {
+    const parsed = listingEditable.safeParse(req.body);
+    if (!parsed.success) {
+      throw new ApiError(400, parsed.error.issues[0]?.message ?? 'Données invalides', 'VALIDATION_FAILED');
+    }
+    const patch = parsed.data;
+    const role = req.user?.adminRole ?? (req.user?.isAdmin ? 'READ_ONLY' : null);
+    if (Object.keys(patch).some((k) => !MODERATION_KEYS.has(k)) && !can(role, 'listing.edit')) {
+      throw new ApiError(403, "Votre rôle ne permet pas de modifier le contenu de l'annonce.", 'ROLE_REQUIRED');
     }
 
-    res.json({ listing });
+    const before = await prisma.listing.findUnique({ where: { id: req.params.id }, select: listingDetailSelect });
+    if (!before) throw new ApiError(404, 'Annonce introuvable', 'NOT_FOUND');
+
+    const data: Record<string, unknown> = { ...patch };
+    // Keep the lifecycle timestamps coherent with the status an admin sets.
+    if (patch.status === 'ACTIVE' && !before.publishedAt) data.publishedAt = new Date();
+    if (patch.status === 'ARCHIVED' && !before.archivedAt) data.archivedAt = new Date();
+    if (patch.status && patch.status !== 'ARCHIVED' && before.archivedAt) data.archivedAt = null;
+    // A cover that isn't in the gallery would render nowhere in the app.
+    if (patch.photos && !patch.coverUrl && before.coverUrl && !patch.photos.includes(before.coverUrl)) {
+      data.coverUrl = patch.photos[0] ?? null;
+    }
+
+    const after = await prisma.listing.update({ where: { id: req.params.id }, data, select: listingDetailSelect });
+
+    await audit(req, { action: 'listing.edit', targetType: 'listing', targetId: after.id, ...diff(before, after, patch) });
+    cacheBust('listings:');
+
+    // When a listing goes ACTIVE for the first time, notify users in the same city.
+    if (patch.status === 'ACTIVE' && before.status !== 'ACTIVE') {
+      notifyNewListing(after as any, before.ownerId).catch(() => {});
+    }
+
+    res.json({ listing: after });
   })
 );
 
 /** DELETE /api/admin/listings/:id. */
 adminRouter.delete(
   '/listings/:id',
+  requirePermission('listing.delete'),
   asyncHandler(async (req, res) => {
-    await prisma.listing.delete({ where: { id: req.params.id } }).catch(() => {
-      throw new ApiError(404, 'Annonce introuvable', 'NOT_FOUND');
-    });
+    const before = await prisma.listing.findUnique({ where: { id: req.params.id }, select: { id: true, title: true, ownerId: true } });
+    if (!before) throw new ApiError(404, 'Annonce introuvable', 'NOT_FOUND');
+    await prisma.listing.delete({ where: { id: req.params.id } });
+    await audit(req, { action: 'listing.delete', targetType: 'listing', targetId: before.id, before });
+    cacheBust('listings:');
     res.json({ deleted: true });
   })
 );
@@ -564,6 +645,8 @@ adminRouter.get(
         participants: t.participants.map((p) => p.user),
         messageCount: t._count.messages,
         lastMessage: t.messages[0] ?? null,
+        frozenAt: t.frozenAt,
+        frozenReason: t.frozenReason,
         updatedAt: t.updatedAt,
       })),
     });
@@ -685,6 +768,45 @@ adminRouter.get(
       }),
     ]);
     res.json({ total, page, pageSize, items });
+  })
+);
+
+/** PATCH /api/admin/visits/:id — change status, reschedule or edit the note. */
+adminRouter.patch(
+  '/visits/:id',
+  requirePermission('visit.update'),
+  asyncHandler(async (req, res) => {
+    const parsed = z
+      .object({
+        status: z.enum(['REQUESTED', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'NO_SHOW']).optional(),
+        scheduledAt: z.coerce.date().optional(),
+        note: z.string().max(1000).nullish(),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) throw new ApiError(400, 'Données invalides', 'VALIDATION_FAILED');
+    const patch = parsed.data;
+
+    const sel = { id: true, status: true, scheduledAt: true, note: true, visitorId: true, ownerId: true, listingId: true } as const;
+    const before = await prisma.visitRequest.findUnique({ where: { id: req.params.id }, select: sel });
+    if (!before) throw new ApiError(404, 'Visite introuvable', 'NOT_FOUND');
+
+    const after = await prisma.visitRequest.update({ where: { id: req.params.id }, data: patch, select: sel });
+    await audit(req, { action: 'visit.edit', targetType: 'visit', targetId: after.id, ...diff(before, after, patch) });
+
+    res.json({ visit: after });
+  })
+);
+
+/** DELETE /api/admin/visits/:id. */
+adminRouter.delete(
+  '/visits/:id',
+  requirePermission('visit.update'),
+  asyncHandler(async (req, res) => {
+    const before = await prisma.visitRequest.findUnique({ where: { id: req.params.id } });
+    if (!before) throw new ApiError(404, 'Visite introuvable', 'NOT_FOUND');
+    await prisma.visitRequest.delete({ where: { id: req.params.id } });
+    await audit(req, { action: 'visit.delete', targetType: 'visit', targetId: before.id, before });
+    res.json({ deleted: true });
   })
 );
 

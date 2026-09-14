@@ -121,6 +121,7 @@ final class SessionTracker {
     /// `chat.send`, `visit.request`. `payload` is small JSON — ids, categories,
     /// counts. No free-form text, no PII beyond what the record already has.
     func log(_ name: String, _ payload: [String: Any] = [:]) {
+        guard RemoteConfigStore.shared.isEnabled("analytics") else { return }
         let evt = PendingEvent(
             name: name,
             payload: payload,

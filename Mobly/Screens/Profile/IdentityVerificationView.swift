@@ -175,6 +175,7 @@ struct IdentityVerificationView: View {
 
     private var startButton: some View {
         Button {
+            guard RemoteConfigStore.shared.can("identity.verification") else { return }
             Task { await store.start() }
         } label: {
             HStack(spacing: 8) {

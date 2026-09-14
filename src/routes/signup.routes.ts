@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { featureGate } from '../middleware/gates';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
@@ -82,6 +83,8 @@ function validationError(fields: FieldErrors): never {
  */
 signupRouter.post(
   '/start',
+  featureGate('signup.enabled'),
+  featureGate('signup.method.otp'),
   smsSendLimiter,
   asyncHandler(async (req, res) => {
     const parsed = signupSchema.safeParse(req.body);
@@ -371,6 +374,7 @@ signupRouter.post(
  */
 signupRouter.post(
   '/oauth/phone/start',
+  featureGate('signup.enabled'),
   smsSendLimiter,
   asyncHandler(async (req, res) => {
     const { pendingToken, phone: raw } = z

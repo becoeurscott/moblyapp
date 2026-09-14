@@ -46,6 +46,7 @@ final class PushService: NSObject, ObservableObject {
     /// Ask once, at a moment where the value is obvious.
     /// Silently no-ops if already asked, granted, or refused.
     func requestIfAppropriate() async {
+        guard RemoteConfigStore.shared.isEnabled("notifications.push") else { return }
         await refreshStatus()
         guard status == .notDetermined,
               !UserDefaults.standard.bool(forKey: askedKey) else { return }

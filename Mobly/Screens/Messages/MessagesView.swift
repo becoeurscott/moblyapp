@@ -24,6 +24,8 @@ struct MessagesView: View {
     /// `unread >= 1` even when the server thinks the thread is read.
     private var threads: [ChatThread] {
         chat.threads.compactMap { dto -> ChatThread? in
+            // Support lives under Profil → Support, not in the regular inbox.
+            if dto.participants.first?.isSupport == true { return nil }
             if prefs.deleted.contains(dto.id) { return nil }
             let f = prefs.flags(for: dto.id)
             if f.archived != showArchived { return nil }

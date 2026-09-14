@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
 import { optionalAuth, requireAuth } from '../middleware/auth';
 import { writeLimiter } from '../middleware/security';
+import { getConfig, isFlagEnabled } from '../services/config';
 
 export const analyticsRouter = Router();
 
@@ -103,6 +104,11 @@ analyticsRouter.post(
   '/events',
   optionalAuth,
   asyncHandler(async (req, res) => {
+    // Off = accepted and dropped: a 403 here would surface a banner on
+    // builds that still send events.
+    if (!isFlagEnabled('analytics', await getConfig())) {
+      return res.json({ ok: true, count: 0 });
+    }
     const parsed = z
       .object({
         sessionId: z.string().min(4),

@@ -32,6 +32,20 @@ enum MoblyTab: Int, CaseIterable {
         case .profile: return "person.fill"
         }
     }
+
+    /// The remote flag that removes this tab from the bar, if any.
+    var flag: String? {
+        switch self {
+        case .explore: return "maps"
+        case .messages: return "chat.enabled"
+        case .favorites: return "favorites"
+        case .home, .profile: return nil
+        }
+    }
+
+    @MainActor static func visible(_ config: RemoteConfigStore) -> [MoblyTab] {
+        allCases.filter { t in t.flag.map { config.isEnabled($0) } ?? true }
+    }
 }
 
 struct MainTabView: View {
@@ -41,6 +55,7 @@ struct MainTabView: View {
     // global root `.id(lang.code)` reset (which used to tear down navigation).
     @ObservedObject private var lang = AppLang.shared
     @ObservedObject private var chrome = AppChrome.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
 
     @State private var tab: MoblyTab = {
         if ProcessInfo.processInfo.environment["MAIN_TAB"] == "explore" { return .explore }
@@ -78,6 +93,7 @@ struct MainTabView: View {
         switch target {
         case .thread(let id):
             withAnimation(Motion.quick) { tab = .messages }
+            guard config.isEnabled("chat.enabled") else { return }
             PushService.shared.pendingThreadId = id
 
         case .listing(let id):
@@ -118,6 +134,12 @@ struct MainTabView: View {
                         showSearch = true
                     },
                     onOpenCityMap: { city in
+                        guard config.isEnabled("maps") else {
+                            searchCategory = nil
+                            searchQuery = city
+                            showSearch = true
+                            return
+                        }
                         exploreLocation = city
                         tab = .explore
                     },
@@ -145,10 +167,22 @@ struct MainTabView: View {
                 FavoritesView(
                     onOpenListing: { openListing($0) },
                     onOpenSearch: { search in
+                        guard config.isEnabled("maps") else {
+                            searchCategory = nil
+                            searchQuery = search.location
+                            showSearch = true
+                            return
+                        }
                         exploreLocation = search.location
                         tab = .explore
                     },
                     onOpenSavedSearch: { item in
+                        guard config.isEnabled("maps") else {
+                            searchCategory = nil
+                            searchQuery = item.label
+                            showSearch = true
+                            return
+                        }
                         explorePresetFilters = item.filters
                         exploreLocation = item.label
                         tab = .explore
@@ -218,8 +252,12 @@ struct MainTabView: View {
             )
             .swipeToDismiss(onDismiss: { showSearch = false })
         }
+        // A tab switched off while it is on screen falls back to Accueil.
+        .onChange(of: MoblyTab.visible(config)) { _, visible in
+            if !visible.contains(tab) { tab = .home }
+        }
         .onChange(of: push.pendingThreadId) { _, threadId in
-            guard threadId != nil else { return }
+            guard threadId != nil, config.isEnabled("chat.enabled") else { return }
             withAnimation(Motion.quick) { tab = .messages }
         }
         .fullScreenCover(isPresented: Binding(
@@ -259,6 +297,7 @@ struct MainTabView: View {
 struct MoblyTabBar: View {
     @Binding var tab: MoblyTab
     @ObservedObject private var chat = ChatStore.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
     @Namespace private var pillNS
 
     private var unreadCount: Int {
@@ -267,7 +306,7 @@ struct MoblyTabBar: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            ForEach(MoblyTab.allCases, id: \.self) { t in
+            ForEach(MoblyTab.visible(config), id: \.self) { t in
                 let active = t == tab
                 Button {
                     withAnimation(Motion.quick) { tab = t }

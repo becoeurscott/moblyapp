@@ -12,6 +12,7 @@ struct ChatThreadView: View {
     @ObservedObject private var listingStore = ListingStore.shared
     @ObservedObject private var chat = ChatStore.shared
     @ObservedObject private var auth = AuthStore.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
     @State private var draft = ""
     @State private var replyingTo: ChatMessage?
     @State private var activeSheet: ActiveSheet?
@@ -449,8 +450,12 @@ struct ChatThreadView: View {
             // support desk — there is nobody on the other end to pick up, and
             // a ringing call that never connects reads as the app being broken.
             if !thread.isSupport {
-                Button { callIsVideo = false; showCall = true } label: { headerIcon("phone.fill") }
-                Button { callIsVideo = true; showCall = true } label: { headerIcon("video.fill") }
+                if config.isEnabled("calls.audio") {
+                    Button { callIsVideo = false; showCall = true } label: { headerIcon("phone.fill") }
+                }
+                if config.isEnabled("calls.video") {
+                    Button { callIsVideo = true; showCall = true } label: { headerIcon("video.fill") }
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -796,6 +801,7 @@ struct ChatThreadView: View {
                 if canSend {
                     send()
                 } else {
+                    guard config.can("chat.voice") else { return }
                     let permission = AVAudioSession.sharedInstance().recordPermission
                     if permission == .denied {
                         showMicPermissionAlert = true
@@ -815,7 +821,7 @@ struct ChatThreadView: View {
             }
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.2).onEnded { _ in
-                    guard !canSend else { return }
+                    guard !canSend, config.can("chat.voice") else { return }
                     withAnimation(Motion.instant) { showMicHint = false }
                     let permission = AVAudioSession.sharedInstance().recordPermission
                     guard permission == .granted else {
@@ -869,13 +875,13 @@ struct ChatThreadView: View {
             Capsule().fill(Color(hex: 0xE2E4EC)).frame(width: 40, height: 5).padding(.top, 10).padding(.bottom, 18)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()),
                                 GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
-                attachItem("photo.fill", "Galerie", 0x3A4FF0) {
+                attachItem("photo.fill", "Galerie", 0x3A4FF0, enabled: config.isEnabled("chat.media")) {
                     activeSheet = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                         activeSheet = .galerie
                     }
                 }
-                attachItem("camera.fill", "Caméra", 0x1F8A5B) {
+                attachItem("camera.fill", "Caméra", 0x1F8A5B, enabled: config.isEnabled("chat.media")) {
                     // The simulator (and an iPad without a rear camera) has no
                     // camera to present; asking for one there is a guaranteed
                     // crash rather than a picker.
@@ -890,10 +896,10 @@ struct ChatThreadView: View {
                     }
                 }
                 attachItem("doc.fill", "Document", 0xFF6B35, enabled: false) { }
-                attachItem("mappin.circle.fill", "Position", 0xE5484D) { sendLocation() }
+                attachItem("mappin.circle.fill", "Position", 0xE5484D, enabled: config.isEnabled("chat.location")) { sendLocation() }
                 attachItem("person.crop.circle.fill", "Contact", 0x8B5CF6, enabled: false) { }
                 attachItem("chart.bar.fill", "Sondage", 0x2A6FDB, enabled: false) { }
-                if iAmTheOwner {
+                if iAmTheOwner && config.isEnabled("visits.invite") {
                     attachItem("calendar.badge.plus", "Visite", 0x1F8A5B) {
                         activeSheet = nil
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {

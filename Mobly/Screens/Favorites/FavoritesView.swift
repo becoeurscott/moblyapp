@@ -33,6 +33,7 @@ struct FavoritesView: View {
     @ObservedObject private var userData = UserDataStore.shared
     @ObservedObject private var auth = AuthStore.shared
     @ObservedObject private var savedSearches = SavedSearchStore.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
     @State private var tab = 0   // 0 = Espaces, 1 = Recherches
     @State private var sort: FavSort = .recent
 
@@ -61,7 +62,7 @@ struct FavoritesView: View {
             header
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    if tab == 0 {
+                    if tab == 0 || !config.isEnabled("search.savedSearches") {
                         if favorites.isEmpty { emptyEspaces } else { espacesTab }
                     } else {
                         if savedSearches.items.isEmpty { emptyRecherches } else { savedSearchesTab }
@@ -153,7 +154,9 @@ struct FavoritesView: View {
 
             HStack(spacing: 6) {
                 segment("\(L("Espaces")) (\(favorites.count))", 0)
-                segment("\(L("Recherches")) (\(savedSearches.count))", 1)
+                if config.isEnabled("search.savedSearches") {
+                    segment("\(L("Recherches")) (\(savedSearches.count))", 1)
+                }
             }
             .padding(4)
             .background(RoundedRectangle(cornerRadius: 14).fill(Color(hex: 0xECEDF2)))

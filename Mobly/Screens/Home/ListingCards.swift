@@ -186,6 +186,7 @@ struct HeartButton: View {
     let listing: Listing
     @ObservedObject private var userData = UserDataStore.shared
     @ObservedObject private var auth = AuthStore.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
     @State private var needsSignIn = false
 
     private var liked: Bool { userData.isFavorite(listing.id) }
@@ -211,6 +212,8 @@ struct HeartButton: View {
                 .animation(Motion.pop, value: liked)
         }
         .buttonStyle(.plain)
+        .opacity(config.isEnabled("favorites") ? 1 : 0)
+        .allowsHitTesting(config.isEnabled("favorites"))
         .alert("Connexion requise", isPresented: $needsSignIn) {
             Button("OK", role: .cancel) {}
         } message: {

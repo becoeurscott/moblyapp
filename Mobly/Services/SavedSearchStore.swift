@@ -34,6 +34,7 @@ final class SavedSearchStore: ObservableObject {
     var count: Int { items.count }
 
     func add(label: String, query: String, filters: FilterState) {
+        guard RemoteConfigStore.shared.isEnabled("search.savedSearches") else { return }
         // Dedup by (label + filters) — a user tapping "Save" twice on the
         // same set should not accumulate duplicates.
         if items.contains(where: { $0.label == label && $0.filters == filters }) { return }

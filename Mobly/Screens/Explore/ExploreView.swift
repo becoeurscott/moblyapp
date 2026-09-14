@@ -16,6 +16,7 @@ struct ExploreView: View {
     @ObservedObject private var ownerListings = OwnerListings.shared
     @ObservedObject private var placeCompleter = LocationSearchCompleter.shared
     @ObservedObject private var savedSearches = SavedSearchStore.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
     @State private var activeChip = "Tous"
     @State private var locatingUser = false
 
@@ -572,7 +573,7 @@ struct ExploreView: View {
             if searchText.isEmpty {
                 // Recent searches on top — the same store Profil → Recherches
                 // enregistrées reads, so the two never disagree.
-                if !savedSearches.items.isEmpty {
+                if config.isEnabled("search.savedSearches"), !savedSearches.items.isEmpty {
                     HStack {
                         Text("Recherches récentes")
                             .font(.moblyBody(11, weight: .semibold))
@@ -905,6 +906,7 @@ struct ExploreView: View {
 
             HStack(spacing: 8) {
                 Button {
+                    guard config.can("chat.enabled") else { return }
                     if auth.isSignedIn {
                         chatListing = l
                     } else {

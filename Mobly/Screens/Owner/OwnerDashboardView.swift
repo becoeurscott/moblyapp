@@ -552,6 +552,7 @@ struct OwnerDashboardView: View {
 // MARK: - Annonce card
 
 private struct AnnonceCard: View {
+    @ObservedObject private var config = RemoteConfigStore.shared
     let annonce: OwnerAnnonce
     var onToggleAvailability: () async -> Void
     var onBoost: () -> Void
@@ -822,16 +823,20 @@ private struct AnnonceCard: View {
         HStack(spacing: 10) {
             if annonce.available {
                 // Boosting only makes sense for an available annonce.
-                if !annonce.isBoosted {
+                if !annonce.isBoosted && config.isEnabled("boost.enabled") {
                     actionButton("Booster", "bolt.fill", fg: 0xC24E10, bg: 0xFFF3EC, action: onBoost)
                 }
-                actionButton("Modifier", "pencil", fg: 0x3A4FF0, bg: 0xEEF0FE, action: onEdit)
+                if config.isEnabled("listings.edit") {
+                    actionButton("Modifier", "pencil", fg: 0x3A4FF0, bg: 0xEEF0FE, action: onEdit)
+                }
                 actionButton("Stats", "chart.bar.fill", fg: 0x666F80, bg: 0xF1F2F6, action: onStats)
             } else {
                 actionButton("Supprimer", "trash.fill", fg: 0xE5484D, bg: 0xFDEDED) {
                     confirmDelete = true
                 }
-                actionButton("Modifier", "pencil", fg: 0x3A4FF0, bg: 0xEEF0FE, action: onEdit)
+                if config.isEnabled("listings.edit") {
+                    actionButton("Modifier", "pencil", fg: 0x3A4FF0, bg: 0xEEF0FE, action: onEdit)
+                }
             }
         }
     }

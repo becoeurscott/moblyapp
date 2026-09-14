@@ -897,7 +897,7 @@ struct PrivacySecurityView: View {
                             }.padding(.vertical, 11)
                         }.buttonStyle(.plain)
                         Divider().padding(.leading, 46)
-                        Button { confirmDelete = true } label: {
+                        Button { if RemoteConfigStore.shared.can("account.delete") { confirmDelete = true } } label: {
                             HStack(spacing: 13) {
                                 iconBox("trash.fill", 0xE5484D)
                                 Text("Supprimer mon compte").font(.moblyBody(13.5, weight: .medium))

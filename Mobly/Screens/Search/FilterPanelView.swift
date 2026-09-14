@@ -112,6 +112,7 @@ struct FilterPanelView: View {
 
     @ObservedObject private var store = ListingStore.shared
     @ObservedObject private var owner = OwnerListings.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
 
     @State private var draft: FilterState
 
@@ -688,7 +689,7 @@ struct FilterPanelView: View {
             // Save the current draft as a recurring recherche. Only offered
             // when there's actually a filter set — saving "no filters at all"
             // would clutter the Favoris > Recherches tab with junk rows.
-            if !draft.isEmpty {
+            if !draft.isEmpty, config.isEnabled("search.savedSearches") {
                 Button { saveDraftAsRecherche() } label: {
                     HStack(spacing: 6) {
                         Image(systemName: saveConfirm ? "checkmark.circle.fill" : "bookmark.fill")

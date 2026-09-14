@@ -155,6 +155,7 @@ export const usersRouter = Router();
 usersRouter.delete(
   '/me',
   requireAuth,
+  featureGate('account.delete'),
   asyncHandler(async (req, res) => {
     const userId = req.userId!;
     // Revoke first: if the delete somehow fails the tokens are already dead,

@@ -260,6 +260,7 @@ struct PeerProfileView: View {
     private var reportBlockRow: some View {
         VStack(spacing: 0) {
             Button {
+                guard RemoteConfigStore.shared.can("reports.file") else { return }
                 showReport = true
             } label: {
                 dangerRow(icon: "flag.fill", label: "Signaler", tint: Color(hex: 0xE5484D))

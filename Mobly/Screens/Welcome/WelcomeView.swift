@@ -120,6 +120,7 @@ struct WelcomeView: View {
 // MARK: - Floating card
 
 private struct WelcomeCard: View {
+    @ObservedObject private var config = RemoteConfigStore.shared
     var onSignUp: () -> Void
     var onSignIn: () -> Void
 
@@ -141,8 +142,10 @@ private struct WelcomeCard: View {
                 .padding(.top, 8)
 
             VStack(spacing: 10) {
-                PillButton(title: "Créer un compte", style: .primaryBlue,
-                           trailingIcon: nil, height: 52, action: onSignUp)
+                if config.isEnabled("signup.enabled") {
+                    PillButton(title: "Créer un compte", style: .primaryBlue,
+                               trailingIcon: nil, height: 52, action: onSignUp)
+                }
                 PillButton(title: "J'ai déjà un compte", style: .outline,
                            trailingIcon: nil, height: 52, action: onSignIn)
             }

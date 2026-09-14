@@ -26,6 +26,7 @@ struct ListingDetailView: View {
 
     @ObservedObject private var chat = ChatStore.shared
     @ObservedObject private var auth = AuthStore.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
     /// Real conversation with this listing's owner, once opened. The owner is
     /// resolved server-side from the listing id — the client never names them.
     @State private var openedThread: ChatThread?
@@ -362,7 +363,10 @@ struct ListingDetailView: View {
             CircleIconButton(icon: "xmark", action: onClose)
             Spacer()
             HStack(spacing: 10) {
-                CircleIconButton(icon: "square.and.arrow.up") { shareListing() }
+                if config.isEnabled("share") {
+                    CircleIconButton(icon: "square.and.arrow.up") { shareListing() }
+                }
+                if config.isEnabled("favorites") {
                 CircleIconButton(icon: liked ? "heart.fill" : "heart",
                                  tint: liked ? .moblyAccent : .moblyTextPrimary) {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -375,6 +379,7 @@ struct ListingDetailView: View {
                             "source": "listing_detail"
                         ])
                     }
+                }
                 }
             }
         }
@@ -607,7 +612,9 @@ struct ListingDetailView: View {
             }
             .foregroundStyle(Color(hex: 0x9A9DAC))
             .padding(.bottom, 12)
-            locationMap
+            if config.isEnabled("maps") {
+                locationMap
+            }
 
             divider
 
@@ -745,7 +752,7 @@ struct ListingDetailView: View {
                 }
                 // An owner reviewing their own space would be self-dealing,
                 // so the CTA is theirs to lose.
-                if !isOwnListing && !hasPostedReview && auth.isSignedIn {
+                if !isOwnListing && !hasPostedReview && auth.isSignedIn && config.isEnabled("reviews.post") {
                     Button {
                         showReviewSheet = true
                     } label: {
@@ -1040,19 +1047,22 @@ struct ListingDetailView: View {
             }
             .layoutPriority(1)
             Spacer(minLength: 4)
-            Button {
-                guard AuthStore.shared.isSignedIn else { needsSignIn = true; return }
-                showVisitSheet = true
-            } label: {
-                Image(systemName: "calendar")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.moblyPrimary)
-                    .frame(width: 48, height: 48)
-                    .background(Circle().fill(Color(hex: 0xEEF0FE)))
+            if config.isEnabled("visits.request") {
+                Button {
+                    guard AuthStore.shared.isSignedIn else { needsSignIn = true; return }
+                    showVisitSheet = true
+                } label: {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.moblyPrimary)
+                        .frame(width: 48, height: 48)
+                        .background(Circle().fill(Color(hex: 0xEEF0FE)))
+                }
+                .buttonStyle(.plain)
+                .disabled(!isAvailable)
+                .opacity(isAvailable ? 1 : 0.4)
             }
-            .buttonStyle(.plain)
-            .disabled(!isAvailable)
-            .opacity(isAvailable ? 1 : 0.4)
+            if config.isEnabled("chat.enabled") {
             Button(action: contactOwner) {
                 Text("Message")
                     .font(.moblyHeading(14))
@@ -1066,6 +1076,7 @@ struct ListingDetailView: View {
             .disabled(!isAvailable)
             .buttonStyle(.plain)
         }
+            }
     }
 }
 

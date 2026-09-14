@@ -7,7 +7,7 @@ import { signToken } from '../lib/jwt';
 import { issueSession } from '../services/session';
 import { assertCanLogin, serializeRestriction } from '../services/restrictions';
 import { configSnapshot, getConfig, isFlagEnabled, flagMessage } from '../services/config';
-import { restrictionGate, callerRestricted, assertNotBlocked } from '../middleware/gates';
+import { featureGate, restrictionGate, callerRestricted, assertNotBlocked } from '../middleware/gates';
 import { createOtp, verifyOtp, otpLength } from '../services/otp';
 import {
   issueRefreshToken,
@@ -41,6 +41,7 @@ function normalizePhone(raw: string): string {
 /** POST /api/auth/otp/request — send an OTP to a phone number. */
 authRouter.post(
   '/otp/request',
+  featureGate('signup.method.otp'),
   otpRequestLimiter,
   asyncHandler(async (req, res) => {
     const { phone } = z.object({ phone: z.string().min(6) }).parse(req.body);
@@ -122,6 +123,7 @@ authRouter.post(
 /** POST /api/auth/login — optional password login. */
 authRouter.post(
   '/login',
+  featureGate('signup.method.password'),
   authLimiter,
   asyncHandler(async (req, res) => {
     const { identifier, password } = z
@@ -381,6 +383,7 @@ authRouter.patch(
  */
 authRouter.post(
   '/password/forgot',
+  featureGate('password.reset'),
   smsSendLimiter,
   asyncHandler(async (req, res) => {
     const { identifier } = z.object({ identifier: z.string().min(3) }).parse(req.body);
@@ -440,6 +443,7 @@ authRouter.post(
 
 authRouter.post(
   '/password/reset',
+  featureGate('password.reset'),
   otpVerifyLimiter,
   asyncHandler(async (req, res) => {
     const codeLength = otpLength();

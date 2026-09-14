@@ -20,6 +20,7 @@ struct HomeView: View {
     @ObservedObject private var userData = UserDataStore.shared
     @ObservedObject private var savedSearches = SavedSearchStore.shared
     @ObservedObject private var session = Session.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
 
     @State private var appeared = false
     @State private var selectedQuickFilter: String? = nil
@@ -144,7 +145,9 @@ struct HomeView: View {
                     .transition(.moblyAppear)
             }
 
-            if store.isLoading && store.listings.isEmpty {
+            if !config.isEnabled("home.carousel") {
+                EmptyView()
+            } else if store.isLoading && store.listings.isEmpty {
                 skeletonCarousel
                     .padding(.top, 4)
                     .padding(.bottom, 24)
@@ -154,16 +157,24 @@ struct HomeView: View {
                     .padding(.bottom, 24)
             }
 
-            sectionHeader(L("Villes populaires"), actionLabel: "Explorer plus",
-                          action: { onOpenCityMap("") })
-                .padding(.horizontal, 22)
-                .padding(.bottom, 14)
+            if config.isEnabled("maps") {
+                sectionHeader(L("Villes populaires"), actionLabel: "Explorer plus",
+                              action: { onOpenCityMap("") })
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 14)
+            } else {
+                sectionHeader(L("Villes populaires"), action: { onOpenCity("") })
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 14)
+            }
             popularRow
                 .padding(.bottom, 24)
 
-            promoBanner
-                .padding(.horizontal, 22)
-                .padding(.bottom, 24)
+            if session.isOwner || config.isEnabled("owners.signup") {
+                promoBanner
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 24)
+            }
 
             sectionHeader(L("Recommandé"), action: { onOpenCategory("Tous") })
                 .padding(.horizontal, 22)
@@ -175,8 +186,10 @@ struct HomeView: View {
             recommendedRow
                 .padding(.bottom, 24)
 
-            AdBannerView()
-                .padding(.bottom, 24)
+            if config.isEnabled("ads.banner") {
+                AdBannerView()
+                    .padding(.bottom, 24)
+            }
 
             Text(L("Filtre rapide"))
                 .font(.moblyHeading(17))
@@ -196,7 +209,7 @@ struct HomeView: View {
                 // Recent searches first — the same list as Profil → Recherches
                 // enregistrées, so what you searched is where you expect it in
                 // both places. Tapping one runs it again.
-                if !savedSearches.items.isEmpty {
+                if config.isEnabled("search.savedSearches"), !savedSearches.items.isEmpty {
                     HStack {
                         Text("Recherches récentes")
                             .font(.moblyBody(11, weight: .semibold))

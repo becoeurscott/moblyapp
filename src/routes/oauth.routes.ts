@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { featureGate } from '../middleware/gates';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
@@ -25,6 +26,7 @@ export const oauthRouter = Router();
  */
 oauthRouter.post(
   '/apple',
+  featureGate('signup.method.apple'),
   authLimiter,
   asyncHandler(async (req, res) => {
     const parsed = z
@@ -113,6 +115,7 @@ oauthRouter.post(
  */
 oauthRouter.post(
   '/google',
+  featureGate('signup.method.google'),
   authLimiter,
   asyncHandler(async (req, res) => {
     const parsed = z.object({ idToken: z.string().min(20) }).safeParse(req.body);

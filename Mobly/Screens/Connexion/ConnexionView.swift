@@ -12,6 +12,11 @@ struct ConnexionView: View {
     var onFinish: () -> Void = {}
 
     @ObservedObject private var auth = AuthStore.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
+    private var signupOpen: Bool { config.isEnabled("signup.enabled") }
+    private var socialLogin: Bool {
+        config.isEnabled("signup.method.google") || config.isEnabled("signup.method.apple")
+    }
 
     @State private var mode: AuthMode
     @State private var phase: AuthPhase = {
@@ -122,16 +127,18 @@ struct ConnexionView: View {
                     .padding(.bottom, 22)
 
                 // The static toggle — same position in both modes.
-                AuthModeToggle(
-                    isSignIn: mode == .signin,
-                    onSignIn: { switchTo(.signin) },
-                    onSignUp: { switchTo(.signup) }
-                )
-                .padding(.bottom, 24)
+                if signupOpen {
+                    AuthModeToggle(
+                        isSignIn: mode == .signin,
+                        onSignIn: { switchTo(.signin) },
+                        onSignUp: { switchTo(.signup) }
+                    )
+                    .padding(.bottom, 24)
+                }
 
                 if mode == .signin { signInFields } else { signUpFields }
 
-                if mode == .signin, auth.lastErrorCode == .accountNotFound {
+                if mode == .signin, signupOpen, auth.lastErrorCode == .accountNotFound {
                     // The account doesn't exist — the useful action is to
                     // create one, not to retype the password.
                     HStack(spacing: 6) {
@@ -172,17 +179,24 @@ struct ConnexionView: View {
                     .padding(.top, 4)
                     .padding(.bottom, 16)
 
-                AuthDivider(text: "ou").padding(.bottom, 16)
+                if socialLogin {
+                    AuthDivider(text: "ou").padding(.bottom, 16)
 
-                VStack(spacing: 11) {
-                    GoogleSignInButton()
-                    AppleSignInButton { _ in
-                        // AuthStore updates `user` on success, which flips
-                        // RootView into the signed-in screen automatically.
+                    VStack(spacing: 11) {
+                        if config.isEnabled("signup.method.google") {
+                            GoogleSignInButton()
+                        }
+                        if config.isEnabled("signup.method.apple") {
+                            AppleSignInButton { _ in
+                                // AuthStore updates `user` on success, which flips
+                                // RootView into the signed-in screen automatically.
+                            }
+                        }
                     }
+                    .padding(.bottom, 22)
                 }
-                .padding(.bottom, 22)
 
+                if signupOpen || mode == .signup {
                 HStack(spacing: 5) {
                     Spacer()
                     Text(mode == .signin ? "Pas encore de compte ?" : "Déjà inscrit ?")
@@ -194,6 +208,7 @@ struct ConnexionView: View {
                     .font(.moblyBody(13, weight: .bold))
                     .foregroundStyle(Color.moblyPrimary)
                     Spacer()
+                }
                 }
             }
             .padding(.horizontal, 26)
@@ -228,6 +243,7 @@ struct ConnexionView: View {
                 .padding(.top, 5)
             Spacer().frame(height: 10)
 
+            if config.isEnabled("password.reset") {
             HStack {
                 Spacer()
                 // Reset sends a code to the phone *on the account*, not to
@@ -252,6 +268,9 @@ struct ConnexionView: View {
                 .disabled(auth.isBusy)
             }
             .padding(.bottom, 18)
+            } else {
+                Spacer().frame(height: 18)
+            }
         }
     }
 
@@ -665,6 +684,12 @@ struct ConnexionView: View {
     /// account. Only move to the code screen once the server confirms it sent
     /// one — otherwise the user waits for an SMS that was never dispatched.
     private func startSignup() async {
+        guard signupOpen else {
+            auth.errorMessage = config.config.flags["signup.enabled"]?.message
+                ?? config.config.copy.signupClosedMessage
+                ?? "Les inscriptions sont temporairement fermées."
+            return
+        }
         // Server-side validation of every field happens here, before any SMS is
         // sent — so a duplicate e-mail or weak password never costs a message.
         if await auth.startSignup(fullName: fullName, phone: phoneForAuth,

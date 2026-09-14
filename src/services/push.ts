@@ -2,6 +2,7 @@ import http2 from 'node:http2';
 import { SignJWT, importPKCS8 } from 'jose';
 import { prisma } from '../lib/prisma';
 import { env } from '../config/env';
+import { getConfig, isFlagEnabled } from './config';
 
 /**
  * Apple Push Notification service, over HTTP/2 with token-based auth.
@@ -135,6 +136,7 @@ async function sendOne(deviceToken: string, payload: PushPayload): Promise<SendR
  */
 export async function pushToUser(userId: string, payload: PushPayload): Promise<void> {
   if (!pushConfigured()) return;
+  if (!isFlagEnabled('notifications.push', await getConfig())) return;
 
   const devices = await prisma.device.findMany({
     where: { userId, pushToken: { not: null } },

@@ -19,6 +19,7 @@ struct ProfileView: View {
     @ObservedObject private var session = Session.shared
     @ObservedObject private var identity = IdentityVerificationStore.shared
     @ObservedObject private var lang = AppLang.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
 
     @State private var showBecomeOwner = false
     /// Opened after a first annonce is published from the become-owner flow.
@@ -41,13 +42,13 @@ struct ProfileView: View {
     /// non vérifiée" badge on the card a few points above it.
     private var account: [MenuItem] { [
         MenuItem(label: "Modifier le profil", icon: "square.and.pencil", iconBg: 0xEEF0FE, iconColor: 0x3A4FF0, route: .editProfile),
-        MenuItem(label: "Vérification d'identité",
+        !identityVerified && !config.isEnabled("identity.verification") ? nil : MenuItem(label: "Vérification d'identité",
                  icon: identityVerified ? "checkmark.shield.fill" : "exclamationmark.shield.fill",
                  iconBg: identityVerified ? 0xE9F9EF : 0xFFF4E5,
                  iconColor: identityVerified ? 0x1F8A5B : 0xE5950C,
                  value: identityVerified ? "Vérifié" : "Non vérifié",
                  route: .identity),
-    ] }
+    ].compactMap { $0 } }
     /// Computed so the Langue row can show the language the user is actually
     /// on — and so it can be hidden entirely while `selectionEnabled` is off.
     /// The row is gated rather than deleted: the String Catalog and the
@@ -57,8 +58,12 @@ struct ProfileView: View {
             ? MenuItem(label: "Langue", icon: "globe", iconBg: 0xFFF3EC, iconColor: 0xFF6B35,
                        value: lang.code == "en" ? "English" : "Français", route: .language)
             : nil,
-        MenuItem(label: "Notifications", icon: "bell.fill", iconBg: 0xEEF0FE, iconColor: 0x3A4FF0, route: .notifications),
-        MenuItem(label: "Recherches enregistrées", icon: "magnifyingglass", iconBg: 0xEEF0FE, iconColor: 0x3A4FF0, route: .savedSearches),
+        config.isEnabled("notifications.push")
+            ? MenuItem(label: "Notifications", icon: "bell.fill", iconBg: 0xEEF0FE, iconColor: 0x3A4FF0, route: .notifications)
+            : nil,
+        config.isEnabled("search.savedSearches")
+            ? MenuItem(label: "Recherches enregistrées", icon: "magnifyingglass", iconBg: 0xEEF0FE, iconColor: 0x3A4FF0, route: .savedSearches)
+            : nil,
     ].compactMap { $0 } }
     private let support: [MenuItem] = [
         MenuItem(label: "Centre d'aide", icon: "questionmark.circle", iconBg: 0xEEF0FE, iconColor: 0x3A4FF0, route: .help),
@@ -144,10 +149,11 @@ struct ProfileView: View {
                 stats
                     .padding(.bottom, 22)
 
-                Group {
-                    if session.isOwner { ownerDashboardCTA } else { becomeOwnerCTA }
+                if session.isOwner {
+                    ownerDashboardCTA.padding(.bottom, 22)
+                } else if config.isEnabled("owners.signup") {
+                    becomeOwnerCTA.padding(.bottom, 22)
                 }
-                .padding(.bottom, 22)
 
 
                 menuGroup("COMPTE", account)

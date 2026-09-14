@@ -394,6 +394,7 @@ struct ListingDetailView: View {
             Text(listing.title)
                 .font(.moblyHeading(24))
                 .foregroundStyle(Color.moblyTextPrimary)
+                .padding(.top, 25)
 
             // Category, directly under the name. The screen knew it all along
             // (it drives "Similaires") but never showed it, so nothing said
@@ -1075,8 +1076,8 @@ struct ListingDetailView: View {
             }
             .disabled(!isAvailable)
             .buttonStyle(.plain)
-        }
             }
+        }
     }
 }
 

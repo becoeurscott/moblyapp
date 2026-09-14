@@ -177,10 +177,16 @@ async function main() {
     const phone = `+2376${h.id.slice(-8)}`;
     const user = await prisma.user.upsert({
       where: { phone },
+      // Imported Airbnb hosts are seeded as fully-verified owners: their
+      // annonces must go live immediately (the create-time `goesLive` gate
+      // keys off identityVerified) and carry the "Propriétaire vérifié" badge,
+      // and Mobly staff answer their conversations from the admin dashboard.
       update: {
         fullName: h.name,
         avatarUrl: h.profileImage ?? null,
-        verified: h.isVerified ?? false,
+        verified: true,
+        identityVerified: true,
+        verifiedAt: new Date(),
         rating: h.ratingAverage ?? null,
         isOwner: true,
       },
@@ -188,7 +194,9 @@ async function main() {
         phone,
         fullName: h.name,
         avatarUrl: h.profileImage ?? null,
-        verified: h.isVerified ?? false,
+        verified: true,
+        identityVerified: true,
+        verifiedAt: new Date(),
         rating: h.ratingAverage ?? null,
         isOwner: true,
       },

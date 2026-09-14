@@ -250,7 +250,14 @@ struct MessagesView: View {
             ListingDetailView(listing: listing, onClose: { pendingListingId = nil })
         }
         .fullScreenCover(item: $openThread) { thread in
-            ChatThreadView(thread: thread, onBack: { openThread = nil })
+            // Support has its own screen (assistant avatar, suggested
+            // questions) — the owner chat's listing header and visit tools
+            // mean nothing there.
+            if thread.isSupport {
+                SupportChatView(thread: thread, onBack: { openThread = nil })
+            } else {
+                ChatThreadView(thread: thread, onBack: { openThread = nil })
+            }
         }
         .onChange(of: push.pendingThreadId) { _, threadId in
             guard let threadId else { return }

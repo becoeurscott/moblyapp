@@ -153,14 +153,81 @@ async function recomputeRating(listingId: string) {
   return agg;
 }
 
+/** GET /admin/moderation/reviews/by-user?side=received|written — reviews grouped
+ *  by person. `received`: each owner with the reviews left on their annonces;
+ *  `written`: each author with what they posted. Count, average, hidden count
+ *  and latest review date, searchable by name / email / phone, newest first.
+ *  Pick a user here, then list with `GET /reviews?ownerId=` or `?userId=`. */
+adminModerationRouter.get(
+  '/reviews/by-user',
+  asyncHandler(async (req, res) => {
+    const { side, query, page, pageSize } = z
+      .object({
+        side: z.enum(['received', 'written']).default('received'),
+        query: z.string().optional(),
+        page: z.coerce.number().int().min(0).default(0),
+        pageSize: z.coerce.number().int().min(1).max(100).default(30),
+      })
+      .parse(req.query);
+
+    type Row = { userId: string; count: number; avg: number | null; hidden: number; last: Date };
+    const rows = side === 'received'
+      ? await prisma.$queryRaw<Row[]>`
+          SELECT l."ownerId" AS "userId", COUNT(*)::int AS "count", AVG(r."rating")::float AS "avg",
+                 COUNT(r."hiddenAt")::int AS "hidden", MAX(r."createdAt") AS "last"
+          FROM "Review" r JOIN "Listing" l ON l."id" = r."listingId"
+          GROUP BY l."ownerId"`
+      : await prisma.$queryRaw<Row[]>`
+          SELECT r."userId" AS "userId", COUNT(*)::int AS "count", AVG(r."rating")::float AS "avg",
+                 COUNT(r."hiddenAt")::int AS "hidden", MAX(r."createdAt") AS "last"
+          FROM "Review" r
+          GROUP BY r."userId"`;
+
+    const users = await prisma.user.findMany({
+      where: { id: { in: rows.map((r) => r.userId) } },
+      select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, avatarColor: true, isOwner: true, isAdmin: true },
+    });
+    const byId = new Map(users.map((u) => [u.id, u]));
+
+    const q = query?.trim().toLowerCase();
+    const digits = q?.replace(/\D/g, '') ?? '';
+    const items = rows
+      .map((r) => ({ user: byId.get(r.userId), ...r }))
+      .filter((r): r is typeof r & { user: NonNullable<typeof r.user> } => !!r.user)
+      .filter((r) =>
+        !q ||
+        r.user.fullName.toLowerCase().includes(q) ||
+        (r.user.email ?? '').toLowerCase().includes(q) ||
+        (digits.length >= 3 && r.user.phone.includes(digits)))
+      .sort((a, b) => new Date(b.last).getTime() - new Date(a.last).getTime())
+      .map(({ user, count, avg, hidden, last }) => ({
+        ...user,
+        reviewCount: count,
+        averageRating: avg === null ? null : Math.round(avg * 10) / 10,
+        hiddenCount: hidden,
+        lastReviewAt: last,
+      }));
+
+    res.json({
+      side,
+      total: items.length,
+      page,
+      pageSize,
+      items: items.slice(page * pageSize, page * pageSize + pageSize),
+    });
+  })
+);
+
 /** GET /admin/moderation/reviews */
 adminModerationRouter.get(
   '/reviews',
   asyncHandler(async (req, res) => {
-    const { listingId, userId, hidden, page = 0, pageSize = 50 } = z
+    const { listingId, userId, ownerId, hidden, page = 0, pageSize = 50 } = z
       .object({
         listingId: z.string().optional(),
         userId: z.string().optional(),
+        /** Reviews left on this owner's annonces. */
+        ownerId: z.string().optional(),
         hidden: z.enum(['true', 'false']).optional(),
         page: z.coerce.number().min(0).default(0),
         pageSize: z.coerce.number().min(1).max(200).default(50),
@@ -170,6 +237,7 @@ adminModerationRouter.get(
     const where = {
       ...(listingId ? { listingId } : {}),
       ...(userId ? { userId } : {}),
+      ...(ownerId ? { listing: { ownerId } } : {}),
       ...(hidden === 'true' ? { hiddenAt: { not: null } } : {}),
       ...(hidden === 'false' ? { hiddenAt: null } : {}),
     };

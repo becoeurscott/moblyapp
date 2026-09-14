@@ -671,9 +671,30 @@ private struct SavedSearchManageRow: View {
 // MARK: - Help center
 
 struct HelpCenterView: View {
-    /// Questions with real answers. The rows used to be plain `HStack`s with a
-    /// decorative chevron and no answers anywhere — the affordance promised
-    /// something that could not happen. They now expand in place.
+    /// A topic card: tapping it opens the support chat with a question about
+    /// that topic already asked, so the assistant answers straight away.
+    private struct Topic: Identifiable {
+        let id = UUID()
+        let title: String
+        let icon: String
+        let color: UInt32
+        let question: String
+    }
+
+    private let topics: [Topic] = [
+        Topic(title: "Mon compte", icon: "person.crop.circle", color: 0xFF7BB5,
+              question: "J'ai une question sur mon compte."),
+        Topic(title: "Paiement", icon: "creditcard", color: 0xA98BFA,
+              question: "J'ai une question sur un paiement."),
+        Topic(title: "Mes annonces", icon: "house", color: 0x5AD2F4,
+              question: "J'ai une question sur mes annonces."),
+        Topic(title: "Visites", icon: "calendar", color: 0xFFC857,
+              question: "J'ai une question sur une visite."),
+        Topic(title: "Vérification", icon: "checkmark.shield", color: 0x6EE7A8,
+              question: "Comment vérifier mon identité ?"),
+    ]
+
+    /// Questions with real answers, expanding in place.
     private let faqs: [(q: String, a: String)] = [
         ("Comment contacter un propriétaire ?",
          "Ouvrez l'annonce puis touchez « Message ». La conversation reste dans Mobly : votre numéro n'est jamais partagé."),
@@ -681,96 +702,80 @@ struct HelpCenterView: View {
          "Depuis l'annonce, touchez « Demander une visite » et proposez une date. Le propriétaire confirme ou propose un autre créneau, et vous recevez une notification."),
         ("Comment fonctionne la vérification ?",
          "Nous contrôlons votre pièce d'identité via un prestataire spécialisé. Mobly ne conserve aucune copie de vos documents. La vérification est obligatoire pour publier une annonce."),
+        ("Pourquoi mon annonce est en attente ?",
+         "Une annonce est mise en ligne immédiatement quand votre identité est vérifiée. Sinon elle reste en attente, et elle est publiée automatiquement dès que la vérification est validée."),
         ("Les prix sont-ils négociables ?",
-         "Cela dépend du propriétaire. Les annonces marquées « négociable » acceptent une offre : proposez votre prix dans la conversation."),
+         "Cela dépend du propriétaire. Proposez votre prix directement dans la conversation."),
         ("Comment signaler une annonce ?",
          "Ouvrez l'annonce ou le profil concerné et touchez « Signaler ». Notre équipe examine chaque signalement."),
     ]
 
     @ObservedObject private var auth = AuthStore.shared
     @ObservedObject private var config = RemoteConfigStore.shared
-    @ObservedObject private var chat = ChatStore.shared
+    @Environment(\.dismiss) private var dismiss
 
     @State private var expanded: Int?
     @State private var openingSupport = false
+    @State private var pendingQuestion: String?
     @State private var supportThread: ChatThread?
     @State private var supportFailed = false
 
-    /// Support chat can be switched off remotely, in which case the button
-    /// falls back to the e-mail address from the same configuration rather
-    /// than disappearing and leaving the user with no way to reach anyone.
+    /// Support chat can be switched off remotely, in which case the entry
+    /// points fall back to e-mail rather than leaving no way to reach anyone.
     private var chatAvailable: Bool { config.isEnabled("support.chat") && auth.isSignedIn }
     private var supportEmail: String { config.config.copy.supportEmail ?? "support@mobly.cm" }
 
     var body: some View {
-        ProfileScaffold(title: "Centre d'aide") {
-            VStack(spacing: 16) {
-                card {
-                    VStack(spacing: 0) {
+        VStack(spacing: 0) {
+            header
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Questions liées")
+                        .font(.moblyHeading(26))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                        .padding(.horizontal, 22)
+                        .padding(.top, 18)
+                        .padding(.bottom, 16)
+
+                    topicCards
+                        .padding(.bottom, 32)
+
+                    Text("Questions\nfréquentes")
+                        .font(.moblyHeading(26))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 22)
+                        .padding(.bottom, 16)
+
+                    VStack(spacing: 10) {
                         ForEach(Array(faqs.enumerated()), id: \.offset) { i, item in
-                            VStack(alignment: .leading, spacing: 0) {
-                                Button {
-                                    withAnimation(Motion.quick) {
-                                        expanded = (expanded == i) ? nil : i
-                                    }
-                                } label: {
-                                    HStack(alignment: .top) {
-                                        Text(LT(item.q))
-                                            .font(.moblyBody(13.5))
-                                            .foregroundStyle(Color.moblyTextPrimary)
-                                            .multilineTextAlignment(.leading)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                        Spacer(minLength: 12)
-                                        Image(systemName: "chevron.right")
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .foregroundStyle(Color(hex: 0xC4C7D2))
-                                            .rotationEffect(.degrees(expanded == i ? 90 : 0))
-                                    }
-                                    .padding(.vertical, 13)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
+                            faqRow(i, item)
+                        }
+                    }
+                    .padding(.horizontal, 22)
 
-                                if expanded == i {
-                                    Text(LT(item.a))
-                                        .font(.moblyBody(12.5))
-                                        .foregroundStyle(Color(hex: 0x666F80))
-                                        .lineSpacing(3)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.bottom, 13)
-                                }
+                    if !chatAvailable {
+                        PillButton(title: "Écrire à \(supportEmail)",
+                                   style: .primaryBlue,
+                                   trailingIcon: "envelope.fill") {
+                            if let url = URL(string: "mailto:\(supportEmail)") {
+                                UIApplication.shared.open(url)
                             }
-                            if i < faqs.count - 1 { Divider() }
                         }
+                        .padding(.horizontal, 22)
+                        .padding(.top, 24)
                     }
                 }
-
-                if chatAvailable {
-                    PillButton(title: "Contacter le support",
-                               style: .primaryBlue,
-                               trailingIcon: "bubble.left.fill") {
-                        openingSupport = true
-                    }
-                    Text("Réponse en général sous 24 h.")
-                        .font(.moblyBody(11.5))
-                        .foregroundStyle(Color(hex: 0x9A9DAC))
-                } else {
-                    PillButton(title: "Écrire à \(supportEmail)",
-                               style: .primaryBlue,
-                               trailingIcon: "envelope.fill") {
-                        if let url = URL(string: "mailto:\(supportEmail)") {
-                            UIApplication.shared.open(url)
-                        }
-                    }
-                }
+                // Clears the floating tab bar so the last question is reachable.
+                .padding(.bottom, 120)
             }
         }
-        // Same bridge the listing screen uses: present immediately with a
-        // skeleton so the round-trip that opens the thread never leaves the
-        // button looking dead.
+        .background(Color.white.ignoresSafeArea())
+        .toolbar(.hidden, for: .navigationBar)
         .fullScreenCover(isPresented: $openingSupport) {
             SupportOpeningView(
+                // Presenting the chat while this cover is still dismissing is
+                // silently dropped by SwiftUI, so wait for it to finish.
                 onOpened: { thread in
                     openingSupport = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
@@ -788,13 +793,140 @@ struct HelpCenterView: View {
             .swipeToDismiss(onDismiss: { openingSupport = false })
         }
         .fullScreenCover(item: $supportThread) { thread in
-            ChatThreadView(thread: thread, onBack: { supportThread = nil })
+            SupportChatView(thread: thread,
+                            initialQuestion: pendingQuestion,
+                            onBack: { supportThread = nil; pendingQuestion = nil })
         }
         .alert("Support indisponible", isPresented: $supportFailed) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(LT("Impossible d'ouvrir la conversation. Réessayez, ou écrivez à \(supportEmail)."))
         }
+    }
+
+    private func openChat(asking question: String? = nil) {
+        guard chatAvailable else {
+            if let url = URL(string: "mailto:\(supportEmail)") { UIApplication.shared.open(url) }
+            return
+        }
+        pendingQuestion = question
+        openingSupport = true
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        HStack {
+            Button { dismiss() } label: {
+                Image(systemName: "arrow.left")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(Color(hex: 0xF1F2F5)))
+            }
+            .buttonStyle(.plain)
+            Spacer()
+            Button { openChat() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .font(.system(size: 15, weight: .medium))
+                    Text("Chat support")
+                        .font(.moblyBody(14, weight: .medium))
+                }
+                .foregroundStyle(Color.moblyTextPrimary)
+                .padding(.horizontal, 16).frame(height: 44)
+                .background(Capsule().fill(Color(hex: 0xF1F2F5)))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 8)
+    }
+
+    // MARK: Topic cards
+
+    private var topicCards: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(topics) { t in
+                    Button { openChat(asking: t.question) } label: {
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack(alignment: .top) {
+                                ZStack {
+                                    Circle().fill(.white).frame(width: 44, height: 44)
+                                    Image(systemName: t.icon)
+                                        .font(.system(size: 18, weight: .medium))
+                                        .foregroundStyle(Color.moblyTextPrimary)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 22, weight: .light))
+                                    .foregroundStyle(Color.moblyTextPrimary)
+                            }
+                            Spacer()
+                            Text(t.title)
+                                .font(.moblyBody(16, weight: .medium))
+                                .foregroundStyle(Color.moblyTextPrimary)
+                        }
+                        .padding(14)
+                        .frame(width: 150, height: 160)
+                        .background(RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .fill(Color(hex: t.color)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 22)
+        }
+    }
+
+    // MARK: FAQ
+
+    private func faqRow(_ i: Int, _ item: (q: String, a: String)) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(Motion.quick) { expanded = (expanded == i) ? nil : i }
+            } label: {
+                HStack(alignment: .top) {
+                    Text(LT(item.q))
+                        .font(.moblyBody(15))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 12)
+                    Image(systemName: expanded == i ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                        .padding(.top, 3)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded == i {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(LT(item.a))
+                        .font(.moblyBody(13.5))
+                        .foregroundStyle(Color(hex: 0x3A3D4A))
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if chatAvailable {
+                        Button { openChat(asking: item.q) } label: {
+                            Text("Poser la question au support")
+                                .font(.moblyBody(12.5, weight: .semibold))
+                                .foregroundStyle(Color.moblyPrimary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 10)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 15)
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .fill(Color(hex: 0xF1F2F5)))
     }
 }
 

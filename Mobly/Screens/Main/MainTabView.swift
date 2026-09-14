@@ -204,6 +204,26 @@ struct MainTabView: View {
             .animation(Motion.instant, value: tab)
 
             if !chrome.hideTabBar {
+                // Blur band under the floating bar: content scrolling beneath
+                // it softens into frost instead of showing sharp text through
+                // the gap around the bar. Masked so it fades in from nothing.
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .mask(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0),
+                                .init(color: .black.opacity(0.7), location: 0.45),
+                                .init(color: .black, location: 1),
+                            ],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(height: 120)
+                    .ignoresSafeArea(edges: .bottom)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+
                 MoblyTabBar(tab: $tab)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }

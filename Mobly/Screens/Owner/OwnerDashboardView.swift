@@ -170,14 +170,14 @@ struct OwnerDashboardView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(days <= 0 ? "Dernier jour d'essai gratuit"
                                : "Essai gratuit · \(days) jour\(days > 1 ? "s" : "") restant\(days > 1 ? "s" : "")")
-                    .font(.moblyHeading(14.5)).foregroundStyle(.white)
+                    .font(.moblyHeading(13)).foregroundStyle(.white)
                 Text("Payez une fois pour garder votre compte actif.")
-                    .font(.moblyBody(12)).foregroundStyle(.white.opacity(0.85))
+                    .font(.moblyBody(11)).foregroundStyle(.white.opacity(0.85))
             }
             Spacer(minLength: 6)
             Button { showReactivate = true } label: {
                 Text("Payer")
-                    .font(.moblyHeading(13))
+                    .font(.moblyHeading(12))
                     .foregroundStyle(Color.moblyAccent)
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(Capsule().fill(.white))
@@ -204,11 +204,11 @@ struct OwnerDashboardView: View {
 
                 VStack(spacing: 10) {
                     Text("Votre essai gratuit est terminé")
-                        .font(.moblyHeading(22))
+                        .font(.moblyHeading(19))
                         .foregroundStyle(Color.moblyTextPrimary)
                         .multilineTextAlignment(.center)
                     Text("Payez les frais d'inscription uniques de 5 000 FCFA pour réactiver votre compte propriétaire.")
-                        .font(.moblyBody(14))
+                        .font(.moblyBody(12.5))
                         .foregroundStyle(Color.moblyTextSecondary)
                         .multilineTextAlignment(.center)
                         .lineSpacing(3)
@@ -230,7 +230,7 @@ struct OwnerDashboardView: View {
                 Button { showReactivate = true } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "lock.open.fill").font(.system(size: 14, weight: .bold))
-                        Text("Payer 5 000 FCFA").font(.moblyHeading(15.5))
+                        Text("Payer 5 000 FCFA").font(.moblyHeading(14))
                     }
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 56)
@@ -255,8 +255,8 @@ struct OwnerDashboardView: View {
                 .foregroundStyle(Color.moblyAccent)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.moblyHeading(14)).foregroundStyle(Color.moblyTextPrimary)
-                Text(subtitle).font(.moblyBody(12.5)).foregroundStyle(Color.moblyTextSecondary)
+                Text(title).font(.moblyHeading(12.5)).foregroundStyle(Color.moblyTextPrimary)
+                Text(subtitle).font(.moblyBody(11.5)).foregroundStyle(Color.moblyTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
@@ -300,7 +300,7 @@ struct OwnerDashboardView: View {
                 Button { showAddListing = true } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "plus").font(.system(size: 14, weight: .bold))
-                        Text("Publier").font(.moblyHeading(14.5))
+                        Text("Publier").font(.moblyHeading(13))
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18).padding(.vertical, 11)
@@ -310,11 +310,11 @@ struct OwnerDashboardView: View {
             }
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 5) {
-                    (Text(greeting).foregroundColor(Color.moblyTextPrimary)
-                        + Text("  👋"))
-                        .font(.moblyHeading(26))
+                    Text(greeting)
+                        .font(.moblyHeading(20))
+                        .foregroundStyle(Color.moblyTextPrimary)
                     Text("Voici un aperçu de vos annonces et de vos performances.")
-                        .font(.moblyBody(13.5))
+                        .font(.moblyBody(12.5))
                         .foregroundStyle(Color.moblyTextSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -364,7 +364,7 @@ struct OwnerDashboardView: View {
                 colors: AvatarPalette.gradient(for: auth.user?.id ?? "self",
                                                stored: auth.user?.avatarColor),
                 startPoint: .topLeading, endPoint: .bottomTrailing)
-            Text(avatarInitials).font(.moblyHeading(18)).foregroundStyle(.white)
+            Text(avatarInitials).font(.moblyHeading(16)).foregroundStyle(.white)
         }
     }
 
@@ -388,7 +388,7 @@ struct OwnerDashboardView: View {
                     .frame(width: 30, height: 30)
                     .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.18)))
                 Text("Performances · 30 derniers jours")
-                    .font(.moblyHeading(14.5)).foregroundStyle(.white)
+                    .font(.moblyHeading(13)).foregroundStyle(.white)
                 Spacer(minLength: 4)
             }
             HStack(alignment: .top, spacing: 0) {
@@ -428,10 +428,10 @@ struct OwnerDashboardView: View {
             Image(systemName: icon)
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.85))
-            Text(value).font(.moblyHeading(24)).foregroundStyle(.white)
+            Text(value).font(.moblyHeading(20)).foregroundStyle(.white)
                 .contentTransition(.numericText())
                 .animation(Motion.content, value: value)
-            Text(LT(label)).font(.moblyBody(11)).foregroundStyle(.white.opacity(0.8))
+            Text(LT(label)).font(.moblyBody(10.5)).foregroundStyle(.white.opacity(0.8))
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             deltaBadge(delta)
@@ -446,7 +446,7 @@ struct OwnerDashboardView: View {
             if d == 0 {
                 HStack(spacing: 3) {
                     Image(systemName: "minus").font(.system(size: 9, weight: .bold))
-                    Text("0%").font(.moblyBody(11, weight: .semibold))
+                    Text("0%").font(.moblyBody(10.5, weight: .semibold))
                 }
                 .foregroundStyle(.white.opacity(0.7))
             } else {
@@ -454,7 +454,7 @@ struct OwnerDashboardView: View {
                 HStack(spacing: 3) {
                     Image(systemName: up ? "arrow.up.right" : "arrow.down.right")
                         .font(.system(size: 9, weight: .bold))
-                    Text("\(up ? "+" : "")\(d)%").font(.moblyBody(11, weight: .semibold))
+                    Text("\(up ? "+" : "")\(d)%").font(.moblyBody(10.5, weight: .semibold))
                 }
                 .foregroundStyle(up ? Color(hex: 0x9CFFC9) : Color(hex: 0xFFC2C4))
             }
@@ -482,16 +482,16 @@ struct OwnerDashboardView: View {
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Demandes de visite")
-                        .font(.moblyHeading(15.5))
+                        .font(.moblyHeading(14))
                         .foregroundStyle(Color.moblyTextPrimary)
                     Text(visitsSubtitle)
-                        .font(.moblyBody(12.5))
+                        .font(.moblyBody(11.5))
                         .foregroundStyle(Color.moblyTextSecondary)
                 }
                 Spacer()
                 if visits.pendingCount > 0 {
                     Text("\(visits.pendingCount)")
-                        .font(.moblyHeading(13))
+                        .font(.moblyHeading(12))
                         .foregroundStyle(.white)
                         .frame(minWidth: 26, minHeight: 26)
                         .padding(.horizontal, 8)
@@ -526,7 +526,7 @@ struct OwnerDashboardView: View {
                         withAnimation(Motion.instant) { filter = f }
                     } label: {
                         Text("\(f.title) (\(count(f)))")
-                            .font(.moblyHeading(13.5))
+                            .font(.moblyHeading(12.5))
                             .foregroundStyle(filter == f ? .white : Color.moblyTextSecondary)
                             .padding(.horizontal, 16).padding(.vertical, 10)
                             .background(Capsule().fill(filter == f ? Color.moblyPrimary : .white))
@@ -543,7 +543,7 @@ struct OwnerDashboardView: View {
         VStack(spacing: 10) {
             Image(systemName: "house.lodge").font(.system(size: 32, weight: .light))
                 .foregroundStyle(Color(hex: 0xC4C7D2))
-            Text("Aucune annonce ici").font(.moblyHeading(14.5)).foregroundStyle(Color.moblyTextPrimary)
+            Text("Aucune annonce ici").font(.moblyHeading(13)).foregroundStyle(Color.moblyTextPrimary)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40)
     }
@@ -632,7 +632,7 @@ private struct AnnonceCard: View {
                         }
                     if annonce.listing.photos.count > 1 {
                         Text("1/\(annonce.listing.photos.count)")
-                            .font(.moblyBody(10, weight: .semibold))
+                            .font(.moblyBody(9.5, weight: .semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 7).padding(.vertical, 3)
                             .background(Capsule().fill(.black.opacity(0.5)))
@@ -642,11 +642,11 @@ private struct AnnonceCard: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top, spacing: 6) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(annonce.listing.title).font(.moblyHeading(17))
+                            Text(annonce.listing.title).font(.moblyHeading(15))
                                 .foregroundStyle(dimmed ? Color.moblyTextSecondary : Color.moblyTextPrimary)
                                 .lineLimit(1)
                             Text(annonce.listing.price + LT(annonce.listing.priceUnit))
-                                .font(.moblyHeading(15))
+                                .font(.moblyHeading(13.5))
                                 .foregroundStyle(dimmed ? Color(hex: 0x9A9DAC) : Color.moblyPrimary)
                         }
                         Spacer(minLength: 6)
@@ -683,7 +683,7 @@ private struct AnnonceCard: View {
                 Circle().fill(pillColor).frame(width: 6, height: 6)
             }
             Text(pillLabel)
-                .font(.moblyBody(10.5, weight: .bold))
+                .font(.moblyBody(10, weight: .bold))
                 .foregroundStyle(pillColor)
                 .lineLimit(1)
                 .fixedSize()
@@ -720,9 +720,9 @@ private struct AnnonceCard: View {
                         .foregroundStyle(Color(hex: 0xE5484D))
                     VStack(alignment: .leading, spacing: 2) {
                         Text("La publication a échoué")
-                            .font(.moblyHeading(13.5)).foregroundStyle(Color.moblyTextPrimary)
+                            .font(.moblyHeading(12.5)).foregroundStyle(Color.moblyTextPrimary)
                         Text(LT(message))
-                            .font(.moblyBody(12)).foregroundStyle(Color.moblyTextSecondary)
+                            .font(.moblyBody(11)).foregroundStyle(Color.moblyTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 0)
@@ -737,9 +737,9 @@ private struct AnnonceCard: View {
                 ProgressView().tint(Color.moblyPrimary)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Publication en cours…")
-                        .font(.moblyHeading(13.5)).foregroundStyle(Color.moblyTextPrimary)
+                        .font(.moblyHeading(12.5)).foregroundStyle(Color.moblyTextPrimary)
                     Text("Votre annonce sera active dès que l'envoi sera terminé.")
-                        .font(.moblyBody(12)).foregroundStyle(Color.moblyTextSecondary)
+                        .font(.moblyBody(11)).foregroundStyle(Color.moblyTextSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
@@ -760,7 +760,7 @@ private struct AnnonceCard: View {
     private func metricPill(_ icon: String, _ value: String, _ color: UInt32, _ bg: UInt32) -> some View {
         HStack(spacing: 4) {
             Image(systemName: icon).font(.system(size: 10, weight: .semibold))
-            Text(LT(value)).font(.moblyBody(12, weight: .semibold))
+            Text(LT(value)).font(.moblyBody(11, weight: .semibold))
         }
         .foregroundStyle(Color(hex: color))
         .padding(.horizontal, 9).padding(.vertical, 5)
@@ -773,7 +773,7 @@ private struct AnnonceCard: View {
                 Circle().fill(annonce.available ? Color(hex: 0x1F8A5B) : Color(hex: 0xC4C7D2))
                     .frame(width: 8, height: 8)
                 Text(annonce.available ? "Disponible" : "Indisponible")
-                    .font(.moblyHeading(13.5))
+                    .font(.moblyHeading(12.5))
                     .foregroundStyle(annonce.available ? Color(hex: 0x1F8A5B) : Color.moblyTextSecondary)
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
@@ -798,7 +798,7 @@ private struct AnnonceCard: View {
                     Text(toggling
                          ? "Mise à jour…"
                          : (annonce.available ? "Rendre indisponible" : "Rendre disponible"))
-                        .font(.moblyHeading(13))
+                        .font(.moblyHeading(12))
                 }
                 .foregroundStyle(toggling ? Color.moblyTextSecondary : Color.moblyPrimary)
             }
@@ -812,7 +812,7 @@ private struct AnnonceCard: View {
             Image(systemName: "bolt.fill").font(.system(size: 13, weight: .bold))
                 .foregroundStyle(Color.moblyAccent)
             Text("Boost actif · \(annonce.boostDaysLeft ?? 0) j restants")
-                .font(.moblyHeading(13)).foregroundStyle(Color(hex: 0xC24E10))
+                .font(.moblyHeading(12)).foregroundStyle(Color(hex: 0xC24E10))
             Spacer()
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
@@ -848,7 +848,7 @@ private struct AnnonceCard: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon).font(.system(size: 12, weight: .semibold))
-                Text(LT(title)).font(.moblyHeading(13.5))
+                Text(LT(title)).font(.moblyHeading(12.5))
             }
             .foregroundStyle(Color(hex: fg))
             .frame(maxWidth: .infinity).frame(height: 42)

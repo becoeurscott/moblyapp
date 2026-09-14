@@ -8,6 +8,9 @@ import { audit, diff } from '../lib/audit';
 import { cacheBust } from '../lib/cache';
 import { notifyNewListing } from '../services/listingNotify';
 import { notifyUser, pushConfigured } from '../services/push';
+import { serializeMessage } from '../lib/serialize';
+import { broadcastMessage } from '../realtime/hub';
+import { configSnapshot } from '../services/config';
 import { adminIpGate, adminWriteLimiter } from '../middleware/adminSecurity';
 import { adminUsersRouter } from './admin/users.routes';
 import { adminConfigRouter } from './admin/config.routes';
@@ -579,6 +582,9 @@ adminRouter.get(
         query: z.string().optional(),
         /** Only conversations this user takes part in (the "by user" view). */
         userId: z.string().optional(),
+        /** Only conversations about an Airbnb-imported listing — the section
+         *  where Mobly staff answer on the imported owner's behalf. */
+        imported: z.coerce.boolean().optional(),
         page: z.coerce.number().int().min(0).optional(),
         pageSize: z.coerce.number().int().min(1).max(100).optional(),
       })
@@ -589,6 +595,9 @@ adminRouter.get(
     const where: any = {};
     if (q.data.userId) {
       where.participants = { some: { userId: q.data.userId } };
+    }
+    if (q.data.imported) {
+      where.listing = { tags: { has: 'airbnb-import' } };
     }
     if (search && search.length > 0) {
       const digits = search.replace(/\D/g, '');
@@ -620,7 +629,7 @@ adminRouter.get(
         skip: page * pageSize,
         take: pageSize,
         include: {
-          listing: { select: { id: true, title: true, imageName: true, coverUrl: true } },
+          listing: { select: { id: true, title: true, imageName: true, coverUrl: true, ownerId: true, tags: true } },
           participants: {
             include: {
               user: {
@@ -640,16 +649,26 @@ adminRouter.get(
 
     res.json({
       total, page, pageSize,
-      items: items.map((t) => ({
-        id: t.id,
-        listing: t.listing,
-        participants: t.participants.map((p) => p.user),
-        messageCount: t._count.messages,
-        lastMessage: t.messages[0] ?? null,
-        frozenAt: t.frozenAt,
-        frozenReason: t.frozenReason,
-        updatedAt: t.updatedAt,
-      })),
+      items: items.map((t) => {
+        const imported = t.listing?.tags?.includes('airbnb-import') ?? false;
+        return {
+          id: t.id,
+          // Drop the heavy tags array from the row; expose the two things the
+          // imported-conversations section needs: the flag and who to reply as.
+          listing: t.listing
+            ? { id: t.listing.id, title: t.listing.title, imageName: t.listing.imageName,
+                coverUrl: t.listing.coverUrl, ownerId: t.listing.ownerId }
+            : null,
+          imported,
+          ownerId: t.listing?.ownerId ?? null,
+          participants: t.participants.map((p) => p.user),
+          messageCount: t._count.messages,
+          lastMessage: t.messages[0] ?? null,
+          frozenAt: t.frozenAt,
+          frozenReason: t.frozenReason,
+          updatedAt: t.updatedAt,
+        };
+      }),
     });
   })
 );
@@ -730,6 +749,109 @@ adminRouter.get(
       },
     });
     res.json({ items: messages });
+  })
+);
+
+/**
+ * POST /api/admin/threads/:id/reply — answer a conversation as the listing's
+ * owner. Restricted to Airbnb-imported listings: their "owner" is a Mobly-
+ * seeded placeholder account nobody logs into, so a visitor who messages one
+ * would otherwise never get an answer. Staff reply from this admin section and
+ * the message reaches the visitor exactly as an owner reply — same socket
+ * delivery, unread bump and push as a real owner's message.
+ *
+ * We deliberately refuse non-imported threads so this can never be used to
+ * impersonate a real owner in their own conversation. The audit row records
+ * which admin actually typed it.
+ */
+adminRouter.post(
+  '/threads/:id/reply',
+  requirePermission('user.notify'),
+  asyncHandler(async (req, res) => {
+    const { text } = z
+      .object({ text: z.string().min(1).max(configSnapshot().limits.messageMaxLength) })
+      .parse(req.body);
+
+    const threadId = req.params.id;
+    const thread = await prisma.thread.findUnique({
+      where: { id: threadId },
+      include: {
+        listing: {
+          select: {
+            ownerId: true,
+            tags: true,
+            title: true,
+            owner: { select: { fullName: true } },
+          },
+        },
+      },
+    });
+    if (!thread) throw new ApiError(404, 'Conversation introuvable', 'NOT_FOUND');
+
+    const ownerId = thread.listing?.ownerId;
+    const imported = thread.listing?.tags?.includes('airbnb-import') ?? false;
+    if (!ownerId || !imported) {
+      throw new ApiError(
+        403,
+        "Cette conversation ne concerne pas une annonce importée.",
+        'FORBIDDEN'
+      );
+    }
+
+    const now = new Date();
+    const [message] = await prisma.$transaction([
+      prisma.message.create({
+        data: { threadId, senderId: ownerId, kind: 'TEXT', text },
+      }),
+      prisma.thread.update({
+        where: { id: threadId },
+        data: { lastMessageAt: now, updatedAt: now },
+      }),
+      // The reply is unread for the visitor, not for the owner we posted as.
+      prisma.threadParticipant.updateMany({
+        where: { threadId, userId: { not: ownerId } },
+        data: { unreadCount: { increment: 1 } },
+      }),
+      prisma.threadParticipant.updateMany({
+        where: { threadId, userId: ownerId },
+        data: { unreadCount: 0, lastReadAt: now },
+      }),
+    ]);
+
+    const payload = serializeMessage(message);
+    await broadcastMessage(threadId, { ...payload, senderId: ownerId });
+
+    res.status(201).json({ message: payload });
+
+    // Notify the visitor after the reply is saved and delivered; a push
+    // failure must never fail the reply itself.
+    const recipient = await prisma.threadParticipant.findFirst({
+      where: { threadId, userId: { not: ownerId } },
+      select: { userId: true },
+    });
+    if (recipient) {
+      // Mirror a normal owner→visitor message notification exactly (same type,
+      // sender-name title and payload) so the visitor's app treats it as an
+      // ordinary reply and taps straight into the thread.
+      void notifyUser({
+        userId: recipient.userId,
+        type: 'message',
+        title: thread.listing?.owner?.fullName ?? 'Nouveau message',
+        body: text.length > 120 ? text.slice(0, 117) + '…' : text,
+        payload: {
+          threadId,
+          ...(thread.listing?.title ? { listingTitle: thread.listing.title } : {}),
+        },
+        threadId,
+      }).catch((err) => console.error('[admin] imported reply push failed', err));
+    }
+
+    await audit(req, {
+      action: 'thread.reply_as_owner',
+      targetType: 'thread',
+      targetId: threadId,
+      after: { text: text.slice(0, 200), sentAs: ownerId },
+    });
   })
 );
 

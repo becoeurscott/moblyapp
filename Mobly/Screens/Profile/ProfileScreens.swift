@@ -773,11 +773,15 @@ struct HelpCenterView: View {
             SupportOpeningView(
                 onOpened: { thread in
                     openingSupport = false
-                    supportThread = thread
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                        supportThread = thread
+                    }
                 },
                 onFailed: {
                     openingSupport = false
-                    supportFailed = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                        supportFailed = true
+                    }
                 },
                 onBack: { openingSupport = false }
             )

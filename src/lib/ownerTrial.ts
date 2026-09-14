@@ -41,17 +41,23 @@ export function ownerTrialDaysLeft(u: OwnerFields): number | null {
 
 /**
  * Prisma filter fragment, applied to a listing's `owner` relation, that keeps
- * only listings whose owner is active — i.e. excludes owners who are past their
- * trial and unpaid. A null `ownerTrialStartedAt` never matches `{ lt: cutoff }`,
- * so legacy owners stay visible.
+ * only listings whose owner is active: not an owner, paid, legacy (no trial
+ * start) or still inside the trial.
+ *
+ * Written as an explicit OR on purpose. The previous form,
+ * `NOT { isOwner, !ownerPaid, ownerTrialStartedAt < cutoff }`, compiles to SQL
+ * where `NULL < cutoff` is NULL and `NOT (… AND NULL)` is also NULL — so every
+ * legacy owner (null trial start) was filtered out and the public feed went
+ * empty in production.
  */
 export function activeOwnerRelationWhere() {
   const cutoff = new Date(Date.now() - OWNER_TRIAL_DAYS * DAY_MS);
   return {
-    NOT: {
-      isOwner: true,
-      ownerPaid: false,
-      ownerTrialStartedAt: { lt: cutoff },
-    },
+    OR: [
+      { isOwner: false },
+      { ownerPaid: true },
+      { ownerTrialStartedAt: null },
+      { ownerTrialStartedAt: { gte: cutoff } },
+    ],
   };
 }

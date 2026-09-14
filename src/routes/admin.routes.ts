@@ -37,14 +37,23 @@ adminRouter.use('/restrictions', adminUsersRouter);
 // Overview + analytics
 // ═════════════════════════════════════════════════════════════
 
+/** Range filter shared by the dashboard: 1 sem · 1 mois · 3 mois · 6 mois · 1 an. */
+const RANGE_DAYS = [7, 30, 90, 180, 365] as const;
+function parseRangeDays(raw: unknown): number {
+  const n = Number(raw);
+  return (RANGE_DAYS as readonly number[]).includes(n) ? n : 30;
+}
+
 /** GET /api/admin/overview — top-line KPIs for the dashboard home. */
 adminRouter.get(
   '/overview',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
     const now = Date.now();
     const day = 24 * 60 * 60 * 1000;
     const since24h = new Date(now - day);
     const since30d = new Date(now - 30 * day);
+    const days = parseRangeDays(req.query.days);
+    const sinceRange = new Date(now - days * day);
 
     const [
       users, owners, activeSessions24h,
@@ -68,8 +77,13 @@ adminRouter.get(
 
     const newUsers30d = await prisma.user.count({ where: { createdAt: { gte: since30d } } });
     const newListings30d = await prisma.listing.count({ where: { createdAt: { gte: since30d } } });
+    const [newUsersRange, newListingsRange] = await Promise.all([
+      prisma.user.count({ where: { createdAt: { gte: sinceRange } } }),
+      prisma.listing.count({ where: { createdAt: { gte: sinceRange } } }),
+    ]);
 
     res.json({
+      rangeDays: days, newUsersRange, newListingsRange,
       users, owners, newUsers30d,
       listings, pendingListings, boostedListings, newListings30d,
       activeSessions24h,
@@ -83,15 +97,16 @@ adminRouter.get(
 /** GET /api/admin/analytics/summary — DAU/MAU + top events, last 30 days. */
 adminRouter.get(
   '/analytics/summary',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
     const now = Date.now();
     const day = 24 * 60 * 60 * 1000;
+    const days = parseRangeDays(req.query.days);
 
     // Two GROUP BY queries instead of a pair of count() calls per day: the
     // old loop issued 60 queries per request, which on its own could exhaust
     // a small connection pool (P2024) when several admin pages load at once.
     // Days are bucketed in UTC on both sides so the keys line up exactly.
-    const since = new Date(now - 30 * day);
+    const since = new Date(now - days * day);
     since.setUTCHours(0, 0, 0, 0);
     const [sessRows, evRows] = await Promise.all([
       prisma.$queryRaw<{ d: string; n: number }[]>`
@@ -105,7 +120,7 @@ adminRouter.get(
     const evBy = new Map(evRows.map((r) => [r.d, r.n]));
 
     const dayBuckets: { day: string; sessions: number; events: number }[] = [];
-    for (let i = 29; i >= 0; i--) {
+    for (let i = days - 1; i >= 0; i--) {
       const start = new Date(now - i * day);
       start.setUTCHours(0, 0, 0, 0);
       const k = start.toISOString().slice(0, 10);
@@ -132,6 +147,7 @@ adminRouter.get(
     });
 
     res.json({
+      rangeDays: days,
       dailyBuckets: dayBuckets,
       dau: dau.length,
       mau: mau.length,

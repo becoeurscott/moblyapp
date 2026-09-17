@@ -95,12 +95,10 @@ struct PeerProfileView: View {
 
     private var hero: some View {
         VStack(spacing: 12) {
-            ZStack {
-                Circle().fill(thread.color)
-                Text(thread.initial)
-                    .font(.moblyHeading(44)).foregroundStyle(.white)
-            }
-            .frame(width: 108, height: 108)
+            UserAvatar(name: peerName, userId: thread.peerId ?? loaded?.id ?? thread.id,
+                       avatarUrl: loaded?.avatarUrl ?? thread.avatarUrl,
+                       avatarColor: loaded?.avatarColor ?? thread.avatarColor,
+                       size: 108)
             .overlay(alignment: .bottomTrailing) {
                 if peerVerified {
                     ZStack {

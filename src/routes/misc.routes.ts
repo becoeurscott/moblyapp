@@ -76,7 +76,7 @@ reviewsRouter.get(
   asyncHandler(async (req, res) => {
     const items = await prisma.review.findMany({
       where: { listingId: req.params.id },
-      include: { user: { select: { id: true, fullName: true, avatarUrl: true } } },
+      include: { user: { select: { id: true, fullName: true, avatarUrl: true, avatarColor: true } } },
       orderBy: { createdAt: 'desc' },
     });
     res.json({ items });
@@ -117,7 +117,7 @@ reviewsRouter.post(
 
     const review = await prisma.review.create({
       data: { listingId, userId, rating, text },
-      include: { user: { select: { id: true, fullName: true, avatarUrl: true } } },
+      include: { user: { select: { id: true, fullName: true, avatarUrl: true, avatarColor: true } } },
     });
 
     const agg = await prisma.review.aggregate({

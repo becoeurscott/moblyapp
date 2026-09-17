@@ -7,6 +7,9 @@ struct Review: Identifiable, Equatable {
     let stars: Int
     let timeAgo: String
     let text: String
+    var userId: String? = nil
+    var avatarUrl: String? = nil
+    var avatarColor: String? = nil
 
     static let samples: [Review] = []
 }
@@ -17,7 +20,9 @@ extension MoblyAPI.ReviewDTO {
         let initial = String(name.prefix(1)).uppercased()
         let ago = Self.relativeTime(from: createdAt)
         return Review(id: id, author: name, initial: initial, stars: rating,
-                      timeAgo: ago, text: text ?? "")
+                      timeAgo: ago, text: text ?? "",
+                      userId: userId, avatarUrl: user?.avatarUrl,
+                      avatarColor: user?.avatarColor)
     }
 
     private static func relativeTime(from iso: String) -> String {
@@ -58,13 +63,9 @@ struct ReviewRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                ZStack {
-                    Circle().fill(Color.moblySurfaceTint)
-                    Text(review.initial)
-                        .font(.moblyHeading(15))
-                        .foregroundStyle(Color.moblyPrimary)
-                }
-                .frame(width: 38, height: 38)
+                UserAvatar(name: review.author, userId: review.userId,
+                           avatarUrl: review.avatarUrl, avatarColor: review.avatarColor,
+                           size: 38)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(review.author)
@@ -92,13 +93,9 @@ struct ReviewCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                ZStack {
-                    Circle().fill(Color.moblySurfaceTint)
-                    Text(review.initial)
-                        .font(.moblyHeading(14))
-                        .foregroundStyle(Color.moblyPrimary)
-                }
-                .frame(width: 36, height: 36)
+                UserAvatar(name: review.author, userId: review.userId,
+                           avatarUrl: review.avatarUrl, avatarColor: review.avatarColor,
+                           size: 36)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(review.author)
                         .font(.moblyHeading(13.5))

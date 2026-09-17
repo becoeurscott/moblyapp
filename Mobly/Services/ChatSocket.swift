@@ -26,6 +26,11 @@ final class ChatSocket: NSObject, ObservableObject {
         case callRejected(callId: String)
         case callEnded(callId: String)
         case callAudio(Data)
+        /// The owner's figures changed (a view, a deleted annonce).
+        case ownerStats
+        /// The server refused a request (e.g. a call that is switched off or
+        /// blocked). Carries the server's French message.
+        case serverError(message: String)
         case review(listingId: String, review: MoblyAPI.ReviewDTO)
         /// A notification was raised for this account (admin broadcast, visit
         /// update, …). Delivered live so the bell does not wait for a refetch.
@@ -204,8 +209,21 @@ final class ChatSocket: NSObject, ObservableObject {
     }
 
     private func handle(_ text: String) {
-        guard let data = text.data(using: .utf8),
-              let envelope = try? decoder.decode(Envelope.self, from: data) else { return }
+        guard let data = text.data(using: .utf8) else { return }
+        // `Envelope.message` is a MessageDTO, so an error frame (whose
+        // `message` is a plain string) never decodes as an Envelope. Read it
+        // separately, otherwise refused calls ring forever with no feedback.
+        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           obj["type"] as? String == "error" {
+            let msg = obj["message"] as? String ?? "Erreur"
+            if msg == "Authentification requise" || msg == "Session invalide" {
+                disconnect()
+            } else {
+                onEvent?(.serverError(message: msg))
+            }
+            return
+        }
+        guard let envelope = try? decoder.decode(Envelope.self, from: data) else { return }
 
         switch envelope.type {
         case "ready":
@@ -250,6 +268,8 @@ final class ChatSocket: NSObject, ObservableObject {
             }
         case "config":
             onEvent?(.config(version: envelope.version ?? 0))
+        case "owner:stats":
+            onEvent?(.ownerStats)
         case "restriction":
             if let kind = envelope.kind {
                 onEvent?(.restriction(kind: kind,
@@ -276,8 +296,6 @@ final class ChatSocket: NSObject, ObservableObject {
                                        frozen: envelope.frozen ?? false,
                                        reason: envelope.reason))
             }
-        case "error":
-            disconnect()
         default:
             break
         }

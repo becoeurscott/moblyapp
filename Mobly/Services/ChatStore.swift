@@ -523,6 +523,8 @@ final class ChatStore: ObservableObject {
             CallService.shared.handleRejected()
         case .callEnded:
             CallService.shared.handleEnded()
+        case .serverError(let message):
+            CallService.shared.handleFailed(message: message)
         case .callAudio(let data):
             CallService.shared.handleAudioData(data)
         case .review:
@@ -539,6 +541,9 @@ final class ChatStore: ObservableObject {
 
         case .config:
             Task { await RemoteConfigStore.shared.refresh() }
+
+        case .ownerStats:
+            NotificationCenter.default.post(name: OwnerListings.statsChanged, object: nil)
 
         case .restriction(let kind, let active, let reason, let expiresAt):
             RemoteConfigStore.shared.apply(

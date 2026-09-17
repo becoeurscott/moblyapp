@@ -25,8 +25,6 @@ struct ChatThreadView: View {
     @State private var reactionTarget: ChatMessage?
     @State private var showDetail = false
     @State private var showPeerProfile = false
-    @State private var showCall = false
-    @State private var callIsVideo = false
     @State private var showProposeVisit = false
     @State private var visitActionBusy = false
     @State private var isUploading = false
@@ -111,6 +109,8 @@ struct ChatThreadView: View {
     /// on the server), so infer kind from the payload when the DTO says TEXT.
     private static func inferKind(dtoKind: String, text: String, hasVisit: Bool) -> MessageKind {
         if dtoKind == "SYSTEM" && hasVisit { return .visit }
+        // Call-log entries the server posts when a call finishes.
+        if dtoKind == "SYSTEM" && text.hasPrefix("Appel ") { return .call }
         if dtoKind == "VOICE" || text.hasPrefix("🎤 Note vocale") { return .voice }
         if dtoKind == "IMAGE" { return .image }
         if parseLocation(text) != nil { return .location }
@@ -359,19 +359,16 @@ struct ChatThreadView: View {
                 .presentationDragIndicator(.visible)
         }
         .fullScreenCover(isPresented: $showDetail) {
-            ListingDetailView(listing: resolvedListing, onClose: { showDetail = false })
+            ListingDetailView(listing: resolvedListing, source: "chat", onClose: { showDetail = false })
         }
         .sheet(isPresented: $showPeerProfile) {
             PeerProfileView(
                 thread: thread,
                 onOpenListing: { _ in showPeerProfile = false; showDetail = true },
-                onCall:  { showPeerProfile = false; callIsVideo = false; showCall = true },
-                onVideo: { showPeerProfile = false; callIsVideo = true;  showCall = true },
+                onCall:  { showPeerProfile = false; CallService.shared.startCall(thread: thread, isVideo: false) },
+                onVideo: { showPeerProfile = false; CallService.shared.startCall(thread: thread, isVideo: true) },
                 onClose: { showPeerProfile = false }
             )
-        }
-        .fullScreenCover(isPresented: $showCall) {
-            CallView(thread: thread, isVideo: callIsVideo, onEnd: { showCall = false })
         }
         .fullScreenCover(isPresented: Binding(
             get: { fullScreenImageURL != nil },
@@ -419,11 +416,9 @@ struct ChatThreadView: View {
             }
             Button { showPeerProfile = true } label: {
                 HStack(spacing: 12) {
-                    ZStack {
-                        Circle().fill(thread.color)
-                        Text(thread.initial).font(.moblyHeading(16)).foregroundStyle(.white)
-                    }
-                    .frame(width: 42, height: 42)
+                    UserAvatar(name: thread.name, userId: thread.peerId ?? thread.id,
+                               avatarUrl: thread.avatarUrl, avatarColor: thread.avatarColor,
+                               size: 42)
 
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(spacing: 5) {
@@ -451,10 +446,10 @@ struct ChatThreadView: View {
             // a ringing call that never connects reads as the app being broken.
             if !thread.isSupport {
                 if config.isEnabled("calls.audio") {
-                    Button { callIsVideo = false; showCall = true } label: { headerIcon("phone.fill") }
+                    Button { CallService.shared.startCall(thread: thread, isVideo: false) } label: { headerIcon("phone.fill") }
                 }
                 if config.isEnabled("calls.video") {
-                    Button { callIsVideo = true; showCall = true } label: { headerIcon("video.fill") }
+                    Button { CallService.shared.startCall(thread: thread, isVideo: true) } label: { headerIcon("video.fill") }
                 }
             }
         }
@@ -550,7 +545,17 @@ struct ChatThreadView: View {
                         // in the pinned banner alone: two Accepter / Refuser
                         // cards competing for the owner's attention is how a
                         // stale one ends up outliving the decision.
-                        if m.kind == .visit {
+                        if m.kind == .call {
+                            if i == 0 || messages[i - 1].day != m.day {
+                                DateSeparator(text: m.day)
+                            }
+                            CallLogLine(message: m) {
+                                let video = m.text.hasPrefix("Appel vidéo")
+                                guard config.isEnabled(video ? "calls.video" : "calls.audio") else { return }
+                                CallService.shared.startCall(thread: thread, isVideo: video)
+                            }
+                            .id(m.id)
+                        } else if m.kind == .visit {
                             if i == 0 || messages[i - 1].day != m.day {
                                 DateSeparator(text: m.day)
                             }
@@ -1271,8 +1276,8 @@ struct MessageBubble: View {
             }
         case .location:
             LocationBubble(message: message)
-        case .visit:
-            // Rendered via VisitCardBubble, not this bubble. Kept for exhaustive-switch.
+        case .visit, .call:
+            // Rendered as centred lines in the transcript, not this bubble.
             EmptyView()
         }
     }
@@ -1607,6 +1612,43 @@ struct LiveWaveform: View {
 /// conversation rather than things someone said — visit requests and their
 /// outcomes. Styled off `DateSeparator` so it reads as chrome, not as a bubble
 /// from either participant.
+/// A finished call in the transcript: missed / declined in red, otherwise the
+/// duration. Tapping it calls the other person back with the same call type.
+struct CallLogLine: View {
+    let message: ChatMessage
+    var onCallBack: () -> Void
+
+    private var isVideo: Bool { message.text.hasPrefix("Appel vidéo") }
+    private var failed: Bool { message.text.hasSuffix("manqué") || message.text.hasSuffix("refusé") }
+    private var icon: String {
+        if isVideo { return failed ? "video.slash.fill" : "video.fill" }
+        if failed { return message.fromMe ? "phone.arrow.up.right.fill" : "phone.down.fill" }
+        return message.fromMe ? "phone.arrow.up.right.fill" : "phone.arrow.down.left.fill"
+    }
+
+    var body: some View {
+        Button(action: onCallBack) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(failed ? Color(hex: 0xE5484D) : Color.moblyPrimary)
+                Text(LT(message.text))
+                    .font(.moblyBody(12, weight: .medium))
+                    .foregroundStyle(failed ? Color(hex: 0xE5484D) : Color(hex: 0x14152A))
+                Text(message.time)
+                    .font(.moblyBody(10.5))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+            }
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .background(Capsule().fill(Color.white.opacity(0.95)))
+            .shadow(color: .black.opacity(0.05), radius: 3, y: 1)
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 3)
+    }
+}
+
 struct SystemNoteLine: View {
     let text: String
     var body: some View {
@@ -1977,10 +2019,9 @@ struct ProposeVisitFromChatSheet: View {
             .padding(.top, 24)
 
             HStack(spacing: 12) {
-                ZStack {
-                    Circle().fill(Color(hex: 0xEEF0FE)).frame(width: 44, height: 44)
-                    Text(thread.initial).font(.moblyHeading(16)).foregroundStyle(Color.moblyPrimary)
-                }
+                UserAvatar(name: thread.name, userId: thread.peerId ?? thread.id,
+                           avatarUrl: thread.avatarUrl, avatarColor: thread.avatarColor,
+                           size: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(thread.name).font(.moblyHeading(14))
                         .foregroundStyle(Color.moblyTextPrimary)

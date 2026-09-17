@@ -902,7 +902,7 @@ struct ExploreView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.45)))
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(hex: 0xF4F5F8)))
 
             HStack(spacing: 8) {
                 Button {
@@ -946,20 +946,34 @@ struct ExploreView: View {
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(Color(hex: 0x6B6F80))
                     .frame(width: 24, height: 24)
-                    .background(Circle().fill(Color.white.opacity(0.5)))
+                    .background(Circle().fill(Color(hex: 0xF1F2F5)))
             }
             .buttonStyle(.plain)
             .padding(10)
         }
+        // Same surface as the floating tab bar: near-white frosted glass with
+        // a bright edge and a soft drop shadow. The old ultra-thin material
+        // let the map show through and the text lost its contrast.
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.ultraThinMaterial)
+                .fill(.regularMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(Color.white.opacity(0.72))
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.5), lineWidth: 1)
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.95), Color.white.opacity(0.35)],
+                        startPoint: .top, endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
         )
-        .shadow(color: Color(hex: 0x14152A).opacity(0.12), radius: 16, y: 8)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: Color(hex: 0x14152A).opacity(0.14), radius: 16, y: 16)
         .padding(.horizontal, 18)
     }
 

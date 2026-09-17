@@ -189,26 +189,10 @@ struct FavoritesView: View {
 
     private var espacesTab: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Recherches enregistrées")
-                .font(.moblyHeading(15))
-                .foregroundStyle(Color.moblyTextPrimary)
-                .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 11)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 11) {
-                    ForEach(FavoritesData.searches) { s in
-                        Button { onOpenSearch(s) } label: { SavedSearchCard(search: s) }
-                            .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 18)
-            }
-            .padding(.bottom, 24)
-
             Text("Espaces sauvegardés")
                 .font(.moblyHeading(15))
                 .foregroundStyle(Color.moblyTextPrimary)
-                .padding(.horizontal, 18).padding(.bottom, 12)
+                .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 12)
 
             VStack(spacing: 14) {
                 ForEach(sortedFavorites) { f in
@@ -410,10 +394,12 @@ struct FavoriteRow: View {
                         .frame(width: 108, height: 108)
                         .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    ZStack {
-                        Circle().fill(Color(hex: 0xB8CCFF))
-                        Image(systemName: "checkmark").font(.system(size: 8, weight: .heavy)).foregroundStyle(Color.moblyPrimary)
-                    }.frame(width: 22, height: 22).padding(7)
+                    if fav.listing.ownerVerified {
+                        ZStack {
+                            Circle().fill(Color(hex: 0xB8CCFF))
+                            Image(systemName: "checkmark").font(.system(size: 8, weight: .heavy)).foregroundStyle(Color.moblyPrimary)
+                        }.frame(width: 22, height: 22).padding(7)
+                    }
                     // heart top-right
                     HStack { Spacer()
                         Button {

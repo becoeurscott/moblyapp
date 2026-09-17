@@ -39,6 +39,9 @@ struct ChatThread: Identifiable, Hashable {
     var peerId: String? = nil
     var listingId: String? = nil
     var listingOwnerId: String? = nil
+    /// Peer's uploaded photo and stored colour, rendered through `UserAvatar`.
+    var avatarUrl: String? = nil
+    var avatarColor: String? = nil
 }
 
 extension ChatThread {
@@ -75,7 +78,9 @@ extension ChatThread {
             fromMe: mine,
             peerId: peer?.id,
             listingId: dto.listing?.id,
-            listingOwnerId: dto.listing?.ownerId
+            listingOwnerId: dto.listing?.ownerId,
+            avatarUrl: peer?.avatarUrl,
+            avatarColor: peer?.avatarColor
         )
     }
 
@@ -128,7 +133,7 @@ extension ChatThread {
 }
 
 enum MessageStatus { case sent, delivered, read }
-enum MessageKind { case text, voice, image, visit, location }
+enum MessageKind { case text, voice, image, visit, location, call }
 
 struct ChatMessage: Identifiable, Equatable {
     /// Server message id, or "local-…" while a send is still in flight.

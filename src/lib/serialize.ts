@@ -17,6 +17,7 @@ export function serializeListing(
   l: Listing & {
     owner?:
       | (Pick<User, 'id' | 'fullName' | 'verified' | 'identityVerified' | 'rating' | 'avatarUrl'> &
+          Partial<Pick<User, 'avatarColor'>> &
           // Optional: only the public listing queries select these, and they're
           // all that `ownerActive` needs to decide the "Contact désactivé" flag.
           Partial<Pick<User, 'isOwner' | 'ownerPaid' | 'ownerTrialStartedAt'>>)
@@ -72,6 +73,7 @@ export function serializeListing(
           identityVerified: l.owner.identityVerified,
           rating: l.owner.rating,
           avatarUrl: l.owner.avatarUrl,
+          avatarColor: l.owner.avatarColor ?? null,
           // False when the owner's free trial lapsed unpaid: the app then hides
           // contact CTAs and shows "Contact désactivé". Queries that don't
           // select the trial fields (favourites, boost) report active=true.

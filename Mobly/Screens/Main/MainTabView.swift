@@ -78,11 +78,31 @@ struct MainTabView: View {
     @State private var explorePresetFilters: FilterState? = nil
     @ObservedObject private var push = PushService.shared
     @ObservedObject private var callService = CallService.shared
-    @State private var showAcceptedCall = false
 
-    private func openListing(_ listing: Listing) {
+    /// Where the open came from, reported with the view so the owner's
+    /// "Origine des vues" can tell Home, Explore, a boost, a shared link… apart.
+    @State private var selectedListingSource = "detail"
+
+    private func openListing(_ listing: Listing, from source: String) {
         ListingStore.shared.prefetchGallery(for: listing)
+        // A boosted annonce is shown in these feeds because of its boost, so
+        // the view is credited to the boost.
+        let feeds: Set = ["home", "explore", "search"]
+        selectedListingSource = listing.boosted && feeds.contains(source) ? "boost" : source
         selectedListing = listing
+    }
+
+    /// Open an annonce by id, fetching it when it is not in the cached feed.
+    private func openListing(id: String, from source: String) {
+        if let known = MoblyData.all.first(where: { $0.id == id }) {
+            openListing(known, from: source)
+        } else {
+            Task {
+                if let dto = try? await MoblyAPI.shared.listing(id: id) {
+                    await MainActor.run { openListing(dto.asListing, from: source) }
+                }
+            }
+        }
     }
 
     /// Take the user to whatever a notification (or a visit card) refers to.
@@ -97,17 +117,9 @@ struct MainTabView: View {
             PushService.shared.pendingThreadId = id
 
         case .listing(let id):
-            if let known = MoblyData.all.first(where: { $0.id == id }) {
-                openListing(known)
-            } else {
-                // Not in the cached feed (an archived or filtered annonce):
-                // fetch it rather than silently doing nothing.
-                Task {
-                    if let dto = try? await MoblyAPI.shared.listing(id: id) {
-                        await MainActor.run { openListing(dto.asListing) }
-                    }
-                }
-            }
+            // Not in the cached feed (an archived or filtered annonce) is
+            // fetched rather than silently doing nothing.
+            openListing(id: id, from: "notification")
 
         case .visits:
             withAnimation(Motion.quick) { tab = .messages }
@@ -121,7 +133,7 @@ struct MainTabView: View {
 
             ZStack {
                 HomeView(
-                    onOpenListing: { openListing($0) },
+                    onOpenListing: { openListing($0, from: "home") },
                     onNotifications: { showNotifications = true },
                     onOpenCategory: { cat in
                         searchCategory = cat
@@ -149,7 +161,7 @@ struct MainTabView: View {
                 .allowsHitTesting(tab == .home)
 
                 ExploreView(
-                    onOpenListing: { openListing($0) },
+                    onOpenListing: { openListing($0, from: "explore") },
                     initialLocation: exploreLocation,
                     initialFilters: explorePresetFilters,
                     onLocationConsumed: {
@@ -165,7 +177,7 @@ struct MainTabView: View {
                     .allowsHitTesting(tab == .messages)
 
                 FavoritesView(
-                    onOpenListing: { openListing($0) },
+                    onOpenListing: { openListing($0, from: "favorites") },
                     onOpenSearch: { search in
                         guard config.isEnabled("maps") else {
                             searchCategory = nil
@@ -204,25 +216,32 @@ struct MainTabView: View {
             .animation(Motion.instant, value: tab)
 
             if !chrome.hideTabBar {
-                // Blur band under the floating bar: content scrolling beneath
-                // it softens into frost instead of showing sharp text through
-                // the gap around the bar. Masked so it fades in from nothing.
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .mask(
-                        LinearGradient(
-                            stops: [
-                                .init(color: .clear, location: 0),
-                                .init(color: .black.opacity(0.7), location: 0.45),
-                                .init(color: .black, location: 1),
-                            ],
-                            startPoint: .top, endPoint: .bottom
+                // Frosted band under the floating bar, running to the physical
+                // bottom edge (behind the home indicator). A full-height
+                // container that ignores the bottom safe area guarantees the
+                // band touches the screen edge on every device.
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                        .mask(
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .clear, location: 0),
+                                    .init(color: .black, location: 0.55),
+                                    .init(color: .black, location: 1),
+                                ],
+                                startPoint: .top, endPoint: .bottom
+                            )
                         )
-                    )
-                    .frame(height: 120)
-                    .ignoresSafeArea(edges: .bottom)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
+                        // Short enough that the fade happens *behind* the bar
+                        // (whose top sits ~104pt above the edge): no white haze
+                        // above the nav, frost only beneath it.
+                        .frame(height: 96)
+                }
+                .ignoresSafeArea(edges: .bottom)
+                .allowsHitTesting(false)
+                .transition(.opacity)
 
                 MoblyTabBar(tab: $tab)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -236,7 +255,13 @@ struct MainTabView: View {
             SessionTracker.shared.log("screen.view", ["screen": "\(new)"])
         }
         .fullScreenCover(item: $selectedListing) { listing in
-            ListingDetailView(listing: listing, onClose: { selectedListing = nil })
+            ListingDetailView(listing: listing, source: selectedListingSource,
+                              onClose: { selectedListing = nil })
+        }
+        // A shared annonce link opened in the app (moblyapp://annonce/<id>).
+        .onReceive(NotificationCenter.default.publisher(for: ListingStore.openSharedListing)) { note in
+            guard let id = note.object as? String else { return }
+            openListing(id: id, from: "share")
         }
         .fullScreenCover(isPresented: $showNotifications) {
             NotificationsView(
@@ -280,37 +305,6 @@ struct MainTabView: View {
             guard threadId != nil, config.isEnabled("chat.enabled") else { return }
             withAnimation(Motion.quick) { tab = .messages }
         }
-        .fullScreenCover(isPresented: Binding(
-            get: { callService.state == .incoming },
-            set: { if !$0 { callService.rejectCall() } }
-        )) {
-            IncomingCallView()
-        }
-        .onChange(of: callService.state) { old, new in
-            if old == .incoming && new == .connected {
-                showAcceptedCall = true
-            }
-            if new == .idle || new == .ended {
-                showAcceptedCall = false
-            }
-        }
-        .fullScreenCover(isPresented: $showAcceptedCall) {
-            CallView(
-                thread: ChatThread(
-                    id: callService.threadId ?? "",
-                    initial: String(callService.peerName.prefix(1)).uppercased(),
-                    color: .moblyPrimary,
-                    name: callService.peerName,
-                    verified: false, online: true, time: "",
-                    listing: "", listingTitle: "", listingPrice: "",
-                    listingImage: "ListingGreen",
-                    preview: "", unread: 0, fromMe: false,
-                    peerId: callService.peerId
-                ),
-                isVideo: callService.isVideo,
-                onEnd: { callService.endCall(); showAcceptedCall = false }
-            )
-        }
     }
 }
 
@@ -321,7 +315,10 @@ struct MoblyTabBar: View {
     @Namespace private var pillNS
 
     private var unreadCount: Int {
-        chat.threads.reduce(0) { $0 + $1.unread }
+        // Conversations with something unread, not messages: 20 messages from
+        // one person is one badge. Support lives outside the inbox, so it
+        // doesn't count here either.
+        chat.threads.filter { $0.unread > 0 && $0.participants.first?.isSupport != true }.count
     }
 
     var body: some View {
@@ -376,7 +373,22 @@ struct MoblyTabBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .modifier(LiquidGlassBar(cornerRadius: 30))
-        .shadow(color: Color(hex: 0x14152A).opacity(0.14), radius: 20, y: 8)
+        // y matches the radius so the drop shadow falls below and to the
+        // sides only — it no longer rises above the bar.
+        .shadow(color: Color(hex: 0x14152A).opacity(0.14), radius: 16, y: 16)
+        // Soft white glow on the left, right and bottom so content passing
+        // behind the floating bar fades into white. Not on top: the glow's
+        // upper edge is pushed down past the blur radius, so nothing spills
+        // above the bar as a white haze.
+        .background {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(Color.white)
+                .padding(.horizontal, -12)
+                .padding(.bottom, -12)
+                .padding(.top, 18)
+                .blur(radius: 16)
+                .allowsHitTesting(false)
+        }
         .padding(.horizontal, 16)
         .padding(.bottom, 6)
     }

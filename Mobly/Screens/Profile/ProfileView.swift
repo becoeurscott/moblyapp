@@ -90,7 +90,6 @@ struct ProfileView: View {
                         case .ownerDashboard: OwnerDashboardView()
                         }
                     }
-                    .navigationDestination(isPresented: $goToOwnerDashboard) { OwnerDashboardView() }
             }
 
             if loggingOut || saidGoodbye { logoutOverlay }
@@ -123,6 +122,9 @@ struct ProfileView: View {
             )
             .swipeToDismiss(onDismiss: { showBecomeOwner = false })
         }
+        // Full screen, like Home: pushing it inside this stack left the tab
+        // bar showing over the dashboard.
+        .fullScreenCover(isPresented: $goToOwnerDashboard) { OwnerDashboardCover() }
 
         .onAppear {
             if ProcessInfo.processInfo.environment["OPEN_BECOME_OWNER"] == "1" {
@@ -325,19 +327,12 @@ struct ProfileView: View {
 
     // MARK: Become owner CTA (visitor)
 
-    // Publishing a space means taking money and visits from strangers, so the
-    // identity check has to happen before the flow, not after it — the help
-    // centre already told users "La vérification est obligatoire pour publier
-    // une annonce" while nothing enforced it. `identityVerified` is declared
-    // once, above, with the identity badge that reads the same flag.
+    // Same entry as the Home card: the onboarding flow itself walks the user
+    // through the identity check before anything is published.
     private var becomeOwnerCTA: some View {
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            if identityVerified {
-                showBecomeOwner = true
-            } else {
-                askIdentityFirst = true
-            }
+            showBecomeOwner = true
         } label: {
             ZStack(alignment: .topTrailing) {
                 VStack(alignment: .leading, spacing: 14) {
@@ -393,7 +388,10 @@ struct ProfileView: View {
     // MARK: Owner dashboard CTA (owner)
 
     private var ownerDashboardCTA: some View {
-        NavigationLink(value: ProfileRoute.ownerDashboard) {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            goToOwnerDashboard = true
+        } label: {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 13).fill(Color(hex: 0xEEF0FE))
@@ -553,7 +551,7 @@ struct ProfileView: View {
                     }
                     .transition(.scale.combined(with: .opacity))
                     VStack(spacing: 4) {
-                        Text("À bientôt \(farewellName) 👋")
+                        Text("À bientôt \(farewellName)")
                             .font(.moblyHeading(17))
                             .foregroundStyle(Color.moblyTextPrimary)
                         Text("Merci d'avoir utilisé Mobly.")

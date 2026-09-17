@@ -23,6 +23,21 @@ struct MoblyApp: App {
                 // anyone who needs it — without shipping broken screens. Raise
                 // or remove this once the per-screen wrapping work is done.
                 .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                // End of the Didit identity flow ("Continuer"): close the
+                // Safari sheet and fetch the verdict.
+                .onOpenURL { url in
+                    guard url.scheme == "moblyapp" else { return }
+                    switch url.host {
+                    case "kyc":
+                        IdentityVerificationStore.shared.finishHostedFlow()
+                    case "annonce":
+                        // moblyapp://annonce/<id> — a shared listing.
+                        guard let id = url.pathComponents.dropFirst().first else { return }
+                        NotificationCenter.default.post(name: ListingStore.openSharedListing, object: id)
+                    default:
+                        break
+                    }
+                }
                 // Confirm any stored session with the server before the UI
                 // trusts it — a Keychain token may have been revoked since.
                 .task {
@@ -58,6 +73,7 @@ struct MoblyApp: App {
                     // From here on the app keeps itself current on its own:
                     // silent polls + foreground + reconnect, no spinners.
                     LiveRefresh.shared.start()
+                    CallOverlay.shared.start()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     // Coming back to the foreground: re-sync the inbox and

@@ -7,8 +7,8 @@ struct OnboardingSlide1MapView: View {
 
     @State private var appeared = false
 
-    /// Slide-1 signature gradient — brand blue easing into violet.
-    static let bg = LinearGradient(colors: [Color(hex: 0x3A4FF0), Color(hex: 0x6D2FE0)],
+    /// Slide-1 signature gradient — brand blue easing into dark blue.
+    static let bg = LinearGradient(colors: [Color(hex: 0x3A4FF0), Color(hex: 0x071B5C)],
                                    startPoint: .topLeading, endPoint: .bottomTrailing)
 
     var body: some View {
@@ -60,35 +60,8 @@ struct OnboardingSlide1MapView: View {
 private struct ListingDeck: View {
     var appeared: Bool
 
-    /// Bundled fallback for the very first launch, before the API has answered.
-    /// Once ListingStore populates, we swap to real properties instead.
-    private static let fallback: [Listing] = [
-        Listing(id: "onb-1", title: "Studio meublé · Akwa", location: "Douala, Cameroun",
-                price: "80 000 FCFA", rating: "4.8", imageName: "ListingGreen",
-                category: "Studios"),
-        Listing(id: "onb-2", title: "Villa · Bonapriso", location: "Douala, Cameroun",
-                price: "350 000 FCFA", rating: "4.9", imageName: "ListingPink",
-                category: "Villas"),
-        Listing(id: "onb-3", title: "Bureau · Bonanjo", location: "Douala, Cameroun",
-                price: "150 000 FCFA", rating: "4.6", imageName: "ListingYellow",
-                category: "Bureaux"),
-    ]
-
-    @ObservedObject private var store = ListingStore.shared
-
-    /// Live listings from the DB, cycled to fill the deck. Falls back to
-    /// the bundled samples ONLY when the store returned nothing at all —
-    /// otherwise the onboarding cards never contradict what the user will
-    /// find inside the app.
-    private var cards: [Listing] {
-        let live = store.listings
-        if live.isEmpty { return Self.fallback }
-        // Cycle so a small DB (1 or 2 listings) still fills the 3-card deck
-        // without showing hardcoded properties that don't exist.
-        var out: [Listing] = []
-        for i in 0..<3 { out.append(live[i % live.count]) }
-        return out
-    }
+    /// Always the bundled showcase properties, cycled through the deck.
+    private var cards: [Listing] { OnboardingShowcase.listings }
 
     @State private var top = 0                       // index of the front card
     @State private var float = false
@@ -102,17 +75,17 @@ private struct ListingDeck: View {
             ZStack {
                 // Peek cards — centered (never clipped), just scaled/nudged up.
                 OnbShowcaseCard(card: card(2))
-                    .frame(width: w * 0.80)
+                    .frame(width: w * 0.92)
                     .scaleEffect(0.86).offset(y: -26).opacity(0.55)
                     .zIndex(0)
                 OnbShowcaseCard(card: card(1))
-                    .frame(width: w * 0.80)
+                    .frame(width: w * 0.92)
                     .scaleEffect(0.93).offset(y: -13).opacity(0.85)
                     .zIndex(1)
 
                 // Front card — swipes off on change, next scales up underneath.
                 OnbShowcaseCard(card: card(0))
-                    .frame(width: w * 0.80)
+                    .frame(width: w * 0.92)
                     .id(top)
                     .zIndex(2)
                     .transition(.asymmetric(
@@ -174,47 +147,9 @@ private struct SwipeOff: ViewModifier {
 private struct OnbShowcaseCard: View {
     let card: Listing
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack(alignment: .top) {
-                ListingCover(listing: card)
-                    .frame(height: 168).clipped()
-                HStack {
-                    Label("Vérifié", systemImage: "checkmark.seal.fill")
-                        .font(.moblyBody(10, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8).padding(.vertical, 5)
-                        .background(Capsule().fill(Color.moblyPrimary.opacity(0.92)))
-                    Spacer()
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color.moblyAccent)
-                        .padding(8)
-                        .background(Circle().fill(.white))
-                        .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-                }
-                .padding(12)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 7) {
-                HStack {
-                    Text(card.title)
-                        .font(.moblyHeading(15)).foregroundStyle(Color(hex: 0x14152A)).lineLimit(1)
-                    Spacer()
-                    HStack(spacing: 3) {
-                        Image(systemName: "star.fill").font(.system(size: 10)).foregroundStyle(Color.moblyAccent)
-                        Text(card.rating).font(.moblyBody(12, weight: .semibold)).foregroundStyle(Color(hex: 0x14152A))
-                    }
-                }
-                HStack(spacing: 4) {
-                    Image(systemName: "mappin.circle.fill").font(.system(size: 11)).foregroundStyle(Color(hex: 0x9A9DAC))
-                    Text(card.location).font(.moblyBody(11.5)).foregroundStyle(Color(hex: 0x9A9DAC))
-                        .lineLimit(1)
-                }
-            }
-            .padding(.horizontal, 14).padding(.vertical, 13)
-        }
-        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(.white))
+        ListingCover(listing: card)
+            .frame(height: 260)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .shadow(color: .black.opacity(0.3), radius: 24, y: 18)
     }
 }

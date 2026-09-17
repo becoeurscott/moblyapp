@@ -161,7 +161,9 @@ struct SearchResultsView: View {
                 .presentationDetents([.large])
         }
         .fullScreenCover(item: $selectedListing) { listing in
-            ListingDetailView(listing: listing, onClose: { selectedListing = nil })
+            ListingDetailView(listing: listing,
+                              source: listing.boosted ? "boost" : "search",
+                              onClose: { selectedListing = nil })
         }
     }
 

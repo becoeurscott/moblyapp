@@ -20,10 +20,12 @@ struct IncomingCallView: View {
                         .scaleEffect(pulse ? 1.15 : 1)
                         .animation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true),
                                    value: pulse)
-                    Circle().fill(Color.moblyPrimary).frame(width: 120, height: 120)
+                    UserAvatar(name: call.peerName,
+                               userId: call.peerId.isEmpty ? nil : call.peerId,
+                               avatarUrl: call.peerThread.avatarUrl,
+                               avatarColor: call.peerThread.avatarColor,
+                               size: 120)
                         .shadow(color: Color.moblyPrimary.opacity(0.5), radius: 30)
-                    Text(String(call.peerName.prefix(1)).uppercased())
-                        .font(.moblyHeading(48)).foregroundStyle(.white)
                 }
 
                 Text(call.peerName)

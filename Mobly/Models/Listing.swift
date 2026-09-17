@@ -18,6 +18,9 @@ struct Listing: Identifiable, Hashable {
     /// Owner's display name, from the server. Nil for locally-built listings.
     var ownerName: String? = nil
     var ownerVerified: Bool = false
+    /// Owner's photo and identity colour, so the host card matches their profile.
+    var ownerAvatarUrl: String? = nil
+    var ownerAvatarColor: String? = nil
     /// False when the owner's free trial lapsed without paying the inscription
     /// fee: the detail screen then hides contact CTAs and shows "Contact
     /// désactivé". Defaults true for locally-built / legacy listings.

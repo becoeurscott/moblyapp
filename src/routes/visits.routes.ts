@@ -26,6 +26,7 @@ const userSelect = {
   id: true,
   fullName: true,
   avatarUrl: true,
+  avatarColor: true,
   phone: true,
   verified: true,
 } as const;

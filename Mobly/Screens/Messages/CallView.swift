@@ -3,7 +3,6 @@ import SwiftUI
 struct CallView: View {
     let thread: ChatThread
     var isVideo: Bool
-    var onEnd: () -> Void = {}
 
     @ObservedObject private var call = CallService.shared
 
@@ -20,12 +19,30 @@ struct CallView: View {
             }
 
             VStack(spacing: 0) {
-                HStack(spacing: 6) {
-                    Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold))
-                    Text("Appel Mobly chiffré")
-                        .font(.moblyBody(12, weight: .medium))
+                ZStack {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold))
+                        Text("Appel Mobly chiffré")
+                            .font(.moblyBody(12, weight: .medium))
+                    }
+                    .foregroundStyle(.white.opacity(0.7))
+
+                    // Shrink to the top bar and keep using the app.
+                    HStack {
+                        Button {
+                            withAnimation(.easeOut(duration: 0.2)) { call.minimized = true }
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 42, height: 42)
+                                .background(Circle().fill(Color.white.opacity(0.15)))
+                        }
+                        .accessibilityLabel("Réduire l'appel")
+                        Spacer()
+                    }
+                    .padding(.horizontal, 20)
                 }
-                .foregroundStyle(.white.opacity(0.7))
                 .padding(.top, 60)
 
                 Spacer()
@@ -45,9 +62,10 @@ struct CallView: View {
                             .animation(.easeOut(duration: 1.5).repeatForever(autoreverses: false).delay(0.3),
                                        value: call.state == .outgoing)
                     }
-                    Circle().fill(thread.color).frame(width: 120, height: 120)
+                    UserAvatar(name: thread.name, userId: thread.peerId ?? thread.id,
+                               avatarUrl: thread.avatarUrl, avatarColor: thread.avatarColor,
+                               size: 120)
                         .shadow(color: thread.color.opacity(0.5), radius: 30)
-                    Text(thread.initial).font(.moblyHeading(48)).foregroundStyle(.white)
                 }
                 .scaleEffect(call.state == .outgoing ? 1.05 : 1)
                 .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true),
@@ -95,7 +113,6 @@ struct CallView: View {
                 Button {
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     call.endCall()
-                    onEnd()
                 } label: {
                     Image(systemName: "phone.down.fill")
                         .font(.system(size: 26, weight: .semibold))
@@ -107,14 +124,6 @@ struct CallView: View {
                 .padding(.bottom, 50)
             }
         }
-        .onAppear {
-            if call.state == .idle {
-                call.startCall(thread: thread, isVideo: isVideo)
-            }
-        }
-        .onChange(of: call.state) { _, newState in
-            if newState == .idle { onEnd() }
-        }
     }
 
     private var statusText: String {
@@ -123,7 +132,7 @@ struct CallView: View {
         case .outgoing: return isVideo ? "Appel vidéo…" : "Appel en cours…"
         case .incoming: return "Appel entrant…"
         case .connected: return call.timeString
-        case .ended: return "Appel terminé"
+        case .ended: return call.failureMessage ?? "Appel terminé"
         }
     }
 

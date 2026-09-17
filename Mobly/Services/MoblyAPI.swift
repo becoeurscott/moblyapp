@@ -775,6 +775,29 @@ final class MoblyAPI {
         let favorites: Int
         let last30d: Window
         let deltas30d: Deltas
+        // Overall statistics screen. Optional so an older server still decodes.
+        let totals: Totals?
+        let daily30d: [Day]?
+        let sources30d: [Source]?
+        let topListings: [Ranked]?
+
+        struct Totals: Decodable {
+            let views: Int; let contacts: Int; let favorites: Int
+            let visits: Int; let contactRate: Double
+        }
+        struct Day: Decodable { let date: String; let views: Int; let contacts: Int }
+        struct Source: Decodable { let source: String; let count: Int; let percent: Int }
+        struct Ranked: Decodable, Identifiable {
+            let id: String; let title: String; let coverUrl: String?
+            let available: Bool; let views: Int; let views30d: Int
+            let contacts: Int; let favorites: Int
+        }
+    }
+
+    /// Delete an annonce for good. Its views, contacts and favourites go
+    /// with it on the server.
+    func deleteListing(id: String) async throws {
+        _ = try await request("listings/\(id)", method: "DELETE", authorized: true) as EmptyResponse
     }
 
     func ownerOverview() async throws -> OwnerOverview {
@@ -879,6 +902,7 @@ final class MoblyAPI {
         let id: String
         let fullName: String
         let avatarUrl: String?
+        let avatarColor: String?
     }
 
     struct ReviewDTO: Decodable {
@@ -1273,6 +1297,8 @@ struct ListingDTO: Codable, Identifiable {
         /// payloads that predate the field still decode.
         let identityVerified: Bool?
         let avatarUrl: String?
+        /// Owner's identity colour; nil = palette fallback on their id.
+        let avatarColor: String?
         /// False when this owner's free trial lapsed unpaid — the app hides the
         /// contact CTAs and shows "Contact désactivé". Optional so older
         /// payloads decode (treated as active).
@@ -1308,6 +1334,7 @@ struct VisitRequestDTO: Codable, Identifiable {
         let id: String
         let fullName: String?
         let avatarUrl: String?
+        let avatarColor: String?
         let phone: String?
         let verified: Bool
     }

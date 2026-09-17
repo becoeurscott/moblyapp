@@ -41,6 +41,8 @@ export type ServerEvent =
   | { type: 'call:accepted'; callId: string }
   | { type: 'call:rejected'; callId: string }
   | { type: 'call:ended'; callId: string }
+  /** An owner's figures changed (a view, a deleted annonce): refetch. */
+  | { type: 'owner:stats' }
   | { type: 'review'; listingId: string; review: unknown }
   | { type: 'notification'; notification: unknown }
   // ── Remote control ────────────────────────────────────────
@@ -80,14 +82,62 @@ interface ActiveCall {
   calleeId: string;
   isVideo: boolean;
   state: 'ringing' | 'connected';
+  connectedAt?: number;
   timeout?: NodeJS.Timeout;
 }
 const activeCalls = new Map<string, ActiveCall>();
 const userToCallId = new Map<string, string>();
 
-function cleanupCall(callId: string) {
+/**
+ * Leave a trace of the call in the conversation (missed / declined / length),
+ * like a phone's call log. Posted as a SYSTEM message with no visit fields;
+ * the app renders it as a centred call line. Both participants receive it,
+ * the caller included, since they were not the one who wrote it.
+ */
+async function logCall(call: ActiveCall, outcome: 'completed' | 'missed' | 'declined') {
+  const label = call.isVideo ? 'Appel vidéo' : 'Appel vocal';
+  const secs = call.connectedAt ? Math.round((Date.now() - call.connectedAt) / 1000) : 0;
+  const text =
+    outcome === 'completed'
+      ? `${label} (${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')})`
+      : outcome === 'declined'
+        ? `${label} refusé`
+        : `${label} manqué`;
+  try {
+    const now = new Date();
+    const message = await prisma.message.create({
+      data: {
+        threadId: call.threadId,
+        senderId: call.callerId,
+        kind: 'SYSTEM',
+        text,
+        durationSec: outcome === 'completed' ? secs : null,
+      },
+    });
+    await prisma.thread.update({
+      where: { id: call.threadId },
+      data: { updatedAt: now, lastMessageAt: now },
+    });
+    if (outcome === 'missed') {
+      await prisma.threadParticipant.updateMany({
+        where: { threadId: call.threadId, userId: call.calleeId },
+        data: { unreadCount: { increment: 1 } },
+      });
+    }
+    emitToUsers([call.callerId, call.calleeId], {
+      type: 'message',
+      threadId: call.threadId,
+      message: { ...message, senderId: call.callerId },
+    });
+  } catch (err) {
+    console.error('[calls] failed to log call', err);
+  }
+}
+
+function cleanupCall(callId: string, outcome?: 'completed' | 'missed' | 'declined') {
   const call = activeCalls.get(callId);
   if (!call) return;
+  void logCall(call, outcome ?? (call.state === 'connected' ? 'completed' : 'missed'));
   clearTimeout(call.timeout);
   userToCallId.delete(call.callerId);
   if (userToCallId.get(call.calleeId) === callId) userToCallId.delete(call.calleeId);
@@ -445,6 +495,7 @@ export function attachRealtime(server: Server, path = '/ws') {
           if (!call || call.state !== 'ringing' || call.calleeId !== client.userId) return;
           clearTimeout(call.timeout);
           call.state = 'connected';
+          call.connectedAt = Date.now();
           emitToUsers([call.callerId], { type: 'call:accepted', callId: ev.callId });
           break;
         }
@@ -454,7 +505,9 @@ export function attachRealtime(server: Server, path = '/ws') {
           const call = activeCalls.get(ev.callId);
           if (!call) return;
           emitToUsers([call.callerId], { type: 'call:rejected', callId: ev.callId });
-          cleanupCall(ev.callId);
+          // A callee who is already busy auto-rejects; only a ringing call
+          // turned down by its own callee counts as "declined".
+          cleanupCall(ev.callId, call.calleeId === client.userId ? 'declined' : 'missed');
           break;
         }
 

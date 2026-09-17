@@ -717,7 +717,6 @@ struct HelpCenterView: View {
     @State private var expanded: Int?
     @State private var openingSupport = false
     @State private var pendingQuestion: String?
-    @State private var supportThread: ChatThread?
     @State private var supportFailed = false
 
     /// Support chat can be switched off remotely, in which case the entry
@@ -772,30 +771,20 @@ struct HelpCenterView: View {
         }
         .background(Color.white.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
+        // One cover for the whole flow: it shows the spinner, then becomes the
+        // chat in place. Chaining a second cover after dismissing the first
+        // could leave the user stuck on the spinner.
         .fullScreenCover(isPresented: $openingSupport) {
             SupportOpeningView(
-                // Presenting the chat while this cover is still dismissing is
-                // silently dropped by SwiftUI, so wait for it to finish.
-                onOpened: { thread in
-                    openingSupport = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-                        supportThread = thread
-                    }
-                },
+                initialQuestion: pendingQuestion,
                 onFailed: {
                     openingSupport = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                         supportFailed = true
                     }
                 },
-                onBack: { openingSupport = false }
+                onBack: { openingSupport = false; pendingQuestion = nil }
             )
-            .swipeToDismiss(onDismiss: { openingSupport = false })
-        }
-        .fullScreenCover(item: $supportThread) { thread in
-            SupportChatView(thread: thread,
-                            initialQuestion: pendingQuestion,
-                            onBack: { supportThread = nil; pendingQuestion = nil })
         }
         .alert("Support indisponible", isPresented: $supportFailed) {
             Button("OK", role: .cancel) {}
@@ -930,20 +919,30 @@ struct HelpCenterView: View {
     }
 }
 
-/// Opens the support conversation, then hands it to `ChatThreadView`.
+/// Opens the support conversation, then becomes `SupportChatView` in place.
 ///
 /// Mirrors `ChatOpeningView` for listings: the screen appears at once and the
 /// network call resolves behind it, because on a Douala connection the round
 /// trip is slow enough that an un-styled wait reads as a broken button.
 private struct SupportOpeningView: View {
-    var onOpened: (ChatThread) -> Void
+    var initialQuestion: String?
     var onFailed: () -> Void
     var onBack: () -> Void
 
     @ObservedObject private var chat = ChatStore.shared
     @ObservedObject private var auth = AuthStore.shared
+    @State private var thread: ChatThread?
 
     var body: some View {
+        if let thread {
+            SupportChatView(thread: thread, initialQuestion: initialQuestion, onBack: onBack)
+                .transition(.opacity)
+        } else {
+            loading
+        }
+    }
+
+    private var loading: some View {
         ZStack {
             Color.moblySurface.ignoresSafeArea()
             VStack(spacing: 18) {
@@ -960,11 +959,17 @@ private struct SupportOpeningView: View {
             }
         }
         .task {
+            // Already in the inbox: open at once instead of waiting on the
+            // network (a cold server can take many seconds).
+            if let cached = chat.threads.first(where: { $0.participants.first?.isSupport == true }) {
+                withAnimation(Motion.quick) { thread = ChatThread.from(cached, myUserId: auth.user?.id) }
+                return
+            }
             guard let dto = await chat.openSupportThread() else {
                 onFailed()
                 return
             }
-            onOpened(ChatThread.from(dto, myUserId: auth.user?.id))
+            withAnimation(Motion.quick) { thread = ChatThread.from(dto, myUserId: auth.user?.id) }
         }
         .overlay(alignment: .topLeading) {
             Button(action: onBack) {
@@ -1051,28 +1056,30 @@ struct PrivacySecurityView: View {
         .sheet(isPresented: $showChangePassword) { ChangePasswordSheet() }
         .sheet(isPresented: $showBlocked)        { BlockedUsersSheet() }
         .sheet(item: $showExportShare)           { url in ShareSheet(url: url) }
-        .alert("Supprimer votre compte ?",
+        .alert("Supprimer définitivement votre compte ?",
                isPresented: $confirmDelete) {
-            Button("Supprimer", role: .destructive) {
-                // This used only to sign out, while promising the account and
-                // its data were gone — the user stayed fully intact on the
-                // server and could sign straight back in.
-                Task {
-                    deleting = true
-                    defer { deleting = false }
-                    do {
-                        try await MoblyAPI.shared.deleteAccount()
-                        await AuthStore.shared.signOut(allDevices: true)
-                    } catch let e as MoblyAPI.APIError {
-                        deleteError = e.message
-                    } catch {
-                        deleteError = "Suppression impossible. Réessayez."
-                    }
-                }
-            }
+            Button("Oui, supprimer mon compte", role: .destructive) { performDelete() }
             Button("Annuler", role: .cancel) {}
         } message: {
-            Text("Votre compte, vos annonces, vos favoris et vos messages seront définitivement supprimés. Cette action est irréversible.")
+            Text("Cette action est irréversible. Votre compte, votre profil, vos annonces, vos favoris et vos messages seront supprimés et ne pourront pas être récupérés.")
+        }
+        .overlay {
+            if deleting {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    VStack(spacing: 14) {
+                        ProgressView().scaleEffect(1.3).tint(Color(hex: 0xE5484D))
+                        Text("Suppression du compte…")
+                            .font(.moblyHeading(14))
+                            .foregroundStyle(Color.moblyTextPrimary)
+                    }
+                    .padding(.horizontal, 32).padding(.vertical, 26)
+                    .background(RoundedRectangle(cornerRadius: 20).fill(.white))
+                }
+                .transition(.opacity)
+                .contentShape(Rectangle())
+                .onTapGesture {}
+            }
         }
         .alert("Suppression impossible", isPresented: Binding(
             get: { deleteError != nil }, set: { if !$0 { deleteError = nil } }
@@ -1080,6 +1087,31 @@ struct PrivacySecurityView: View {
             Button("OK", role: .cancel) { deleteError = nil }
         } message: {
             Text(deleteError ?? "")
+        }
+    }
+
+    // This used only to sign out, while promising the account and its data
+    // were gone — the user stayed fully intact on the server and could sign
+    // straight back in.
+    private func performDelete() {
+        withAnimation(Motion.quick) { deleting = true }
+        AppChrome.shared.hideTabBar = true
+        Task {
+            do {
+                try await MoblyAPI.shared.deleteAccount()
+                await AuthStore.shared.signOut(allDevices: true)
+                // RootView plays the confirmation and returns to Welcome.
+                NotificationCenter.default.post(name: AuthStore.accountDeleted, object: nil)
+                deleting = false
+            } catch let e as MoblyAPI.APIError {
+                withAnimation(Motion.quick) { deleting = false }
+                AppChrome.shared.hideTabBar = false
+                deleteError = e.message
+            } catch {
+                withAnimation(Motion.quick) { deleting = false }
+                AppChrome.shared.hideTabBar = false
+                deleteError = "Suppression impossible. Réessayez."
+            }
         }
     }
 

@@ -16,6 +16,8 @@ struct OwnerDashboardView: View {
     @State private var boostAnnonce: OwnerAnnonce?
     @State private var editAnnonce: OwnerAnnonce?
     @State private var showReactivate = false
+    @State private var showOverallStats = false
+    @State private var deleteFailed = false
 
     /// The free trial ran out and the one-time inscription fee hasn't been paid:
     /// the whole dashboard is locked behind the paywall.
@@ -65,7 +67,13 @@ struct OwnerDashboardView: View {
                                     onBoost: { boostAnnonce = annonce },
                                     onStats: { statsAnnonce = annonce },
                                     onEdit: { editAnnonce = annonce },
-                                    onDelete: { store.remove(annonce) },
+                                    onDelete: {
+                                        Task {
+                                            if !(await store.deleteOnServer(annonce)) {
+                                                deleteFailed = true
+                                            }
+                                        }
+                                    },
                                     onRetry: { store.retryPublishing(annonce.id) },
                                     onDiscard: { store.discardPublishing(annonce.id) }
                                 )
@@ -89,6 +97,19 @@ struct OwnerDashboardView: View {
         .task {
             await visits.refresh(silent: !visits.items.isEmpty)
             await loadOverview()
+        }
+        // A view came in or an annonce was deleted: refresh the totals live.
+        .onReceive(NotificationCenter.default.publisher(for: OwnerListings.statsChanged)) { _ in
+            Task { await loadOverview() }
+        }
+        .fullScreenCover(isPresented: $showOverallStats) {
+            OwnerOverallStatsView(initial: overview)
+                .swipeToDismiss(onDismiss: { showOverallStats = false })
+        }
+        .alert("Suppression impossible", isPresented: $deleteFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("L'annonce n'a pas pu être supprimée. Vérifiez votre connexion et réessayez.")
         }
         // Coming back to the app: refresh the figures with no sign of it.
         .onReceive(NotificationCenter.default.publisher(
@@ -178,7 +199,7 @@ struct OwnerDashboardView: View {
             Button { showReactivate = true } label: {
                 Text("Payer")
                     .font(.moblyHeading(12))
-                    .foregroundStyle(Color.moblyAccent)
+                    .foregroundStyle(Color.moblyPrimary)
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(Capsule().fill(.white))
             }
@@ -186,19 +207,19 @@ struct OwnerDashboardView: View {
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 18)
-            .fill(LinearGradient(colors: [Color.moblyAccent, Color(hex: 0xE85A1A)],
+            .fill(LinearGradient(colors: [Color(hex: 0x1A2266), Color(hex: 0x2A3690)],
                                  startPoint: .topLeading, endPoint: .bottomTrailing)))
-        .shadow(color: Color.moblyAccent.opacity(0.25), radius: 14, y: 6)
+        .shadow(color: Color(hex: 0x1A2266).opacity(0.35), radius: 14, y: 6)
     }
 
     private var lockedView: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 22) {
                 ZStack {
-                    Circle().fill(Color(hex: 0xFFF3EC)).frame(width: 108, height: 108)
+                    Circle().fill(Color(hex: 0xEEF0FE)).frame(width: 108, height: 108)
                     Image(systemName: "lock.fill")
                         .font(.system(size: 44, weight: .semibold))
-                        .foregroundStyle(Color.moblyAccent)
+                        .foregroundStyle(Color.moblyPrimary)
                 }
                 .padding(.top, 40)
 
@@ -252,7 +273,7 @@ struct OwnerDashboardView: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Color.moblyAccent)
+                .foregroundStyle(Color.moblyPrimary)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.moblyHeading(12.5)).foregroundStyle(Color.moblyTextPrimary)
@@ -313,7 +334,7 @@ struct OwnerDashboardView: View {
                     Text(greeting)
                         .font(.moblyHeading(20))
                         .foregroundStyle(Color.moblyTextPrimary)
-                    Text("Voici un aperçu de vos annonces et de vos performances.")
+                    Text("Bienvenue dans votre\nespace propriétaire")
                         .font(.moblyBody(12.5))
                         .foregroundStyle(Color.moblyTextSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -325,11 +346,11 @@ struct OwnerDashboardView: View {
         .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 12)
     }
 
-    /// "Bonjour Alex" — first name only, greeting alone when we have no name.
+    /// "Salut Alex" — first name only, greeting alone when we have no name.
     private var greeting: String {
         let full = (auth.user?.fullName ?? "").trimmingCharacters(in: .whitespaces)
         let first = full.split(separator: " ").first.map(String.init) ?? ""
-        return first.isEmpty ? "Bonjour" : "Bonjour \(first)"
+        return first.isEmpty ? "Salut" : "Salut \(first)"
     }
 
     private var avatarInitials: String {
@@ -390,29 +411,39 @@ struct OwnerDashboardView: View {
                 Text("Performances · 30 derniers jours")
                     .font(.moblyHeading(13)).foregroundStyle(.white)
                 Spacer(minLength: 4)
+                HStack(spacing: 3) {
+                    Text("Détails").font(.moblyBody(11.5, weight: .semibold))
+                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
+                }
+                .foregroundStyle(.white.opacity(0.8))
             }
             HStack(alignment: .top, spacing: 0) {
                 // Totals come from the listings; the 30-day window and its
                 // deltas come from the raw event tables via /owner/overview.
                 perfStat("eye.fill",
-                         (overview?.last30d.views ?? store.totalViews).formattedGrouped,
-                         "Vues totales", overview?.deltas30d.views)
+                         (overview?.last30d.views ?? 0).formattedGrouped,
+                         "Vues", overview?.deltas30d.views)
                 perfDivider
                 perfStat("bubble.left.fill",
-                         "\(overview?.last30d.contacts ?? store.totalContacts)",
+                         "\(overview?.last30d.contacts ?? 0)",
                          "Contacts", overview?.deltas30d.contacts)
                 perfDivider
                 perfStat("bookmark.fill",
-                         "\(overview?.last30d.favorites ?? store.totalFavorites)",
-                         "Ajouts en préférés", overview?.deltas30d.favorites)
+                         "\(overview?.last30d.favorites ?? 0)",
+                         "Favoris", overview?.deltas30d.favorites)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
         .background(RoundedRectangle(cornerRadius: 24)
-            .fill(LinearGradient(colors: [Color.moblyPrimary, Color(hex: 0x5B6BF5)],
+            .fill(LinearGradient(colors: [Color(hex: 0x1A2266), Color(hex: 0x2A3690)],
                                  startPoint: .topLeading, endPoint: .bottomTrailing)))
-        .shadow(color: Color.moblyPrimary.opacity(0.28), radius: 20, y: 10)
+        .shadow(color: Color(hex: 0x1A2266).opacity(0.35), radius: 20, y: 10)
+        .contentShape(RoundedRectangle(cornerRadius: 24))
+        .onTapGesture {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showOverallStats = true
+        }
     }
 
     private var perfDivider: some View {
@@ -474,11 +505,11 @@ struct OwnerDashboardView: View {
             HStack(spacing: 14) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14)
-                        .fill(Color(hex: 0xFFF3EC))
+                        .fill(Color(hex: 0xEEF0FE))
                         .frame(width: 46, height: 46)
                     Image(systemName: "calendar.badge.clock")
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(Color.moblyAccent)
+                        .foregroundStyle(Color.moblyPrimary)
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Demandes de visite")
@@ -495,7 +526,7 @@ struct OwnerDashboardView: View {
                         .foregroundStyle(.white)
                         .frame(minWidth: 26, minHeight: 26)
                         .padding(.horizontal, 8)
-                        .background(Capsule().fill(Color.moblyAccent))
+                        .background(Capsule().fill(Color.moblyPrimary))
                 }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))

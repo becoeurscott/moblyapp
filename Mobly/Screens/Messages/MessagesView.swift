@@ -247,7 +247,7 @@ struct MessagesView: View {
             get: { pendingListingId.flatMap { id in MoblyData.all.first { $0.id == id } } },
             set: { if $0 == nil { pendingListingId = nil } }
         )) { listing in
-            ListingDetailView(listing: listing, onClose: { pendingListingId = nil })
+            ListingDetailView(listing: listing, source: "chat", onClose: { pendingListingId = nil })
         }
         .fullScreenCover(item: $openThread) { thread in
             // Support has its own screen (assistant avatar, suggested
@@ -465,12 +465,9 @@ struct ChatRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 13) {
             ZStack(alignment: .bottomTrailing) {
-                ZStack {
-                    Circle().fill(thread.color)
-                    Text(thread.initial)
-                        .font(.moblyHeading(19)).foregroundStyle(.white)
-                }
-                .frame(width: 54, height: 54)
+                UserAvatar(name: thread.name, userId: thread.peerId ?? thread.id,
+                           avatarUrl: thread.avatarUrl, avatarColor: thread.avatarColor,
+                           size: 54)
                 if thread.online {
                     Circle().fill(Color(hex: 0x25D366))
                         .frame(width: 14, height: 14)

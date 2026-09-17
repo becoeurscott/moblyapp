@@ -16,6 +16,7 @@ import {
 } from '../middleware/gates';
 import { configSnapshot } from '../services/config';
 import { notifyNewListing } from '../services/listingNotify';
+import { emitToUsers } from '../realtime/hub';
 
 export const listingsRouter = Router();
 
@@ -26,7 +27,7 @@ const LIST_TTL_MS = 60_000;
 const ownerSelect = {
   owner: {
     select: {
-      id: true, fullName: true, verified: true, identityVerified: true, rating: true, avatarUrl: true,
+      id: true, fullName: true, verified: true, identityVerified: true, rating: true, avatarUrl: true, avatarColor: true,
       // Drives the "Contact désactivé" state on the client.
       isOwner: true, ownerPaid: true, ownerTrialStartedAt: true,
     },
@@ -151,16 +152,19 @@ listingsRouter.get(
     if ((!listing.available || !publicStatus) && !canSeePrivate) {
       throw new ApiError(404, 'Annonce introuvable', 'NOT_FOUND');
     }
-    await prisma.listing.update({
-      where: { id: listing.id },
-      data: { views: { increment: 1 } },
-    });
-    // Skip the raw event when the owner is viewing their own annonce —
-    // otherwise the "traffic" chart is dominated by the owner refreshing.
+    // Skip the owner viewing their own annonce, for the counter as well as
+    // the raw event — otherwise the figures are inflated by the owner
+    // checking their own page.
     if (listing.ownerId !== req.userId) {
+      await prisma.listing.update({
+        where: { id: listing.id },
+        data: { views: { increment: 1 } },
+      });
       prisma.viewEvent.create({
         data: { listingId: listing.id, userId: req.userId ?? null, source },
-      }).catch(() => {});
+      })
+        .then(() => emitToUsers([listing.ownerId], { type: 'owner:stats' }))
+        .catch(() => {});
     }
     res.json({ listing: serializeListing(listing) });
   })
@@ -310,8 +314,11 @@ listingsRouter.delete(
   requireOwner,
   asyncHandler(async (req, res) => {
     await assertOwnership(req.params.id, req.userId!);
+    // Cascades to the annonce's view / contact / favorite events, so the
+    // owner's totals drop with it.
     await prisma.listing.delete({ where: { id: req.params.id } });
     cacheBust(LIST_CACHE);
+    emitToUsers([req.userId!], { type: 'owner:stats' });
     res.status(204).end();
   })
 );

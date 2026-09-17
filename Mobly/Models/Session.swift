@@ -152,6 +152,15 @@ final class OwnerListings: ObservableObject {
         }
     }
 
+    /// Same patch as `ListingStore.applyOwnerAvatar` for the owner's own rows.
+    @MainActor
+    func applyOwnerAvatar(url: String?, color: String?) {
+        for i in annonces.indices {
+            annonces[i].listing.ownerAvatarUrl = url
+            annonces[i].listing.ownerAvatarColor = color
+        }
+    }
+
     func add(_ listing: Listing) {
         guard !annonces.contains(where: { $0.id == listing.id }) else { return }
         annonces.insert(
@@ -297,6 +306,33 @@ final class OwnerListings: ObservableObject {
             return e.isOffline ? "Pas de connexion. Réessayez une fois connecté." : e.message
         }
         return fallback
+    }
+
+    /// Posted when the owner's figures may have changed; the dashboard and
+    /// the statistics screen refetch on it.
+    static let statsChanged = Notification.Name("OwnerListings.statsChanged")
+
+    /// Delete on the server, not just on this phone — the local-only removal
+    /// left the annonce live, still collecting views that kept counting in the
+    /// dashboard totals. Removed at once, put back if the server refuses.
+    @MainActor
+    @discardableResult
+    func deleteOnServer(_ annonce: OwnerAnnonce) async -> Bool {
+        guard let index = annonces.firstIndex(where: { $0.id == annonce.id }) else { return false }
+        withAnimation(Motion.quick) { _ = annonces.remove(at: index) }
+        do {
+            try await MoblyAPI.shared.deleteListing(id: annonce.listing.id)
+            publishJobs[annonce.id] = nil
+            OwnerPhotoStore.clear(id: annonce.listing.id)
+            NotificationCenter.default.post(name: Self.statsChanged, object: nil)
+            await ListingStore.shared.refresh()
+            return true
+        } catch {
+            withAnimation(Motion.quick) {
+                annonces.insert(annonce, at: min(index, annonces.count))
+            }
+            return false
+        }
     }
 
     func remove(_ annonce: OwnerAnnonce) {

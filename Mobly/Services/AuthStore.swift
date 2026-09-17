@@ -8,9 +8,22 @@ import Combine
 /// keyed off `MoblyAPI.Code` — never off message text.
 @MainActor
 final class AuthStore: ObservableObject {
+    /// Posted after the server deleted the account and local state is wiped.
+    static let accountDeleted = Notification.Name("AuthStore.accountDeleted")
+
     static let shared = AuthStore()
 
-    @Published private(set) var user: UserDTO?
+    @Published private(set) var user: UserDTO? {
+        didSet {
+            // Keep locally cached copies of this user's own listings in step
+            // with a photo / colour edit instead of waiting for a refetch.
+            guard let u = user, u.id == oldValue?.id,
+                  u.avatarUrl != oldValue?.avatarUrl || u.avatarColor != oldValue?.avatarColor
+            else { return }
+            ListingStore.shared.applyOwnerAvatar(ownerId: u.id, url: u.avatarUrl, color: u.avatarColor)
+            OwnerListings.shared.applyOwnerAvatar(url: u.avatarUrl, color: u.avatarColor)
+        }
+    }
     @Published private(set) var isBusy = false
     @Published var errorMessage: String?
     /// Machine-readable form of the last failure. Callers branch on this —
@@ -454,6 +467,12 @@ final class AuthStore: ObservableObject {
     /// switch to the new photo immediately after upload.
     func applyAvatarUrl(_ url: String) {
         guard var u = user else { return }
+        // Cloudinary mints a fresh URL per upload, but if the server ever
+        // hands back the same one, evict the cached bytes so the new photo
+        // is fetched instead of the old one.
+        if u.avatarUrl == url, let old = URL(string: url) {
+            URLCache.shared.removeCachedResponse(for: URLRequest(url: old))
+        }
         let json = """
         {"id":"\(u.id)","phone":"\(u.phone)","fullName":"\(u.fullName)",
         "email":\(u.email.map { "\"\($0)\"" } ?? "null"),

@@ -30,6 +30,7 @@ struct RootView: View {
     @ObservedObject private var maintenance = MaintenanceStore.shared
     @ObservedObject private var remoteConfig = RemoteConfigStore.shared
     @ObservedObject private var auth = AuthStore.shared
+    @State private var accountDeleted = false
     @State private var route: AppRoute = {
         // Allow launch arg to skip splash for screenshotting: -skipSplash 1
         if ProcessInfo.processInfo.environment["START_AT"] == "welcome" {
@@ -296,6 +297,24 @@ struct RootView: View {
         // and ChatStore stops, but nothing moved the UI — the user was left
         // sitting in the signed-in tab bar where every request 401s. Bounce
         // them to Welcome so they can sign in again.
+        // Account deleted: confirm it, then land on Welcome from wherever the
+        // user was (the delete button sits deep in a profile sub-screen).
+        .onReceive(NotificationCenter.default.publisher(for: AuthStore.accountDeleted)) { _ in
+            withAnimation(Motion.standard) { accountDeleted = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+                AppChrome.shared.hideTabBar = false
+                route = .welcome
+                withAnimation(Motion.standard) { accountDeleted = false }
+            }
+        }
+        .overlay {
+            if accountDeleted {
+                AccountDeletedView()
+                    .environment(\.locale, Locale(identifier: lang.code))
+                    .transition(.opacity)
+                    .zIndex(99)
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: MoblyAPI.sessionExpired)) { _ in
             guard route == .placeholder else { return }
             withAnimation(Motion.standard) { route = .welcome }
@@ -449,4 +468,48 @@ private struct PreviewChatWrapper: View {
         #endif
     }
     var body: some View { ChatThreadView(thread: ChatThread.preview) }
+}
+
+/// Shown once the server confirmed the deletion, before returning to Welcome.
+private struct AccountDeletedView: View {
+    @State private var shown = false
+
+    var body: some View {
+        ZStack {
+            Color.moblySurface.ignoresSafeArea()
+            VStack(spacing: 18) {
+                ZStack {
+                    Circle()
+                        .fill(Color(hex: 0x1F8A5B).opacity(0.12))
+                        .frame(width: 120, height: 120)
+                        .scaleEffect(shown ? 1 : 0.4)
+                    Circle()
+                        .fill(Color(hex: 0x1F8A5B))
+                        .frame(width: 78, height: 78)
+                        .scaleEffect(shown ? 1 : 0.2)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 34, weight: .bold))
+                        .foregroundStyle(.white)
+                        .scaleEffect(shown ? 1 : 0)
+                        .rotationEffect(.degrees(shown ? 0 : -30))
+                }
+                VStack(spacing: 6) {
+                    Text("Compte supprimé")
+                        .font(.moblyHeading(20))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                    Text("Votre compte et vos données ont bien été supprimés.")
+                        .font(.moblyBody(13.5))
+                        .foregroundStyle(Color(hex: 0x6B6F80))
+                        .multilineTextAlignment(.center)
+                }
+                .opacity(shown ? 1 : 0)
+                .offset(y: shown ? 0 : 10)
+            }
+            .padding(.horizontal, 32)
+        }
+        .onAppear {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) { shown = true }
+        }
+    }
 }

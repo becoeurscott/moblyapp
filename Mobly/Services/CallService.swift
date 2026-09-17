@@ -23,6 +23,16 @@ final class CallService: ObservableObject {
     @Published private(set) var seconds: Int = 0
     @Published var muted: Bool = false
     @Published var speaker: Bool = false
+    /// True on the device that placed the call. The incoming-call UI in
+    /// MainTabView only drives calls this device *received*.
+    @Published private(set) var isCaller: Bool = false
+    /// The call keeps running as a bar at the top while the user browses.
+    @Published var minimized: Bool = false
+    /// Thread of the outgoing call, kept for its avatar colour.
+    private var callerThread: ChatThread?
+    /// Server's reason when a call could not be placed.
+    @Published private(set) var failureMessage: String?
+    private var outgoingTimeout: DispatchWorkItem?
 
     private var audioEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
@@ -45,9 +55,22 @@ final class CallService: ObservableObject {
         threadId = thread.id
         peerId = thread.peerId ?? ""
         peerName = thread.name
+        callerThread = thread
+        minimized = false
         self.isVideo = isVideo
         state = .outgoing
+        isCaller = true
+        failureMessage = nil
         seconds = 0
+
+        // The server times out ringing calls, but a call it silently drops
+        // (stale state, socket down) would otherwise ring forever.
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.state == .outgoing, self.callId == id else { return }
+            self.endCall()
+        }
+        outgoingTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 40, execute: timeout)
 
         ChatStore.shared.socket.sendCallStart(callId: id, threadId: thread.id, isVideo: isVideo)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -67,6 +90,8 @@ final class CallService: ObservableObject {
         peerName = fromName
         self.isVideo = isVideo
         state = .incoming
+        isCaller = false
+        minimized = false
 
         startIncomingRing()
     }
@@ -97,9 +122,22 @@ final class CallService: ObservableObject {
 
     // MARK: - Events from socket
 
+    func handleFailed(message: String) {
+        guard state == .outgoing else { return }
+        stopRinging()
+        failureMessage = message
+        state = .ended
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            guard self?.state == .ended else { return }
+            self?.cleanup()
+        }
+    }
+
     func handleAccepted() {
         guard state == .outgoing else { return }
         stopRinging()
+        outgoingTimeout?.cancel()
         state = .connected
         startAudio()
         startTimer()
@@ -169,8 +207,14 @@ final class CallService: ObservableObject {
                       let out = AVAudioPCMBuffer(pcmFormat: self.commonFormat, frameCapacity: frameCount)
                 else { return }
 
+                // Hand the tap buffer over exactly once. Returning it on every
+                // pull made the converter re-read the same audio until the
+                // output filled, which garbled the voice.
                 var error: NSError?
+                var fed = false
                 converter.convert(to: out, error: &error) { _, outStatus in
+                    if fed { outStatus.pointee = .noDataNow; return nil }
+                    fed = true
                     outStatus.pointee = .haveData
                     return buffer
                 }
@@ -247,6 +291,12 @@ final class CallService: ObservableObject {
     }
 
     func cleanup() {
+        outgoingTimeout?.cancel()
+        outgoingTimeout = nil
+        isCaller = false
+        minimized = false
+        callerThread = nil
+        failureMessage = nil
         stopRinging()
         stopAudio()
         timer?.invalidate()
@@ -260,6 +310,23 @@ final class CallService: ObservableObject {
         seconds = 0
         muted = false
         speaker = false
+    }
+
+    /// What the call screen shows: the real thread when this device called,
+    /// otherwise a stand-in built from the caller's name.
+    var peerThread: ChatThread {
+        if let callerThread { return callerThread }
+        return ChatThread(
+            id: threadId ?? "",
+            initial: String(peerName.prefix(1)).uppercased(),
+            color: .moblyPrimary,
+            name: peerName,
+            verified: false, online: true, time: "",
+            listing: "", listingTitle: "", listingPrice: "",
+            listingImage: "ListingGreen",
+            preview: "", unread: 0, fromMe: false,
+            peerId: peerId
+        )
     }
 
     var timeString: String {

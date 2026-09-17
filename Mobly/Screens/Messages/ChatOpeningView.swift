@@ -63,7 +63,6 @@ private struct ChatSkeletonScreen: View {
     @State private var pulse = false
 
     private var ownerName: String { listing.ownerName ?? "Propriétaire" }
-    private var ownerInitial: String { String(ownerName.prefix(1)).uppercased() }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -107,12 +106,9 @@ private struct ChatSkeletonScreen: View {
                     .background(RoundedRectangle(cornerRadius: 14).fill(.white)
                         .shadow(color: Color(hex: 0x14152A).opacity(0.06), radius: 8, y: 2))
             }
-            ZStack {
-                Circle().fill(LinearGradient(colors: [Color.moblyPrimary, Color(hex: 0x6D2FE0)],
-                                             startPoint: .top, endPoint: .bottom))
-                    .frame(width: 42, height: 42)
-                Text(ownerInitial).font(.moblyHeading(15)).foregroundStyle(.white)
-            }
+            UserAvatar(name: ownerName, userId: listing.ownerId,
+                       avatarUrl: listing.ownerAvatarUrl,
+                       avatarColor: listing.ownerAvatarColor, size: 42)
             VStack(alignment: .leading, spacing: 3) {
                 Text(ownerName)
                     .font(.moblyHeading(15))

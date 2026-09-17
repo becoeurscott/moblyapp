@@ -6,6 +6,9 @@ import SwiftUI
 /// instantly. Surfaces load/offline/error state for the UI to render.
 @MainActor
 final class ListingStore: ObservableObject {
+    /// Posted with an annonce id when a shared link is opened in the app.
+    static let openSharedListing = Notification.Name("ListingStore.openSharedListing")
+
     static let shared = ListingStore()
 
     @Published private(set) var listings: [Listing] = []
@@ -94,6 +97,19 @@ final class ListingStore: ObservableObject {
         ImagePrefetch.warm(listing.photos, width: ImageSlot.hero)
     }
 
+    /// Patch the owner avatar on already-loaded rows after the signed-in user
+    /// edits their photo or colour, so their own listings match right away.
+    func applyOwnerAvatar(ownerId: String, url: String?, color: String?) {
+        guard listings.contains(where: { $0.ownerId == ownerId }) else { return }
+        listings = listings.map { l in
+            guard l.ownerId == ownerId else { return l }
+            var l = l
+            l.ownerAvatarUrl = url
+            l.ownerAvatarColor = color
+            return l
+        }
+    }
+
     // MARK: - Cache
 
     private func loadCached() {
@@ -136,6 +152,8 @@ extension ListingDTO {
             // "Propriétaire vérifié" reflects the identity/KYC check, matching
             // the owner's own profile badge — not merely a confirmed phone.
             ownerVerified: owner?.identityVerified ?? false,
+            ownerAvatarUrl: owner?.avatarUrl,
+            ownerAvatarColor: owner?.avatarColor,
             ownerContactActive: owner?.active ?? true,
             category: category,
             subtitle: subtitle,

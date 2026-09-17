@@ -47,6 +47,26 @@ struct ListingDetailView: View {
     /// all 126 real properties.
     private var ownerName: String { listing.ownerName ?? "Propriétaire" }
 
+    /// Same avatar as the owner's profile. Your own listing reads from
+    /// `AuthStore` so a fresh photo/colour edit shows without a refetch.
+    @ViewBuilder
+    private var hostAvatar: some View {
+        if isOwnListing, let me = auth.user {
+            UserAvatar(me: me, size: 54)
+        } else if listing.ownerId != nil || listing.ownerName != nil {
+            UserAvatar(name: ownerName, userId: listing.ownerId,
+                       avatarUrl: listing.ownerAvatarUrl,
+                       avatarColor: listing.ownerAvatarColor, size: 54)
+        } else {
+            ZStack {
+                Circle().fill(Color(hex: 0xEEF0FE))
+                Image(systemName: "person.fill")
+                    .font(.system(size: 24)).foregroundStyle(Color.moblyPrimary)
+            }
+            .frame(width: 54, height: 54)
+        }
+    }
+
     /// True when the signed-in user is the owner of this space. There is
     /// nobody to contact — messaging or booking a visit with yourself would
     /// open a thread with a single participant — so the CTAs are replaced with
@@ -461,12 +481,7 @@ struct ListingDetailView: View {
 
             // Host row + in-app contact (2026 pivot)
             HStack(spacing: 14) {
-                ZStack {
-                    Circle().fill(Color(hex: 0xEEF0FE)).frame(width: 54, height: 54)
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 24)).foregroundStyle(Color.moblyPrimary)
-                }
-                .frame(width: 54, height: 54)
+                hostAvatar
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
@@ -873,7 +888,8 @@ struct ListingDetailView: View {
         let price = listing.price.isEmpty ? "" : " — \(listing.price)"
         let text = "\(listing.title)\(price)\n\(listing.location)\nSur Mobly"
         var items: [Any] = [text]
-        if let url = URL(string: "https://mobly.cm/annonce/\(listing.id)") { items.append(url) }
+        // `src=share` lets the page that opens it credit the view to sharing.
+        if let url = URL(string: "https://mobly.cm/annonce/\(listing.id)?src=share") { items.append(url) }
 
         let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
         guard let scene = UIApplication.shared.connectedScenes

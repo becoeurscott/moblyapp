@@ -54,13 +54,10 @@ private struct BoostHero: View {
     var entered: Bool
     @State private var float = false
     @State private var pulse = false
-    @ObservedObject private var store = ListingStore.shared
-
-    /// Three real listings once the store has answered, else nil (falls back
-    /// to the bundled sample rows below).
+    /// Showcase rows: a studio (boosted), an office, a shop.
     private var rows: [Listing]? {
-        let live = Array(store.listings.prefix(3))
-        return live.count >= 3 ? live : nil
+        let all = OnboardingShowcase.listings
+        return [all[1], all[2], all[7]]
     }
 
     var body: some View {

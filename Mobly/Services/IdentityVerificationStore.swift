@@ -103,6 +103,12 @@ final class IdentityVerificationStore: ObservableObject {
 
     // MARK: - Actions
 
+    /// Didit sent the user back to `moblyapp://kyc/return`. Closing the sheet
+    /// is enough: its `onDisappear` starts polling for the verdict.
+    func finishHostedFlow() {
+        hostedFlow = nil
+    }
+
     /// Ask the backend for a session and hand back the hosted URL to present.
     func start() async {
         guard !isBusy else { return }

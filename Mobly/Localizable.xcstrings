@@ -453,10 +453,16 @@
         }
       }
     },
+    "30 derniers jours" : {
+
+    },
+    "30 j" : {
+
+    },
     "80k" : {
 
     },
-    "À bientôt %@ 👋" : {
+    "À bientôt %@" : {
 
     },
     "À jour" : {
@@ -1098,6 +1104,9 @@
         }
       }
     },
+    "Assistant · répond en quelques secondes" : {
+
+    },
     "Au moins 8 caractères, avec une lettre et un chiffre." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1359,6 +1368,9 @@
     "Aucune annonce ne correspond à %@." : {
 
     },
+    "Aucune annonce pour le moment." : {
+
+    },
     "Aucune commission sur vos revenus" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1478,6 +1490,9 @@
         }
       }
     },
+    "Aucune photo" : {
+
+    },
     "Aucune recherche enregistrée" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1528,6 +1543,9 @@
           }
         }
       }
+    },
+    "Aucune vue enregistrée sur les 30 derniers jours." : {
+
     },
     "Authentification à deux facteurs" : {
       "extractionState" : "manual",
@@ -1654,6 +1672,9 @@
         }
       }
     },
+    "Bienvenue dans votre\nespace propriétaire" : {
+
+    },
     "Bienvenue,\npropriétaire !" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1714,6 +1735,9 @@
         }
       }
     },
+    "Bonjour %@. Envoyez-moi un message pour commencer." : {
+
+    },
     "Bonjour, je souhaite visiter…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1764,6 +1788,9 @@
           }
         }
       }
+    },
+    "Bonjour. Envoyez-moi un message pour commencer." : {
+
     },
     "Boost actif · %lld j restants" : {
 
@@ -2199,6 +2226,9 @@
         }
       }
     },
+    "Cette action est irréversible. Votre compte, votre profil, vos annonces, vos favoris et vos messages seront supprimés et ne pourront pas être récupérés." : {
+
+    },
     "Cette action supprimera aussi ses annonces et messages." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2402,6 +2432,9 @@
           }
         }
       }
+    },
+    "Chat support" : {
+
     },
     "Choisissez la catégorie de votre bien." : {
       "extractionState" : "manual",
@@ -2617,6 +2650,9 @@
       }
     },
     "Compte réactivé" : {
+
+    },
+    "Compte supprimé" : {
 
     },
     "Compte suspendu" : {
@@ -3560,6 +3596,9 @@
         }
       }
     },
+    "Détails" : {
+
+    },
     "Détection…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4470,6 +4509,9 @@
         }
       }
     },
+    "Évolution" : {
+
+    },
     "Ex. Studio meublé à Akwa" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5160,6 +5202,12 @@
         }
       }
     },
+    "Jour" : {
+
+    },
+    "L'annonce n'a pas pu être supprimée. Vérifiez votre connexion et réessayez." : {
+
+    },
     "L'eau et l'électricité sont incluses ?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5196,6 +5244,9 @@
           }
         }
       }
+    },
+    "La première photo sera la couverture. Touchez la croix pour retirer une photo." : {
+
     },
     "La publication a échoué" : {
 
@@ -6016,6 +6067,9 @@
         }
       }
     },
+    "Modifier les photos" : {
+
+    },
     "Mon espace propriétaire" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6171,6 +6225,9 @@
           }
         }
       }
+    },
+    "Nombre" : {
+
     },
     "Nombre de mois minimum de location" : {
       "extractionState" : "manual",
@@ -6410,6 +6467,9 @@
           }
         }
       }
+    },
+    "Nouvelle" : {
+
     },
     "Numéro %@" : {
 
@@ -6675,6 +6735,9 @@
         }
       }
     },
+    "Oui, supprimer mon compte" : {
+
+    },
     "Ouverture de la conversation…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6756,6 +6819,9 @@
 
     },
     "Paiement unique. Aucun abonnement ni frais mensuel par la suite." : {
+
+    },
+    "Par annonce" : {
 
     },
     "Partagez votre expérience…" : {
@@ -7186,6 +7252,9 @@
           }
         }
       }
+    },
+    "Poser la question au support" : {
+
     },
     "Position choisie" : {
       "extractionState" : "manual",
@@ -7947,6 +8016,12 @@
         }
       }
     },
+    "Questions\nfréquentes" : {
+
+    },
+    "Questions liées" : {
+
+    },
     "Réactivation…" : {
 
     },
@@ -8187,6 +8262,9 @@
           }
         }
       }
+    },
+    "Réduire l'appel" : {
+
     },
     "Réessayer" : {
       "extractionState" : "manual",
@@ -8452,9 +8530,6 @@
         }
       }
     },
-    "Réponse en général sous 24 h." : {
-
-    },
     "Reprise possible encore %lld minutes" : {
 
     },
@@ -8613,6 +8688,9 @@
           }
         }
       }
+    },
+    "Retour à l'appel" : {
+
     },
     "Retour aux discussions" : {
       "extractionState" : "manual",
@@ -8906,6 +8984,9 @@
         }
       }
     },
+    "Série" : {
+
+    },
     "Signaler" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9014,6 +9095,9 @@
         }
       }
     },
+    "Statistiques globales" : {
+
+    },
     "Statut" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9091,6 +9175,9 @@
     "Support Mobly" : {
 
     },
+    "Suppression du compte…" : {
+
+    },
     "Suppression impossible" : {
 
     },
@@ -9147,6 +9234,9 @@
           }
         }
       }
+    },
+    "Supprimer définitivement votre compte ?" : {
+
     },
     "Supprimer l'annonce" : {
       "extractionState" : "manual",
@@ -10562,9 +10652,6 @@
         }
       }
     },
-    "Voici un aperçu de vos annonces et de vos performances." : {
-
-    },
     "Voir détails" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10741,6 +10828,9 @@
         }
       }
     },
+    "Votre compte et vos données ont bien été supprimés." : {
+
+    },
     "Votre compte Mobly est prêt." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10774,9 +10864,6 @@
           }
         }
       }
-    },
-    "Votre compte, vos annonces, vos favoris et vos messages seront définitivement supprimés. Cette action est irréversible." : {
-
     },
     "Votre couleur" : {
       "extractionState" : "manual",
@@ -10936,6 +11023,9 @@
           }
         }
       }
+    },
+    "Votre question" : {
+
     },
     "Votre session a expiré. Reconnectez-vous." : {
       "extractionState" : "manual",
@@ -11115,6 +11205,9 @@
           }
         }
       }
+    },
+    "Vues totales" : {
+
     },
     "Vues, contacts, taux — au jour le jour." : {
       "extractionState" : "manual",

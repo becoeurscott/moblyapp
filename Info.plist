@@ -73,6 +73,17 @@
 				<string>com.googleusercontent.apps.961218606453-3ovpslv8p174c6sii8t9h3otb7gn4er9</string>
 			</array>
 		</dict>
+		<!-- Didit redirects here (DIDIT_CALLBACK_URL) when the user taps
+		     Continue at the end of the identity check; the app closes the
+		     Safari sheet on receipt. -->
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.mobly.app.return</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>moblyapp</string>
+			</array>
+		</dict>
 	</array>
 	<!--
 	  Camera and photo library.

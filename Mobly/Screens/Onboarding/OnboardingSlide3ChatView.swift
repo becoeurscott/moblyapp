@@ -121,11 +121,8 @@ private struct ChatHero: View {
 
 private struct ChatCard: View {
     var show: Bool
-    @ObservedObject private var store = ListingStore.shared
-
-    /// The listing being discussed in the chat mock — a real one if available,
-    /// otherwise the bundled Akwa studio.
-    private var listing: Listing? { store.listings.first }
+    /// The listing being discussed in the chat mock.
+    private var listing: Listing? { OnboardingShowcase.listings[1] }
 
     /// Owner name gets picked up if the real listing has one, else the
     /// historical "Paul M." keeps the mock's rhythm.
@@ -171,7 +168,7 @@ private struct ChatCard: View {
     private var header: some View {
         HStack(spacing: 10) {
             ZStack {
-                Circle().fill(LinearGradient(colors: [Color.moblyPrimary, Color(hex: 0x6D2FE0)],
+                Circle().fill(LinearGradient(colors: [Color.moblyPrimary, Color(hex: 0x071B5C)],
                                              startPoint: .top, endPoint: .bottom))
                 Text(ownerInitial).font(.moblyHeading(14)).foregroundStyle(.white)
             }

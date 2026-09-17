@@ -32,13 +32,29 @@ struct ManageListingView: View {
     init(annonce: OwnerAnnonce, onClose: @escaping () -> Void = {}) {
         self.original = annonce
         self.onClose = onClose
-        _draft = State(initialValue: annonce.listing)
+        // The editor works on `photos` (URLs). A listing that only has a
+        // cover URL still shows it as its first photo so it can be removed.
+        var listing = annonce.listing
+        if listing.photos.isEmpty, let cover = listing.coverUrl, cover.hasPrefix("http") {
+            listing.photos = [cover]
+        }
+        _draft = State(initialValue: listing)
+        _baseline = State(initialValue: listing)
     }
 
-    private var hasChanges: Bool { draft != original.listing }
+    /// `draft` as it was on open, so seeding `photos` above does not count
+    /// as an edit.
+    @State private var baseline: Listing
+    /// Photos picked in this session, uploaded on save and appended after
+    /// the existing ones.
+    @State private var newPhotos: [Data] = []
+
+    private var hasChanges: Bool { draft != baseline || !newPhotos.isEmpty }
+
+    @State private var photoPickerItems: [PhotosPickerItem] = []
 
     enum FieldKind: String, Identifiable {
-        case title, description, price, furnished, category, tags, location
+        case title, description, price, furnished, category, tags, location, photos
         var id: String { rawValue }
     }
 
@@ -84,7 +100,7 @@ struct ManageListingView: View {
         }
         .sheet(item: $editingField) { field in
             editor(for: field)
-                .presentationDetents([.medium, .large])
+                .presentationDetents(field == .photos ? [.large] : [.medium, .large])
                 .presentationDragIndicator(.visible)
         }
         .alert("Modifications non enregistrées",
@@ -136,19 +152,35 @@ struct ManageListingView: View {
     // MARK: Cover
 
     private var heroCover: some View {
-        ZStack(alignment: .bottomTrailing) {
-            ListingCover(listing: draft)
-                .frame(height: 180)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            // Placeholder for a photo editor — the wizard already handles
-            // photo pick / reorder end-to-end, so this row simply routes
-            // users to the full flow when they want to edit media.
-            Text("Modifier depuis le publier")
-                .font(.moblyBody(10.5, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Capsule().fill(.black.opacity(0.55)))
-                .padding(10)
+        VStack(alignment: .leading, spacing: 10) {
+            ZStack(alignment: .bottomTrailing) {
+                ListingCover(listing: draft)
+                    .frame(height: 180)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                Button { editingField = .photos } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "camera.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Modifier les photos")
+                            .font(.moblyBody(11, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(Capsule().fill(Color.moblyPrimary))
+                    .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                    .padding(10)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if draft.photos.count + newPhotos.count > 1 {
+                let count = draft.photos.count + newPhotos.count
+                Text("\(count) photo\(count > 1 ? "s" : "")")
+                    .font(.moblyBody(11, weight: .semibold))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+                    .padding(.leading, 4)
+            }
         }
     }
 
@@ -295,6 +327,23 @@ struct ManageListingView: View {
     private func save() async {
         guard hasChanges else { return }
         saving = true
+        if !newPhotos.isEmpty {
+            do {
+                let uploaded = try await MoblyAPI.shared.uploadOwnerPhotos(newPhotos)
+                draft.photos.append(contentsOf: uploaded.map(\.url))
+                newPhotos = []
+            } catch {
+                saving = false
+                saveError = "L'envoi des photos a échoué. Vérifiez votre connexion et réessayez."
+                return
+            }
+        }
+        // First photo is the cover; keep them in step after removals.
+        if let first = draft.photos.first(where: { $0.hasPrefix("http") }) {
+            draft.coverUrl = first
+        }
+        // Drop the device copies so the gallery reads the saved list.
+        draft.customPhotos = []
         let ok = await store.updateOnServer(draft)
         await MainActor.run {
             saving = false
@@ -326,6 +375,8 @@ struct ManageListingView: View {
         case .category:    CategoryEditor(listing: $draft, done: { editingField = nil })
         case .location:    LocationTextEditor(listing: $draft, done: { editingField = nil })
         case .tags:        TagsEditor(listing: $draft, done: { editingField = nil })
+        case .photos:      PhotosEditor(listing: $draft, newPhotos: $newPhotos,
+                                        done: { editingField = nil })
         }
     }
 }
@@ -543,6 +594,176 @@ private struct TagsEditor: View {
             .navigationTitle("Équipements")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("OK") { done() } } }
+        }
+    }
+}
+
+// MARK: - Photos editor
+
+private struct PhotosEditor: View {
+    @Binding var listing: Listing
+    @Binding var newPhotos: [Data]
+    var done: () -> Void
+    @State private var pickerItems: [PhotosPickerItem] = []
+    @State private var loading = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("La première photo sera la couverture. Touchez la croix pour retirer une photo.")
+                        .font(.moblyBody(12.5))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                        .padding(.horizontal, 4)
+
+                    // Every photo already on the annonce stays visible while
+                    // new ones are added, each with its own remove button.
+                    if listing.photos.isEmpty && newPhotos.isEmpty {
+                        emptyState
+                    } else {
+                        remotePhotosGrid
+                        if !newPhotos.isEmpty { customPhotosGrid }
+                    }
+
+                    PhotosPicker(selection: $pickerItems,
+                                 maxSelectionCount: 10,
+                                 matching: .images) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("Ajouter des photos")
+                                .font(.moblyHeading(13.5))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).frame(height: 48)
+                        .background(RoundedRectangle(cornerRadius: 14).fill(Color.moblyPrimary))
+                    }
+                    .buttonStyle(.plain)
+
+                    if loading {
+                        HStack {
+                            Spacer()
+                            ProgressView().tint(Color.moblyPrimary)
+                            Spacer()
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .navigationTitle("Photos")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("OK") { done() } } }
+            .onChange(of: pickerItems) { _, items in
+                guard !items.isEmpty else { return }
+                loading = true
+                Task {
+                    for item in items {
+                        if let data = try? await item.loadTransferable(type: Data.self) {
+                            newPhotos.append(data)
+                        }
+                    }
+                    pickerItems = []
+                    loading = false
+                }
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "photo.on.rectangle.angled")
+                .font(.system(size: 36, weight: .light))
+                .foregroundStyle(Color(hex: 0xC4C7D2))
+            Text("Aucune photo")
+                .font(.moblyHeading(13))
+                .foregroundStyle(Color.moblyTextSecondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+
+    private var customPhotosGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
+                            GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            ForEach(Array(newPhotos.enumerated()), id: \.offset) { idx, data in
+                ZStack(alignment: .topTrailing) {
+                    if let ui = UIImage(data: data) {
+                        Image(uiImage: ui)
+                            .resizable().scaledToFill()
+                            .frame(height: 120)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(alignment: .topLeading) {
+                                Text("Nouvelle")
+                                    .font(.moblyBody(9, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8).padding(.vertical, 3)
+                                    .background(Capsule().fill(Color(hex: 0x1F8A5B)))
+                                    .padding(6)
+                            }
+                    }
+                    Button {
+                        withAnimation(Motion.quick) { _ = newPhotos.remove(at: idx) }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+                            .padding(6)
+                    }
+                    .buttonStyle(.plain)
+                    if idx == 0 && listing.photos.isEmpty {
+                        Text("Couverture")
+                            .font(.moblyBody(9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Capsule().fill(Color.moblyPrimary))
+                            .padding(6)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    }
+                }
+            }
+        }
+    }
+
+    private var remotePhotosGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
+                            GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            ForEach(Array(listing.photos.enumerated()), id: \.offset) { idx, url in
+                ZStack(alignment: .topTrailing) {
+                    AsyncImage(url: URL(string: url)) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img.resizable().scaledToFill()
+                                .frame(height: 120)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        default:
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(hex: 0xF4F5F8))
+                                .frame(height: 120)
+                                .overlay(ProgressView().tint(Color(hex: 0xC4C7D2)))
+                        }
+                    }
+                    Button {
+                        withAnimation(Motion.quick) { _ = listing.photos.remove(at: idx) }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+                            .padding(6)
+                    }
+                    .buttonStyle(.plain)
+                    if idx == 0 {
+                        Text("Couverture")
+                            .font(.moblyBody(9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Capsule().fill(Color.moblyPrimary))
+                            .padding(6)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    }
+                }
+            }
         }
     }
 }

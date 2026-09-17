@@ -27,7 +27,10 @@ struct HomeView: View {
     @State private var searchText = ""
     @State private var showBecomeOwner = false
     @State private var showOwnerDashboard = false
+    @State private var carouselSetIndex = 0
     @FocusState private var searchActive: Bool
+
+    private let carouselRotation = Timer.publish(every: 180, on: .main, in: .common).autoconnect()
 
     private var searching: Bool { searchActive || !searchText.isEmpty }
 
@@ -91,6 +94,13 @@ struct HomeView: View {
         .background(Color.white)
         .opacity(appeared ? 1 : 0)
         .onAppear { withAnimation(Motion.standard) { appeared = true } }
+        .onReceive(carouselRotation) { _ in
+            let count = carouselSets.count
+            guard count > 1 else { return }
+            withAnimation(Motion.gentle) {
+                carouselSetIndex = (carouselSetIndex + 1) % count
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NetworkMonitor.didReconnect)) { _ in
             // Silent: the feed is already on screen from cache. Catching up
             // must not swap it for skeletons.
@@ -111,16 +121,75 @@ struct HomeView: View {
     }
 
     private var featuredListings: [Listing] {
-        let pool: [Listing]
-        if let city = userCity {
-            let local = liveListings.filter { $0.location.lowercased().contains(city) }
-            pool = local.isEmpty ? liveListings : local
-        } else {
-            pool = liveListings
+        let sets = carouselSets
+        guard !sets.isEmpty else { return [] }
+        return sets[carouselSetIndex % sets.count]
+    }
+
+    /// Builds up to 3 distinct sets of 6 listings that the carousel rotates
+    /// through every 3 minutes:
+    ///   0 – Boosted spaces first, filled with top-rated
+    ///   1 – Highly rated from diverse categories
+    ///   2 – Recent/nearby spaces based on user location
+    private var carouselSets: [[Listing]] {
+        let all = liveListings
+        guard !all.isEmpty else { return [] }
+        var sets: [[Listing]] = []
+
+        // --- Set 0: Boosted first, then top-rated fill ---
+        let boosted = all.filter { $0.boosted }
+        let topRated = all.sorted { score($0) > score($1) }
+        var set0 = boosted
+        for l in topRated where set0.count < 6 && !set0.contains(where: { $0.id == l.id }) {
+            set0.append(l)
         }
-        let boosted = pool.filter { $0.boosted }
-        let rest    = pool.filter { !$0.boosted }
-        return Array((boosted + rest).prefix(6))
+        sets.append(Array(set0.prefix(6)))
+
+        // --- Set 1: Highly rated, one per category for diversity ---
+        var usedIds = Set(set0.prefix(6).map(\.id))
+        let byCategory = Dictionary(grouping: all, by: \.category)
+        var set1: [Listing] = []
+        let sortedCats = byCategory.keys.sorted()
+        for cat in sortedCats {
+            guard set1.count < 6,
+                  let best = byCategory[cat]?.sorted(by: { score($0) > score($1) })
+                    .first(where: { !usedIds.contains($0.id) }) else { continue }
+            set1.append(best)
+            usedIds.insert(best.id)
+        }
+        if set1.count < 6 {
+            for l in topRated where set1.count < 6 && !usedIds.contains(l.id) {
+                set1.append(l)
+                usedIds.insert(l.id)
+            }
+        }
+        if !set1.isEmpty { sets.append(Array(set1.prefix(6))) }
+
+        // --- Set 2: Nearby / location-based ---
+        let city = userCity
+        let nearby: [Listing]
+        if let city {
+            nearby = all.filter {
+                $0.location.folding(options: .diacriticInsensitive, locale: .current)
+                    .lowercased().contains(city)
+            }
+        } else {
+            nearby = all
+        }
+        var set2: [Listing] = []
+        for l in nearby.sorted(by: { score($0) > score($1) }) where set2.count < 6 && !usedIds.contains(l.id) {
+            set2.append(l)
+            usedIds.insert(l.id)
+        }
+        if set2.count < 6 {
+            for l in topRated where set2.count < 6 && !usedIds.contains(l.id) {
+                set2.append(l)
+                usedIds.insert(l.id)
+            }
+        }
+        if !set2.isEmpty { sets.append(Array(set2.prefix(6))) }
+
+        return sets
     }
 
     // MARK: Feed (scrolls under the pinned search bar)
@@ -621,6 +690,12 @@ struct HomeView: View {
         }
         .frame(height: 184)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        // The whole card is the target, not only the arrow.
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .onTapGesture {
+            if session.isOwner { showOwnerDashboard = true }
+            else { showBecomeOwner = true }
+        }
         .shadow(color: Color.moblyPrimary.opacity(0.25), radius: 16, y: 10)
         .fullScreenCover(isPresented: $showBecomeOwner) {
             BecomeOwnerView(
@@ -634,7 +709,7 @@ struct HomeView: View {
             .swipeToDismiss(onDismiss: { showBecomeOwner = false })
         }
         .fullScreenCover(isPresented: $showOwnerDashboard) {
-            NavigationStack { OwnerDashboardView() }
+            OwnerDashboardCover()
         }
     }
 

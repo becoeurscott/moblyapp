@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { OWNER_TRIAL_DAYS, ownerTrialEndsAt } from '../../lib/ownerTrial';
 import { z } from 'zod';
 import { randomBytes, createHash } from 'node:crypto';
 import { RestrictionKind } from '@prisma/client';
@@ -40,6 +41,60 @@ const userSelect = {
   ownerPaid: true, ownerTrialStartedAt: true,
   createdAt: true, lastSeenAt: true,
 } as const;
+
+// ─────────────────────────────────────────────────────────────
+// Owner trials
+// ─────────────────────────────────────────────────────────────
+
+/** GET /admin/users/owner-trials — owners on the free trial, for the
+ *  dashboard countdown. Running trials come soonest-to-end first; trials that
+ *  ended unpaid in the last 30 days are listed after them so an operator can
+ *  follow up. Declared before `/:id/...` so the path is never read as an id. */
+adminUsersRouter.get(
+  '/owner-trials',
+  asyncHandler(async (_req, res) => {
+    const now = Date.now();
+    const trialMs = OWNER_TRIAL_DAYS * 24 * 60 * 60 * 1000;
+    const since = new Date(now - trialMs - 30 * 24 * 60 * 60 * 1000);
+    const [owners, paid] = await Promise.all([
+      prisma.user.findMany({
+        where: { isOwner: true, ownerPaid: false, ownerTrialStartedAt: { gte: since } },
+        select: {
+          id: true, fullName: true, phone: true, avatarUrl: true, avatarColor: true,
+          ownerTrialStartedAt: true,
+          _count: { select: { listings: true } },
+        },
+        take: 500,
+      }),
+      prisma.user.count({ where: { isOwner: true, ownerPaid: true } }),
+    ]);
+    const rows = owners.map((u) => {
+      const endsAt = ownerTrialEndsAt(u.ownerTrialStartedAt)!;
+      return {
+        id: u.id,
+        fullName: u.fullName,
+        phone: u.phone,
+        avatarUrl: u.avatarUrl,
+        avatarColor: u.avatarColor,
+        listings: u._count.listings,
+        trialStartedAt: u.ownerTrialStartedAt,
+        trialEndsAt: endsAt,
+        expired: endsAt.getTime() <= now,
+      };
+    });
+    const active = rows.filter((r) => !r.expired)
+      .sort((a, b) => a.trialEndsAt.getTime() - b.trialEndsAt.getTime());
+    const expired = rows.filter((r) => r.expired)
+      .sort((a, b) => b.trialEndsAt.getTime() - a.trialEndsAt.getTime());
+    res.json({
+      trialDays: OWNER_TRIAL_DAYS,
+      serverTime: new Date(now),
+      counts: { active: active.length, expired: expired.length, paid },
+      active,
+      expired,
+    });
+  })
+);
 
 // ─────────────────────────────────────────────────────────────
 // Detail

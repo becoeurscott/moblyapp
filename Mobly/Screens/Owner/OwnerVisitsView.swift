@@ -177,7 +177,7 @@ struct OwnerVisitsView: View {
                         .font(.moblyBody(12, weight: .semibold))
                         .foregroundStyle(Color.moblyAccent)
                         .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Capsule().fill(Color(hex: 0xFFF3EC)))
+                        .background(Capsule().fill(Color(hex: 0xEAF3FF)))
                 }
             }
         }
@@ -292,7 +292,7 @@ private struct VisitCard: View {
     }
     private var statusFG: Color {
         switch visit.status {
-        case "REQUESTED": return Color(hex: 0xC24E10)
+        case "REQUESTED": return Color(hex: 0x1F6FD9)
         case "CONFIRMED": return Color(hex: 0x1F8A5B)
         case "CANCELLED": return Color(hex: 0xE5484D)
         case "COMPLETED": return Color.moblyPrimary
@@ -302,7 +302,7 @@ private struct VisitCard: View {
     }
     private var statusBG: Color {
         switch visit.status {
-        case "REQUESTED": return Color(hex: 0xFFF3EC)
+        case "REQUESTED": return Color(hex: 0xEAF3FF)
         case "CONFIRMED": return Color(hex: 0xE9F9EF)
         case "CANCELLED": return Color(hex: 0xFDEDED)
         case "COMPLETED": return Color(hex: 0xEEF0FE)

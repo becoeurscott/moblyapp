@@ -9,7 +9,7 @@ extension Color {
     }
 
     static let moblyPrimary        = Color(hex: 0x3A4FF0)
-    static let moblyAccent         = Color(hex: 0xFF6B35)
+    static let moblyAccent         = Color(hex: 0x4C9BFF) // light blue (was orange)
     static let moblyTextPrimary    = Color(hex: 0x1A1A2E)
     static let moblyTextSecondary  = Color(hex: 0x666666)
     static let moblySurface        = Color(hex: 0xFAFAF7)

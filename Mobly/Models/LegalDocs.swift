@@ -186,7 +186,7 @@ enum LegalLibrary {
         summary: "Boost, paiement Mobile Money, remboursement",
         nav: "Services payants",
         icon: "creditcard.fill",
-        tint: 0xFFF1EA,
+        tint: 0xEAF3FF,
         intro: "La publication d'une annonce sur Mobly est gratuite. Certaines fonctionnalités de visibilité sont payantes. Ces conditions complètent les CGU et s'appliquent à tout achat effectué dans l'application.",
         sections: [
             LegalSection(
@@ -461,7 +461,7 @@ enum LegalLibrary {
         summary: "Comment nous traitons les signalements",
         nav: "Signalement",
         icon: "flag.fill",
-        tint: 0xFFF1EA,
+        tint: 0xEAF3FF,
         intro: "Mobly héberge des contenus publiés par ses utilisateurs. Nous n'exerçons pas de contrôle a priori sur chaque annonce, mais nous agissons promptement dès qu'un contenu illicite ou non conforme nous est signalé.",
         sections: [
             LegalSection(
@@ -502,7 +502,7 @@ enum LegalLibrary {
         summary: "Ne payez jamais avant d'avoir visité",
         nav: "Sécurité des visites",
         icon: "exclamationmark.shield.fill",
-        tint: 0xFFF1EA,
+        tint: 0xEAF3FF,
         intro: "Une visite se déroule hors de l'application, entre deux personnes majeures et responsables. Mobly n'accompagne pas les visites et ne peut pas en garantir le déroulement. Ces règles réduisent fortement le risque.",
         sections: [
             LegalSection(

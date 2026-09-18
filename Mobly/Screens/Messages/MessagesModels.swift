@@ -88,7 +88,7 @@ extension ChatThread {
     /// hue between launches.
     private static func avatarColor(for id: String) -> Color {
         let palette: [Color] = [
-            .moblyPrimary, Color(hex: 0xFF6B35), Color(hex: 0x1F8A5B),
+            .moblyPrimary, Color(hex: 0x4C9BFF), Color(hex: 0x1F8A5B),
             Color(hex: 0x8B5CF6), Color(hex: 0xD9A21B), Color(hex: 0x2E7BE4),
         ]
         return palette[abs(id.hashValue) % palette.count]

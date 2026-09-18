@@ -247,7 +247,8 @@ struct MainTabView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .overlay(alignment: .top) { ConnectionBanner() }
+        // In the layout, not over it: the banner pushes the screen down.
+        .safeAreaInset(edge: .top, spacing: 0) { ConnectionBanner() }
         .animation(Motion.quick, value: chrome.hideTabBar)
         .ignoresSafeArea(.keyboard)
         .onAppear { SessionTracker.shared.log("screen.view", ["screen": "\(tab)"]) }

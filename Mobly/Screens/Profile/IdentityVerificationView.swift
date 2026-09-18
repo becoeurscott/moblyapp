@@ -161,9 +161,9 @@ struct IdentityVerificationView: View {
                                 .font(.moblyBody(12, weight: .semibold))
                                 .monospacedDigit()
                         }
-                        .foregroundStyle(Color(hex: 0xC24E10))
+                        .foregroundStyle(Color(hex: 0x1F6FD9))
                         .padding(.horizontal, 9).padding(.vertical, 5)
-                        .background(Capsule().fill(Color(hex: 0xFFF3EC)))
+                        .background(Capsule().fill(Color(hex: 0xEAF3FF)))
                         .padding(.top, 2)
                         .accessibilityLabel(Text("Reprise possible encore \(Int(left) / 60) minutes"))
                     }

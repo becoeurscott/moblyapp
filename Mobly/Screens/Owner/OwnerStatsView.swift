@@ -119,7 +119,7 @@ struct OwnerStatsView: View {
             if annonce.isBoosted {
                 Text("BOOSTÉE").font(.moblyBody(10, weight: .bold)).foregroundStyle(Color.moblyAccent)
                     .padding(.horizontal, 9).padding(.vertical, 5)
-                    .background(Capsule().fill(Color(hex: 0xFFF3EC)))
+                    .background(Capsule().fill(Color(hex: 0xEAF3FF)))
             }
         }
         .padding(14)
@@ -135,7 +135,7 @@ struct OwnerStatsView: View {
         return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
             statCard("eye.fill", 0x3A4FF0, 0xEEF0FE, totalViews.formattedGrouped, "Vues totales", d?.views)
             statCard("bubble.left.fill", 0x1F8A5B, 0xE9F9EF, "\(totalContacts)", "Contacts", d?.contacts)
-            statCard("heart.fill", 0xFF6B35, 0xFFF3EC, "\(totalFavorites)", "Ajouts en préférés", d?.favorites)
+            statCard("heart.fill", 0x4C9BFF, 0xEAF3FF, "\(totalFavorites)", "Ajouts en préférés", d?.favorites)
             statCard("chart.line.uptrend.xyaxis", 0x6B5BF5, 0xEDEBFE, rate, "Taux de contact", nil)
         }
     }
@@ -236,7 +236,7 @@ struct OwnerStatsView: View {
     private var sourcesCard: some View {
         // Palette per source key, cycled deterministically so the same source
         // always gets the same colour across renders.
-        let palette: [UInt32] = [0x3A4FF0, 0x1F8A5B, 0xFF6B35, 0x8B5CF6, 0x2A6FDB, 0xF5B301]
+        let palette: [UInt32] = [0x3A4FF0, 0x1F8A5B, 0x4C9BFF, 0x8B5CF6, 0x2A6FDB, 0xF5B301]
         let raw = stats?.sources ?? []
         return VStack(alignment: .leading, spacing: 16) {
             HStack {

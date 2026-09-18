@@ -96,6 +96,8 @@ struct OwnerAnnonce: Identifiable, Hashable {
     var favorites: Int
     var available: Bool = true
     var boostDaysLeft: Int? = nil          // non-nil ⇒ boosted
+    /// Exact end of the boost, for the live countdown on the card.
+    var boostEndsAt: Date? = nil
     var status: AnnonceStatus = .active
     /// Non-nil only for an annonce published from this device that the server
     /// hasn't confirmed yet. Server-backed annonces are always nil.
@@ -136,6 +138,7 @@ final class OwnerListings: ObservableObject {
                 favorites: dto.favorites,
                 available: dto.available,
                 boostDaysLeft: dto.boostDaysLeft,
+                boostEndsAt: dto.boostExpiresAt,
                 status: Self.status(from: dto.status)
             )
         }
@@ -437,10 +440,29 @@ final class OwnerListings: ObservableObject {
         }
     }
 
-    func boost(_ annonce: OwnerAnnonce, days: Int = 30) {
-        guard let i = annonces.firstIndex(where: { $0.id == annonce.id }) else { return }
-        annonces[i].boostDaysLeft = days
-        annonces[i].status = .boosted
+    /// Boost on the server, then mirror it here. This used to flip the local
+    /// row only: the boost was lost on the next refresh and never reached the
+    /// public feed. Returns an error message, or nil on success.
+    @MainActor
+    func boost(_ annonce: OwnerAnnonce, days: Int) async -> String? {
+        do {
+            let dto = try await MoblyAPI.shared.boost(listingId: annonce.listing.id, days: days)
+            if let i = annonces.firstIndex(where: { $0.id == annonce.id }) {
+                withAnimation(Motion.standard) {
+                    annonces[i].boostDaysLeft = dto.boostDaysLeft ?? days
+                    annonces[i].boostEndsAt = dto.boostExpiresAt
+                        ?? Date().addingTimeInterval(TimeInterval(days) * 86_400)
+                    annonces[i].status = .boosted
+                    annonces[i].listing.boosted = true
+                }
+            }
+            await ListingStore.shared.refresh()
+            return nil
+        } catch let e as MoblyAPI.APIError {
+            return e.message
+        } catch {
+            return "Le boost n'a pas pu être activé. Vérifiez votre connexion et réessayez."
+        }
     }
 
     // Aggregate 30-day performance across all annonces.

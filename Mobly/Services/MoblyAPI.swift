@@ -1284,6 +1284,8 @@ struct ListingDTO: Codable, Identifiable {
     let contacts: Int
     let favorites: Int
     let boostDaysLeft: Int?
+    /// When the running boost ends. Optional so older payloads still decode.
+    let boostExpiresAt: Date?
     let lat: Double?
     let lng: Double?
     let owner: OwnerRef?

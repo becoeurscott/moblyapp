@@ -35,6 +35,20 @@ struct OwnerDashboardView: View {
         return auth.user?.ownerTrialDaysLeft
     }
 
+    /// Exact end of the running trial, for the live countdown. The server
+    /// sends it with fractional seconds, which the default parser rejects.
+    private var trialEndsAt: Date? {
+        if let s = ProcessInfo.processInfo.environment["FORCE_TRIAL_DAYS"], let i = Double(s) {
+            return Date().addingTimeInterval(i * 86_400 - 3_600)
+        }
+        guard auth.user?.ownerTrialDaysLeft != nil, let raw = auth.user?.ownerTrialEndsAt else { return nil }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: raw) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: raw)
+    }
+
     private enum Filter: CaseIterable {
         case all, active, boosted, pending
         var title: String {
@@ -53,7 +67,8 @@ struct OwnerDashboardView: View {
             } else {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 18) {
-                        if let days = trialDaysLeft { trialBanner(days) }
+                        if let end = trialEndsAt { trialBanner(end) }
+                        else if let days = trialDaysLeft { trialBanner(days) }
                         performanceCard
                         visitsCard
                         filterBar
@@ -154,7 +169,7 @@ struct OwnerDashboardView: View {
         }
         .sheet(item: $boostAnnonce) { annonce in
             BoostSheet(annonce: annonce) { days in
-                store.boost(annonce, days: days)
+                await store.boost(annonce, days: days)
             }
             .presentationDetents([.height(620), .large])
             .presentationDragIndicator(.visible)
@@ -180,6 +195,68 @@ struct OwnerDashboardView: View {
     }
 
     // MARK: Trial banner + locked paywall
+
+    /// Free-trial banner with a live "2 j 04:12:09" countdown and a bar for
+    /// the share of the trial already used. At zero the account is reloaded
+    /// so the dashboard locks without waiting for the next refresh.
+    private func trialBanner(_ end: Date) -> some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let left = max(end.timeIntervalSince(context.date), 0)
+            let total: TimeInterval = 7 * 86_400
+            let used = min(max(1 - left / total, 0), 1)
+            let urgent = left < 86_400
+            let s = Int(left)
+            let clock = String(format: "%02d:%02d:%02d", s % 86_400 / 3600, s % 3600 / 60, s % 60)
+            let days = s / 86_400
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: urgent ? "hourglass" : "gift.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 40, height: 40)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.22)))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Essai gratuit · temps restant")
+                            .font(.moblyBody(11.5, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.8))
+                        Text(days > 0 ? "\(days) j \(clock)" : clock)
+                            .font(.moblyHeading(22))
+                            .monospacedDigit()
+                            .foregroundStyle(urgent ? Color(hex: 0xFFB4B6) : .white)
+                            .contentTransition(.numericText(countsDown: true))
+                    }
+                    Spacer(minLength: 6)
+                    Button { showReactivate = true } label: {
+                        Text("Payer")
+                            .font(.moblyHeading(12))
+                            .foregroundStyle(Color.moblyPrimary)
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .background(Capsule().fill(.white))
+                    }
+                    .buttonStyle(.plain)
+                }
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.white.opacity(0.18))
+                        Capsule().fill(urgent ? Color(hex: 0xFF6B6F) : Color(hex: 0x7CF0B4))
+                            .frame(width: geo.size.width * used)
+                    }
+                }
+                .frame(height: 6)
+                Text("Payez une fois 5 000 FCFA pour garder votre compte actif.")
+                    .font(.moblyBody(11)).foregroundStyle(.white.opacity(0.85))
+            }
+            .onChange(of: left == 0) { _, ended in
+                if ended { Task { await auth.bootstrap() } }
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 18)
+            .fill(LinearGradient(colors: [Color(hex: 0x1A2266), Color(hex: 0x2A3690)],
+                                 startPoint: .topLeading, endPoint: .bottomTrailing)))
+        .shadow(color: Color(hex: 0x1A2266).opacity(0.35), radius: 14, y: 6)
+    }
 
     private func trialBanner(_ days: Int) -> some View {
         HStack(spacing: 12) {
@@ -838,16 +915,30 @@ private struct AnnonceCard: View {
         }
     }
 
+    /// Boost status with a live countdown to its end (days + hh:mm:ss), or the
+    /// day count when the server did not send an end date.
     private var boostRow: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "bolt.fill").font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color.moblyAccent)
-            Text("Boost actif · \(annonce.boostDaysLeft ?? 0) j restants")
-                .font(.moblyHeading(12)).foregroundStyle(Color(hex: 0xC24E10))
-            Spacer()
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.fill").font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.moblyAccent)
+                Text("Boost actif").font(.moblyHeading(12)).foregroundStyle(Color(hex: 0x1F6FD9))
+                Spacer()
+                Group {
+                    if let end = annonce.boostEndsAt {
+                        let s = max(Int(end.timeIntervalSince(context.date)), 0)
+                        let clock = String(format: "%02d:%02d:%02d", s % 86_400 / 3600, s % 3600 / 60, s % 60)
+                        Text(s >= 86_400 ? "\(s / 86_400) j \(clock)" : clock)
+                    } else {
+                        Text("\(annonce.boostDaysLeft ?? 0) j restants")
+                    }
+                }
+                .font(.moblyHeading(12.5)).monospacedDigit()
+                .foregroundStyle(Color(hex: 0x1F6FD9))
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 11).fill(Color(hex: 0xFFF3EC)))
+        .background(RoundedRectangle(cornerRadius: 11).fill(Color(hex: 0xEAF3FF)))
     }
 
     private var actionRow: some View {
@@ -855,7 +946,7 @@ private struct AnnonceCard: View {
             if annonce.available {
                 // Boosting only makes sense for an available annonce.
                 if !annonce.isBoosted && config.isEnabled("boost.enabled") {
-                    actionButton("Booster", "bolt.fill", fg: 0xC24E10, bg: 0xFFF3EC, action: onBoost)
+                    actionButton("Booster", "bolt.fill", fg: 0x1F6FD9, bg: 0xEAF3FF, action: onBoost)
                 }
                 if config.isEnabled("listings.edit") {
                     actionButton("Modifier", "pencil", fg: 0x3A4FF0, bg: 0xEEF0FE, action: onEdit)

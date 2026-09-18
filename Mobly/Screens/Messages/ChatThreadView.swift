@@ -46,6 +46,9 @@ struct ChatThreadView: View {
     /// No camera on this device (simulator, or an iPad without one).
     @State private var cameraUnavailable = false
     @State private var fullScreenImageURL: URL?
+    /// Photos of a tapped stack, shown in a paged full-screen gallery.
+    @State private var galleryURLs: [URL] = []
+    @State private var galleryStart = 0
     @State private var fullScreenLocalImage: UIImage?
     /// Server-reported availability of the listing this conversation is
     /// about. `.unavailable` greys the pill and shows "Non disponible";
@@ -528,6 +531,38 @@ struct ChatThreadView: View {
 
     // MARK: Messages list
 
+    /// Runs of consecutive photos from the same sender, sent within two
+    /// minutes of each other on the same day. Keyed by the run's FIRST message
+    /// id (so the row identity stays put as more photos land); every other
+    /// member of a run is listed in `hidden` and not drawn on its own.
+    /// Replies and reacted photos stay standalone so their quote/emoji show.
+    private var photoGroups: (groups: [String: [ChatMessage]], hidden: Set<String>) {
+        var groups: [String: [ChatMessage]] = [:]
+        var hidden = Set<String>()
+        func groupable(_ m: ChatMessage) -> Bool {
+            m.kind == .image && m.replyToText == nil && m.reaction == nil
+        }
+        var i = 0
+        while i < messages.count {
+            let head = messages[i]
+            guard groupable(head) else { i += 1; continue }
+            var run = [head]
+            var j = i + 1
+            while j < messages.count {
+                let prev = run[run.count - 1], next = messages[j]
+                guard groupable(next), next.fromMe == head.fromMe, next.day == prev.day,
+                      abs(next.createdAt.timeIntervalSince(prev.createdAt)) <= 120 else { break }
+                run.append(next); j += 1
+            }
+            if run.count > 1 {
+                groups[head.id] = run
+                run.dropFirst().forEach { hidden.insert($0.id) }
+            }
+            i = j
+        }
+        return (groups, hidden)
+    }
+
     private var messagesList: some View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
@@ -565,6 +600,28 @@ struct ChatThreadView: View {
                             if i == 0 || messages[i - 1].day != m.day {
                                 DateSeparator(text: m.day)
                             }
+                            if let group = photoGroups.groups[m.id] {
+                                // Several photos sent together render as one
+                                // stacked deck; the rest of the run is skipped.
+                                // Long-press / swipe act on the LAST photo.
+                                let last = group[group.count - 1]
+                                PhotoStackBubble(
+                                    messages: group,
+                                    onReply: { replyingTo = last },
+                                    onReact: { reactionTarget = last },
+                                    onOpen: { start in
+                                        let urls = group.compactMap { g -> URL? in
+                                            guard !g.mediaExpired, let s = g.mediaUrl else { return nil }
+                                            return URL(string: s)
+                                        }
+                                        guard !urls.isEmpty else { return }
+                                        galleryStart = min(start, urls.count - 1)
+                                        galleryURLs = urls
+                                    }
+                                )
+                                .transition(.scale(scale: 0.85, anchor: m.fromMe ? .bottomTrailing : .bottomLeading).combined(with: .opacity))
+                                .id(m.id)
+                            } else if !photoGroups.hidden.contains(m.id) {
                             MessageBubble(
                                 message: m,
                                 onReply: { replyingTo = m },
@@ -574,6 +631,7 @@ struct ChatThreadView: View {
                             )
                             .transition(.scale(scale: 0.85, anchor: m.fromMe ? .bottomTrailing : .bottomLeading).combined(with: .opacity))
                             .id(m.id)
+                            }
                         }
                     }
 
@@ -604,6 +662,16 @@ struct ChatThreadView: View {
             .onChange(of: uploadingPreview == nil) { _, _ in scrollDown(proxy) }
             .onChange(of: sendingVoice == nil) { _, _ in scrollDown(proxy) }
             .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+        }
+        // Attached here rather than next to the single-photo cover so the two
+        // full-screen presentations don't compete on the same view.
+        .fullScreenCover(isPresented: Binding(
+            get: { !galleryURLs.isEmpty },
+            set: { if !$0 { galleryURLs = [] } }
+        )) {
+            FullScreenGalleryViewer(urls: galleryURLs, startIndex: galleryStart,
+                                    onClose: { galleryURLs = [] })
+                .ignoresSafeArea()
         }
     }
 
@@ -900,7 +968,7 @@ struct ChatThreadView: View {
                         activeSheet = .camera
                     }
                 }
-                attachItem("doc.fill", "Document", 0xFF6B35, enabled: false) { }
+                attachItem("doc.fill", "Document", 0x4C9BFF, enabled: false) { }
                 attachItem("mappin.circle.fill", "Position", 0xE5484D, enabled: config.isEnabled("chat.location")) { sendLocation() }
                 attachItem("person.crop.circle.fill", "Contact", 0x8B5CF6, enabled: false) { }
                 attachItem("chart.bar.fill", "Sondage", 0x2A6FDB, enabled: false) { }
@@ -1738,7 +1806,7 @@ struct VisitCardBubble: View {
         case "CANCELLED":   return Color(hex: 0xE5484D)
         case "COMPLETED":   return Color.moblyPrimary
         case "NO_SHOW":     return Color(hex: 0x9A9DAC)
-        case "RESCHEDULED": return Color(hex: 0xC24E10)
+        case "RESCHEDULED": return Color(hex: 0x1F6FD9)
         default:            return Color.moblyAccent   // REQUESTED
         }
     }
@@ -1748,8 +1816,8 @@ struct VisitCardBubble: View {
         case "CANCELLED":   return Color(hex: 0xFDEDED)
         case "COMPLETED":   return Color(hex: 0xEEF0FE)
         case "NO_SHOW":     return Color(hex: 0xF1F2F6)
-        case "RESCHEDULED": return Color(hex: 0xFFF3EC)
-        default:            return Color(hex: 0xFFF3EC)
+        case "RESCHEDULED": return Color(hex: 0xEAF3FF)
+        default:            return Color(hex: 0xEAF3FF)
         }
     }
     private var icon: String {
@@ -1872,7 +1940,7 @@ struct PinnedVisitStrip: View {
         case "CANCELLED":   return Color(hex: 0xE5484D)
         case "COMPLETED":   return Color.moblyPrimary
         case "NO_SHOW":     return Color(hex: 0x9A9DAC)
-        case "RESCHEDULED": return Color(hex: 0xC24E10)
+        case "RESCHEDULED": return Color(hex: 0x1F6FD9)
         default:            return Color.moblyAccent
         }
     }
@@ -1882,8 +1950,8 @@ struct PinnedVisitStrip: View {
         case "CANCELLED":   return Color(hex: 0xFDEDED)
         case "COMPLETED":   return Color(hex: 0xEEF0FE)
         case "NO_SHOW":     return Color(hex: 0xF1F2F6)
-        case "RESCHEDULED": return Color(hex: 0xFFF3EC)
-        default:            return Color(hex: 0xFFF3EC)
+        case "RESCHEDULED": return Color(hex: 0xEAF3FF)
+        default:            return Color(hex: 0xEAF3FF)
         }
     }
     private var icon: String {
@@ -2261,6 +2329,216 @@ struct FullScreenImageViewer: View {
     }
 }
 
+// MARK: - Photo stack (several photos sent together)
+
+/// A run of photos sent back to back, drawn as ONE bubble. Two photos sit
+/// side by side, slightly overlapped; three or more fan out as a deck (like a
+/// Photos memory) with the first two on top, a "+N" pill on the top card and a
+/// frosted "N photos" label. Tapping opens the whole run in a paged gallery.
+/// Time and ticks are the LAST photo's, since that is when the run finished.
+struct PhotoStackBubble: View {
+    let messages: [ChatMessage]
+    var onReply: () -> Void = {}
+    var onReact: () -> Void = {}
+    /// Index (among the run's viewable photos) to open the gallery at.
+    var onOpen: (Int) -> Void = { _ in }
+
+    @State private var dragOffset: CGFloat = 0
+
+    private var last: ChatMessage { messages[messages.count - 1] }
+    private var fromMe: Bool { last.fromMe }
+
+    var body: some View {
+        HStack {
+            if fromMe { Spacer(minLength: 30) }
+            stack
+                .contentShape(Rectangle())
+                .onTapGesture { onOpen(0) }
+                .offset(x: dragOffset)
+                .gesture(replySwipe)
+                .contextMenu {
+                    Button { onReply() } label: { Label("Répondre", systemImage: "arrowshape.turn.up.left") }
+                    Button { onReact() } label: { Label("Réagir", systemImage: "face.smiling") }
+                }
+            if !fromMe { Spacer(minLength: 30) }
+        }
+    }
+
+    @ViewBuilder private var stack: some View {
+        if messages.count == 2 {
+            // Two photos: both fully readable, the second tucked slightly
+            // under the first with a small opposing tilt.
+            let w: CGFloat = 132
+            ZStack {
+                card(messages[1], width: w)
+                    .rotationEffect(.degrees(4))
+                    .offset(x: 58, y: 6)
+                    .onTapGesture { onOpen(1) }
+                card(messages[0], width: w)
+                    .rotationEffect(.degrees(-3))
+                    .offset(x: -58)
+                    .onTapGesture { onOpen(0) }
+            }
+            .frame(width: 2 * w + 24, height: w * 16 / 9 + 20)
+            .overlay(alignment: .bottom) { label(showCount: false).padding(.bottom, 2) }
+        } else {
+            // Deck: a third card peeks out behind, two photos on top.
+            let w: CGFloat = 170
+            ZStack {
+                card(messages[2], width: w)
+                    .rotationEffect(.degrees(-9))
+                    .offset(x: -18, y: 4)
+                card(messages[1], width: w)
+                    .rotationEffect(.degrees(7))
+                    .offset(x: 20, y: 2)
+                card(messages[0], width: w)
+                    .rotationEffect(.degrees(-2))
+                    .overlay(alignment: .topTrailing) {
+                        Text("+\(messages.count - 2)")
+                            .font(.moblyBody(12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 9).padding(.vertical, 4)
+                            .background(Capsule().fill(Color.black.opacity(0.45)))
+                            .padding(10)
+                            .rotationEffect(.degrees(-2))
+                    }
+            }
+            .frame(width: w + 60, height: w * 16 / 9 + 30)
+            .overlay(alignment: .bottom) { label(showCount: true).padding(.bottom, 8) }
+        }
+    }
+
+    /// Frosted capsule centred under the deck: "10 photos · 14:02 ✓✓".
+    private func label(showCount: Bool) -> some View {
+        HStack(spacing: 5) {
+            if showCount {
+                Text("\(messages.count) photos")
+                    .font(.moblyBody(11.5, weight: .semibold))
+                Text("·").font(.system(size: 10))
+            }
+            Text(last.time).font(.system(size: 9.5))
+            if fromMe { ticks }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(Capsule().fill(.ultraThinMaterial).environment(\.colorScheme, .dark))
+        .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 0.5))
+    }
+
+    /// One photo card: white border, rounded corners, soft shadow. Expired
+    /// and not-yet-uploaded photos keep the card shape with a muted fill.
+    private func card(_ m: ChatMessage, width: CGFloat) -> some View {
+        let h = width * 16 / 9
+        return Group {
+            if !m.mediaExpired, let s = m.mediaUrl, let url = URL(string: s) {
+                CachedChatImage(url: url, imgWidth: width)
+            } else {
+                ZStack {
+                    Color(hex: 0xF1F2F6)
+                    Image(systemName: m.mediaExpired ? "clock.badge.xmark" : "photo")
+                        .font(.system(size: 24))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                }
+                .frame(width: width, height: h)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .stroke(Color.white, lineWidth: 3))
+        .shadow(color: Color.black.opacity(0.18), radius: 8, y: 3)
+    }
+
+    private var ticks: some View {
+        Group {
+            switch last.status {
+            case .sent:
+                Image(systemName: "checkmark").font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.8))
+            case .delivered, .read:
+                ZStack {
+                    Image(systemName: "checkmark").font(.system(size: 9, weight: .semibold)).offset(x: -3)
+                    Image(systemName: "checkmark").font(.system(size: 9, weight: .semibold)).offset(x: 1)
+                }
+                .foregroundStyle(last.status == .read ? Color(hex: 0x8FE3FF) : Color.white.opacity(0.8))
+            }
+        }
+    }
+
+    /// Same swipe-to-reply as a single bubble, replying to the last photo.
+    private var replySwipe: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onChanged { v in
+                if v.translation.width > 0 { dragOffset = min(v.translation.width, 60) }
+            }
+            .onEnded { v in
+                if v.translation.width > 45 { onReply(); UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+                withAnimation(Motion.panel) { dragOffset = 0 }
+            }
+    }
+}
+
+// MARK: - Full-screen gallery (photo stack)
+
+/// Paged viewer for a photo stack: swipe between photos, each page keeping the
+/// pinch-zoom / drag-to-dismiss of the single-photo viewer.
+struct FullScreenGalleryViewer: View {
+    let urls: [URL]
+    var startIndex: Int = 0
+    var onClose: () -> Void
+
+    @State private var index = 0
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            TabView(selection: $index) {
+                ForEach(Array(urls.enumerated()), id: \.offset) { i, url in
+                    GalleryPage(url: url, onClose: onClose).tag(i)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+
+            VStack {
+                HStack {
+                    Text("\(index + 1) / \(urls.count)")
+                        .font(.moblyBody(13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Capsule().fill(.white.opacity(0.2)))
+                        .padding(.leading, 16).padding(.top, 8)
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Circle().fill(.white.opacity(0.2)))
+                    }
+                    .padding(.trailing, 16).padding(.top, 8)
+                }
+                Spacer()
+            }
+        }
+        .statusBarHidden()
+        .onAppear { index = min(max(0, startIndex), max(0, urls.count - 1)) }
+    }
+
+    private struct GalleryPage: View {
+        let url: URL
+        var onClose: () -> Void
+        @State private var scale: CGFloat = 1
+        @State private var lastScale: CGFloat = 1
+        @State private var offset: CGSize = .zero
+        @State private var lastOffset: CGSize = .zero
+
+        var body: some View {
+            CachedFullScreenImage(url: url, scale: $scale, lastScale: $lastScale,
+                                  offset: $offset, lastOffset: $lastOffset,
+                                  onClose: onClose)
+        }
+    }
+}
+
 // MARK: - Cached chat image (bubble thumbnail)
 
 /// The one size every chat-photo state renders at — the upload preview, the
@@ -2278,8 +2556,9 @@ private struct CachedChatImage: View {
     let url: URL
     @StateObject private var loader = CachedImageLoader()
 
-    private let imgWidth = ChatImageSize.width
-    private var imgHeight: CGFloat { ChatImageSize.height }
+    /// Photo-stack cards pass a smaller width; the 9:16 ratio is kept.
+    var imgWidth: CGFloat = ChatImageSize.width
+    private var imgHeight: CGFloat { imgWidth * 16 / 9 }
 
     var body: some View {
         Group {

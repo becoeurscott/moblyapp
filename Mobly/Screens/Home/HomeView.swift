@@ -658,29 +658,22 @@ struct HomeView: View {
                                     .padding(.horizontal, 16).padding(.vertical, 9)
                                     .background(Capsule().fill(.white))
                             } else {
-                                // Arrow-only pill instead of a "Commencer" label.
-                                Image(systemName: "arrow.right")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundStyle(Color.moblyPrimary)
-                                    .frame(width: 30, height: 30)
-                                    .background(Circle().fill(.white))
+                                // One white button carrying the offer itself.
+                                HStack(spacing: 6) {
+                                    Image(systemName: "gift.fill")
+                                        .font(.system(size: 11, weight: .bold))
+                                    Text(L("7 jours d'essai gratuit"))
+                                        .font(.moblyBody(12.5, weight: .semibold))
+                                        .lineLimit(1)
+                                    Image(systemName: "arrow.right")
+                                        .font(.system(size: 12, weight: .bold))
+                                }
+                                .foregroundStyle(Color.moblyPrimary)
+                                .padding(.horizontal, 14).padding(.vertical, 9)
+                                .background(Capsule().fill(.white))
                             }
                         }
                         .buttonStyle(.plain)
-
-                        // Trial badge sits beside the button, not above it.
-                        if !session.isOwner {
-                            HStack(spacing: 5) {
-                                Image(systemName: "gift.fill")
-                                    .font(.system(size: 10, weight: .bold))
-                                Text(L("7 jours d'essai gratuit"))
-                                    .font(.moblyBody(11, weight: .bold))
-                            }
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(Capsule().fill(.white.opacity(0.22)))
-                            .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 1))
-                        }
                     }
                     .padding(.top, 2)
                 }
@@ -848,7 +841,7 @@ struct HomeView: View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Color(hex: 0xFF6B35))
+                .foregroundStyle(Color(hex: 0x4C9BFF))
             Text(LT(text))
                 .font(.moblyBody(13, weight: .medium))
                 .foregroundStyle(Color.moblyTextPrimary)
@@ -864,8 +857,8 @@ struct HomeView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(hex: 0xFFF4EE)))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: 0xFF6B35).opacity(0.3), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(hex: 0xEAF3FF)))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: 0x4C9BFF).opacity(0.3), lineWidth: 1))
     }
 
     // MARK: Loading skeleton (placeholder before first fetch)

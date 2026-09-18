@@ -170,7 +170,7 @@ struct MessagesView: View {
                                 Label(prefs.flags(for: thread.id).pinned ? "Détacher" : "Épingler",
                                       systemImage: prefs.flags(for: thread.id).pinned ? "pin.slash.fill" : "pin.fill")
                             }
-                            .tint(Color(hex: 0xFF6B35))
+                            .tint(Color(hex: 0x4C9BFF))
                         }
                     }
                 }
@@ -401,7 +401,7 @@ struct MessagesView: View {
             if chat.isOffline {
                 Label("Hors ligne", systemImage: "wifi.slash")
                     .font(.moblyBody(12, weight: .medium))
-                    .foregroundStyle(Color(hex: 0xFF6B35))
+                    .foregroundStyle(Color(hex: 0x4C9BFF))
                     .padding(.top, 4)
             }
             Spacer()

@@ -3,6 +3,7 @@ import { env } from './config/env';
 import { prisma } from './lib/prisma';
 import { attachRealtime } from './realtime/hub';
 import { primeConfig } from './services/config';
+import { startBoostExpiry } from './services/boostExpiry';
 
 const app = createApp();
 
@@ -20,6 +21,7 @@ const server = app.listen(env.port, () => {
 
 // Shares the HTTP server, so one port serves both REST and the socket.
 attachRealtime(server);
+startBoostExpiry();
 
 async function shutdown(signal: string) {
   console.log(`\n${signal} received, shutting down…`);

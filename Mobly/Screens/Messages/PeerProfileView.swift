@@ -143,7 +143,7 @@ struct PeerProfileView: View {
                 infoRow(icon: "house.fill",
                         label: "Annonces publiées",
                         value: "\(loaded?.listingsCount ?? peerListings.count)",
-                        tint: Color(hex: 0xFF6B35))
+                        tint: Color(hex: 0x4C9BFF))
             }
             if let avg = loaded?.avgRating, avg > 0 {
                 divider

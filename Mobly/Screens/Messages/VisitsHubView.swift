@@ -270,7 +270,7 @@ private struct VisitCard: View {
     }
     private var fg: Color {
         switch visit.status {
-        case "REQUESTED": return Color(hex: 0xC24E10)
+        case "REQUESTED": return Color(hex: 0x1F6FD9)
         case "CONFIRMED": return Color(hex: 0x1F8A5B)
         case "CANCELLED": return Color(hex: 0xE5484D)
         case "COMPLETED": return Color.moblyPrimary
@@ -279,7 +279,7 @@ private struct VisitCard: View {
     }
     private var bg: Color {
         switch visit.status {
-        case "REQUESTED": return Color(hex: 0xFFF1E8)
+        case "REQUESTED": return Color(hex: 0xEAF3FF)
         case "CONFIRMED": return Color(hex: 0xE9F9EF)
         case "CANCELLED": return Color(hex: 0xFDEDED)
         case "COMPLETED": return Color(hex: 0xEEF0FE)

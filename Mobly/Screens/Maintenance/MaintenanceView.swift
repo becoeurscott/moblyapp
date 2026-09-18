@@ -28,7 +28,7 @@ struct MaintenanceView: View {
 
             // Soft orange glow, echoing the splash.
             Circle()
-                .fill(Color(hex: 0xFF6B35).opacity(0.28))
+                .fill(Color(hex: 0x4C9BFF).opacity(0.28))
                 .frame(width: 320, height: 320)
                 .blur(radius: 90)
                 .offset(y: -180)

@@ -1,11 +1,12 @@
 import SwiftUI
 
-/// Boost purchase flow. Pick a plan → confirm → processing beat → success, then
-/// the annonce is boosted via `onActivate(days)`. No real payment (prototype,
-/// no backend) — this simulates the mobile-money purchase step.
+/// Boost purchase flow. Pick a plan → confirm → processing → success. The
+/// boost is saved on the server through `onActivate(days)`, which returns an
+/// error message when it fails. The Mobile Money payment step is simulated.
 struct BoostSheet: View {
     let annonce: OwnerAnnonce
-    var onActivate: (Int) -> Void
+    var onActivate: (Int) async -> String?
+    @State private var failure: String?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -44,6 +45,13 @@ struct BoostSheet: View {
             }
         }
         .animation(Motion.quick, value: phase)
+        .alert("Boost impossible", isPresented: Binding(
+            get: { failure != nil }, set: { if !$0 { failure = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(failure ?? "")
+        }
     }
 
     // MARK: Choose
@@ -107,28 +115,37 @@ struct BoostSheet: View {
                     if isSel { Circle().fill(Color.moblyPrimary).frame(width: 12, height: 12) }
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 8) {
+                    // One line: the day count and both badges keep their width.
+                    HStack(spacing: 6) {
                         Text("\(plan.days) jours").font(.moblyHeading(16)).foregroundStyle(Color.moblyTextPrimary)
+                            .lineLimit(1).fixedSize()
                         if plan.popular {
-                            Text("POPULAIRE").font(.moblyBody(9, weight: .bold)).foregroundStyle(.white)
-                                .padding(.horizontal, 7).padding(.vertical, 3)
-                                .background(Capsule().fill(Color.moblyAccent))
+                            Text("POPULAIRE").font(.moblyBody(9, weight: .bold))
+                                .foregroundStyle(Color.moblyPrimary)
+                                .lineLimit(1).fixedSize()
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(Capsule().fill(Color(hex: 0xEAF3FF)))
+                                .overlay(Capsule().stroke(Color.moblyPrimary.opacity(0.25), lineWidth: 1))
                         }
                         if savings(plan) > 0 {
                             Text("-\(savings(plan))%").font(.moblyBody(9, weight: .bold))
+                                .lineLimit(1).fixedSize()
                                 .foregroundStyle(Color(hex: 0x1F8A5B))
                                 .padding(.horizontal, 7).padding(.vertical, 3)
                                 .background(Capsule().fill(Color(hex: 0xE9F9EF)))
                         }
                     }
                     Text(plan.tagline).font(.moblyBody(12)).foregroundStyle(Color(hex: 0x9A9DAC))
+                        .lineLimit(1).minimumScaleFactor(0.85)
                 }
-                Spacer()
+                Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("\(plan.price.formattedGrouped) FCFA")
                         .font(.moblyHeading(15)).foregroundStyle(Color.moblyPrimary)
+                        .lineLimit(1).fixedSize()
                     Text("≈ \(plan.perDay) FCFA/jour")
                         .font(.moblyBody(10.5)).foregroundStyle(Color(hex: 0x9A9DAC))
+                        .lineLimit(1).fixedSize()
                 }
             }
             .padding(15)
@@ -161,7 +178,7 @@ struct BoostSheet: View {
         VStack(spacing: 0) {
             Divider()
             PillButton(title: "Activer le boost · \(plans[selected].price.formattedGrouped) FCFA",
-                       style: .primaryOrange, trailingIcon: "bolt.fill") {
+                       style: .primaryBlue, trailingIcon: "bolt.fill") {
                 startProcessing()
             }
             .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 10)
@@ -193,7 +210,7 @@ struct BoostSheet: View {
         VStack(spacing: 22) {
             Spacer()
             ZStack {
-                Circle().fill(Color(hex: 0xFFF3EC)).frame(width: 96, height: 96)
+                Circle().fill(Color(hex: 0xEAF3FF)).frame(width: 96, height: 96)
                 Image(systemName: "checkmark").font(.system(size: 40, weight: .bold))
                     .foregroundStyle(Color.moblyAccent)
             }
@@ -215,10 +232,19 @@ struct BoostSheet: View {
     private func startProcessing() {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         withAnimation { phase = .processing }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-            onActivate(plans[selected].days)
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            withAnimation { phase = .done }
+        Task {
+            // Keep the processing beat readable even when the server is fast.
+            async let pause: Void = { try? await Task.sleep(nanoseconds: 1_200_000_000) }()
+            let error = await onActivate(plans[selected].days)
+            _ = await pause
+            if let error {
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                withAnimation { phase = .choose }
+                failure = error
+            } else {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                withAnimation { phase = .done }
+            }
         }
     }
 }

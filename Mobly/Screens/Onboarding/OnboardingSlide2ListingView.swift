@@ -79,7 +79,7 @@ private struct BoostHero: View {
                     .opacity(entered ? 1 : 0)
                     .animation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true), value: float)
 
-                chip("bolt.fill", "×3 plus de vues", tint: 0xFF6B35)
+                chip("bolt.fill", "×3 plus de vues", tint: 0x4C9BFF)
                     .position(x: w * 0.78, y: w * 0.90 + (float ? 7 : -5))
                     .opacity(entered ? 1 : 0)
                     .animation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true), value: float)
@@ -154,7 +154,7 @@ private struct BoostHero: View {
         }
         .padding(9)
         .background(RoundedRectangle(cornerRadius: 15)
-            .fill(boosted ? Color(hex: 0xFFF3EC) : Color(hex: 0xF7F8FA)))
+            .fill(boosted ? Color(hex: 0xEAF3FF) : Color(hex: 0xF7F8FA)))
         .overlay(RoundedRectangle(cornerRadius: 15)
             .stroke(boosted ? Color.moblyAccent.opacity(0.35) : .clear, lineWidth: 1.5))
     }
@@ -172,7 +172,7 @@ private struct BoostHero: View {
         }
         .padding(9)
         .background(RoundedRectangle(cornerRadius: 15)
-            .fill(boosted ? Color(hex: 0xFFF3EC) : Color(hex: 0xF7F8FA)))
+            .fill(boosted ? Color(hex: 0xEAF3FF) : Color(hex: 0xF7F8FA)))
         .overlay(RoundedRectangle(cornerRadius: 15)
             .stroke(boosted ? Color.moblyAccent.opacity(0.35) : .clear, lineWidth: 1.5))
     }

@@ -149,7 +149,7 @@ struct OwnerOverallStatsView: View {
             tile("heart.fill", "Favoris", "\(totals?.favorites ?? data?.favorites ?? 0)", 0xE5484D)
             tile("calendar", "Demandes de visite", "\(totals?.visits ?? 0)", 0x8B5CF6)
             tile("percent", "Taux de contact",
-                 String(format: "%.1f%%", totals?.contactRate ?? 0), 0xFF6B35)
+                 String(format: "%.1f%%", totals?.contactRate ?? 0), 0x4C9BFF)
         }
     }
 
@@ -231,7 +231,7 @@ struct OwnerOverallStatsView: View {
     // MARK: Sources
 
     private var sourcesCard: some View {
-        let palette: [UInt32] = [0x3A4FF0, 0x1F8A5B, 0xFF6B35, 0x8B5CF6, 0x2A6FDB, 0xF5B301]
+        let palette: [UInt32] = [0x3A4FF0, 0x1F8A5B, 0x4C9BFF, 0x8B5CF6, 0x2A6FDB, 0xF5B301]
         let rows = data?.sources30d ?? []
         return VStack(alignment: .leading, spacing: 16) {
             HStack {

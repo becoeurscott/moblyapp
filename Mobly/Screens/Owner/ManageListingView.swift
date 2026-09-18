@@ -139,7 +139,7 @@ struct ManageListingView: View {
                     .foregroundStyle(Color.moblyTextPrimary)
                 Text(hasChanges ? "Modifications non enregistrées" : "À jour")
                     .font(.moblyBody(11))
-                    .foregroundStyle(hasChanges ? Color(hex: 0xC24E10) : Color(hex: 0x9A9DAC))
+                    .foregroundStyle(hasChanges ? Color(hex: 0x1F6FD9) : Color(hex: 0x9A9DAC))
             }
             Spacer()
             Color.clear.frame(width: 42, height: 42)
@@ -229,10 +229,10 @@ struct ManageListingView: View {
         Button { editingField = .tags } label: {
             HStack(alignment: .top, spacing: 13) {
                 ZStack {
-                    Circle().fill(Color(hex: 0xFFF3EC)).frame(width: 40, height: 40)
+                    Circle().fill(Color(hex: 0xEAF3FF)).frame(width: 40, height: 40)
                     Image(systemName: "sparkles")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color(hex: 0xFF6B35))
+                        .foregroundStyle(Color(hex: 0x4C9BFF))
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     Text("ÉQUIPEMENTS")

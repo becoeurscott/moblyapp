@@ -120,13 +120,13 @@ enum MoblyData {
 
     static let categories: [CategoryItem] = [
         CategoryItem(label: "Chambres", icon: "bed.double.fill", tint: 0xEAF6EF),
-        CategoryItem(label: "Studios", icon: "square.split.bottomrightquarter.fill", tint: 0xFFF1EA),
+        CategoryItem(label: "Studios", icon: "square.split.bottomrightquarter.fill", tint: 0xEAF3FF),
         CategoryItem(label: "Appartements", icon: "building.2.fill", tint: 0xF3EEFB),
         CategoryItem(label: "Villas", icon: "house.fill", tint: 0xEEF0FE),
-        CategoryItem(label: "Bureaux", icon: "building.2.fill", tint: 0xFFF1EA),
+        CategoryItem(label: "Bureaux", icon: "building.2.fill", tint: 0xEAF3FF),
         CategoryItem(label: "Boutiques", icon: "bag.fill", tint: 0xF3EEFB),
         CategoryItem(label: "Coworking", icon: "person.3.fill", tint: 0xEAF6EF),
-        CategoryItem(label: "Commercial", icon: "storefront.fill", tint: 0xFFF1EA),
+        CategoryItem(label: "Commercial", icon: "storefront.fill", tint: 0xEAF3FF),
     ]
 
     static let nearby: [Listing] = []

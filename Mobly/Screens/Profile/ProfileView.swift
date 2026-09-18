@@ -55,7 +55,7 @@ struct ProfileView: View {
     /// locale wiring are still there, so re-enabling is a one-line change.
     private var prefs: [MenuItem] { [
         AppLang.selectionEnabled
-            ? MenuItem(label: "Langue", icon: "globe", iconBg: 0xFFF3EC, iconColor: 0xFF6B35,
+            ? MenuItem(label: "Langue", icon: "globe", iconBg: 0xEAF3FF, iconColor: 0x4C9BFF,
                        value: lang.code == "en" ? "English" : "Français", route: .language)
             : nil,
         config.isEnabled("notifications.push")

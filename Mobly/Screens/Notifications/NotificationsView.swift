@@ -26,11 +26,11 @@ struct MoblyNotification: Identifiable {
             switch self {
             case .message:    return 0x3A4FF0
             case .visit:      return 0x1F8A5B
-            case .match:      return 0xFF6B35
+            case .match:      return 0x4C9BFF
             case .priceDrop:  return 0x1F8A5B
             case .verified:   return 0x3A4FF0
-            case .boost:      return 0xFF6B35
-            case .newListing: return 0xFF6B35
+            case .boost:      return 0x4C9BFF
+            case .newListing: return 0x4C9BFF
             case .reengage:   return 0x3A4FF0
             }
         }
@@ -38,7 +38,7 @@ struct MoblyNotification: Identifiable {
             switch self {
             case .message, .verified, .reengage: return 0xEEF0FE
             case .visit, .priceDrop:             return 0xEAF6EF
-            case .match, .boost, .newListing:    return 0xFFF1EA
+            case .match, .boost, .newListing:    return 0xEAF3FF
             }
         }
     }

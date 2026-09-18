@@ -1413,7 +1413,8 @@ struct BecomeOwnerView: View {
 
     var body: some View {
         ZStack {
-            Color(hex: 0xF7F8FA).ignoresSafeArea()
+            // Very light blue ground for the whole become-owner flow.
+            Color(hex: 0xF2F7FF).ignoresSafeArea()
 
             VStack(spacing: 0) {
                 progressHeader
@@ -1653,31 +1654,24 @@ private struct StepIntro: View {
                 Circle()
                     .fill(LinearGradient(colors: [Color.moblyPrimary.opacity(0.30), Color.moblyPrimary.opacity(0)],
                                          startPoint: .top, endPoint: .bottom))
-                    .frame(width: 240, height: 240)
+                    .frame(width: 320, height: 320)
                     .blur(radius: 40)
 
-                Image(systemName: "house.fill")
-                    .font(.system(size: 96, weight: .medium))
-                    .foregroundStyle(
-                        LinearGradient(colors: [Color.moblyAccent, Color(hex: 0xE85A1A)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing)
-                    )
-                    .rotationEffect(.degrees(-6))
+                IntroPhotoDeck()
                     .offset(y: float ? -8 : 0)
-                    .shadow(color: Color.moblyAccent.opacity(0.35), radius: 24, y: 14)
 
                 // Floating sparkle chips
-                chip("×3", 24, 0xFFF3EC, 0xC24E10)
-                    .offset(x: 100, y: -80)
+                chip("×3", 24, 0xEAF3FF, 0x1F6FD9)
+                    .offset(x: 120, y: -118)
                     .opacity(appear ? 1 : 0)
                 chip("Gratuit", 32, 0xE9F9EF, 0x1F8A5B)
-                    .offset(x: -110, y: -30)
+                    .offset(x: -125, y: -40)
                     .opacity(appear ? 1 : 0)
                 chip("En 5 min", 32, 0xEEF0FE, 0x3A4FF0)
-                    .offset(x: 90, y: 80)
+                    .offset(x: 110, y: 116)
                     .opacity(appear ? 1 : 0)
             }
-            .frame(height: 260)
+            .frame(height: 280)
 
             VStack(spacing: 12) {
                 Text("Devenez propriétaire\nsur Mobly")
@@ -1720,7 +1714,7 @@ private struct StepIntro: View {
 
 private struct StepBenefits: View {
     private let benefits: [(icon: String, tint: UInt32, bg: UInt32, title: String, body: String)] = [
-        ("megaphone.fill", 0xFF6B35, 0xFFF3EC,
+        ("megaphone.fill", 0x4C9BFF, 0xEAF3FF,
          "Visible partout au Cameroun",
          "Home, Explore, carte — dès la publication."),
         ("bubble.left.and.bubble.right.fill", 0x3A4FF0, 0xEEF0FE,
@@ -1729,7 +1723,7 @@ private struct StepBenefits: View {
         ("chart.line.uptrend.xyaxis", 0x1F8A5B, 0xE9F9EF,
          "Vos statistiques en temps réel",
          "Vues, contacts, taux — au jour le jour."),
-        ("bolt.badge.checkmark.fill", 0xC24E10, 0xFFF3EC,
+        ("bolt.badge.checkmark.fill", 0x1F6FD9, 0xEAF3FF,
          "Boostez et vendez plus vite",
          "×3 plus de vues à partir de 500 FCFA."),
     ]
@@ -1827,7 +1821,7 @@ private struct StepHowItWorks: View {
                     HStack(alignment: .top, spacing: 16) {
                         ZStack {
                             Circle().fill(
-                                LinearGradient(colors: [Color.moblyAccent, Color(hex: 0xE85A1A)],
+                                LinearGradient(colors: [Color.moblyAccent, Color(hex: 0x3A7BF0)],
                                                startPoint: .topLeading, endPoint: .bottomTrailing)
                             )
                             .frame(width: 54, height: 54)
@@ -1891,13 +1885,13 @@ private struct StepSocialProof: View {
               gradient: [Color(hex: 0x3A4FF0), Color(hex: 0x6D2FE0)], rating: 5),
         .init(initial: "A", name: "Aïcha M.", city: "Yaoundé", role: "Propriétaire · 3 annonces",
               quote: "Le chat intégré change tout. Je réponds vite, je filtre facilement, et mon numéro reste privé.",
-              gradient: [Color(hex: 0xFF6B35), Color(hex: 0xC24E10)], rating: 5),
+              gradient: [Color(hex: 0x4C9BFF), Color(hex: 0x1F6FD9)], rating: 5),
         .init(initial: "J", name: "Jean-Paul N.", city: "Bafoussam", role: "Propriétaire",
               quote: "Publier a pris 6 minutes. Premier contact reçu le même soir. Publier ne coûte rien : imbattable.",
               gradient: [Color(hex: 0x1F8A5B), Color(hex: 0x0E6A44)], rating: 5),
         .init(initial: "S", name: "Sandrine E.", city: "Kribi", role: "Propriétaire · Court séjour",
               quote: "J'ai boosté à 500 FCFA sur un week-end de fêtes : trois réservations en 48h.",
-              gradient: [Color(hex: 0xC24E10), Color(hex: 0x8B3410)], rating: 5),
+              gradient: [Color(hex: 0x1F6FD9), Color(hex: 0x8B3410)], rating: 5),
         .init(initial: "M", name: "Marc T.", city: "Douala", role: "Agence",
               quote: "Les statistiques me disent exactement quelles annonces travailler. Plus de devinettes.",
               gradient: [Color(hex: 0x2A6FDB), Color(hex: 0x14152A)], rating: 4),
@@ -2131,7 +2125,7 @@ private struct StepConfirm: View {
                     .font(.system(size: 42, weight: .semibold))
                     .foregroundStyle(
                         isIdentityVerified
-                            ? LinearGradient(colors: [Color.moblyAccent, Color(hex: 0xE85A1A)],
+                            ? LinearGradient(colors: [Color.moblyAccent, Color(hex: 0x3A7BF0)],
                                              startPoint: .topLeading, endPoint: .bottomTrailing)
                             : LinearGradient(colors: [Color(hex: 0xE5950C), Color(hex: 0xC27A00)],
                                              startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -2705,5 +2699,73 @@ private struct CelebrationView: View {
             withAnimation(Motion.gentle) { appear = true }
             withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { pulse = true }
         }
+    }
+}
+
+/// Real annonce photos stacked like a small deck, the front one fading into
+/// the next every couple of seconds. Replaces the flat house icon on the first
+/// become-owner step so the owner sees the kind of space they could publish.
+private struct IntroPhotoDeck: View {
+    @ObservedObject private var store = ListingStore.shared
+    @State private var index = 0
+    private let tick = Timer.publish(every: 2.2, on: .main, in: .common).autoconnect()
+
+    private var photos: [Listing] {
+        Array(store.listings.filter { $0.coverUrl != nil || !$0.photos.isEmpty }.prefix(8))
+    }
+
+    var body: some View {
+        let items = photos
+        ZStack {
+            if items.isEmpty {
+                card { Color(hex: 0xDCE8FF) }
+            } else {
+                // Two resting cards behind, peeking out above and below.
+                ForEach(0..<min(2, items.count), id: \.self) { k in
+                    card { ListingCover(listing: items[(index + k + 1) % items.count]) }
+                        .offset(y: k == 0 ? -22 : 22)
+                        .scaleEffect(0.9)
+                        .opacity(0.9)
+                        .zIndex(-1)
+                }
+                // The front card is swiped away to the left, tilting as it
+                // goes, while the next one rises from the deck behind.
+                card { ListingCover(listing: items[index % items.count]) }
+                    .id(index)
+                    // Older cards stay above newer ones, so the card being
+                    // swiped away is seen whole on top of the one replacing it.
+                    .zIndex(1_000_000 - Double(index))
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.9).combined(with: .opacity),
+                        removal: .modifier(active: SwipeAway(progress: 1),
+                                           identity: SwipeAway(progress: 0))))
+            }
+        }
+        .animation(.spring(response: 0.6, dampingFraction: 0.85), value: index)
+        .onReceive(tick) { _ in
+            guard items.count > 1 else { return }
+            index = (index + 1) % items.count
+        }
+    }
+
+    private func card<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        content()
+            .frame(width: 290, height: 190)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(.white, lineWidth: 4))
+            .shadow(color: Color(hex: 0x1A2266).opacity(0.18), radius: 18, y: 10)
+    }
+}
+
+/// Slides a card fully off screen to the left with a slight tilt.
+private struct SwipeAway: ViewModifier {
+    let progress: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .offset(x: -440 * progress, y: 30 * progress)
+            .rotationEffect(.degrees(-14 * progress))
     }
 }

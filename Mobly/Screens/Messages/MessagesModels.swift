@@ -117,18 +117,25 @@ extension ChatThread {
         }
     }
 
+    // Shared formatters: this runs for every message and every thread row,
+    // and creating a DateFormatter each time was heavy enough to show up in
+    // the main-thread watchdog kills.
+    private static func formatter(_ format: String) -> DateFormatter {
+        let f = DateFormatter(); f.locale = Locale(identifier: "fr_FR")
+        f.dateFormat = format; return f
+    }
+    private static let timeFormatter = formatter("HH:mm")
+    private static let weekdayFormatter = formatter("EEE")
+    private static let shortDateFormatter = formatter("d MMM")
+
     static func relativeTime(_ date: Date) -> String {
         let cal = Calendar.current
-        if cal.isDateInToday(date) {
-            let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: date)
-        }
+        if cal.isDateInToday(date) { return timeFormatter.string(from: date) }
         if cal.isDateInYesterday(date) { return "Hier" }
         if let days = cal.dateComponents([.day], from: date, to: Date()).day, days < 7 {
-            let f = DateFormatter(); f.locale = Locale(identifier: "fr_FR")
-            f.dateFormat = "EEE"; return f.string(from: date).capitalized
+            return weekdayFormatter.string(from: date).capitalized
         }
-        let f = DateFormatter(); f.locale = Locale(identifier: "fr_FR")
-        f.dateFormat = "d MMM"; return f.string(from: date)
+        return shortDateFormatter.string(from: date)
     }
 }
 

@@ -154,12 +154,17 @@ struct ChatThreadView: View {
         return ownerId == me
     }
 
+    /// Formatters are expensive to create; one per message was a real cost.
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "fr_FR")
+        f.dateFormat = "d MMMM"; return f
+    }()
+
     private static func dayLabel(_ date: Date) -> String {
         let cal = Calendar.current
         if cal.isDateInToday(date) { return "Aujourd'hui" }
         if cal.isDateInYesterday(date) { return "Hier" }
-        let f = DateFormatter(); f.locale = Locale(identifier: "fr_FR")
-        f.dateFormat = "d MMMM"; return f.string(from: date)
+        return dayFormatter.string(from: date)
     }
 
     /// The listing this conversation is about — resolve from data, or build
@@ -536,7 +541,7 @@ struct ChatThreadView: View {
     /// id (so the row identity stays put as more photos land); every other
     /// member of a run is listed in `hidden` and not drawn on its own.
     /// Replies and reacted photos stay standalone so their quote/emoji show.
-    private var photoGroups: (groups: [String: [ChatMessage]], hidden: Set<String>) {
+    private func photoGroups(in messages: [ChatMessage]) -> (groups: [String: [ChatMessage]], hidden: Set<String>) {
         var groups: [String: [ChatMessage]] = [:]
         var hidden = Set<String>()
         func groupable(_ m: ChatMessage) -> Bool {
@@ -564,7 +569,14 @@ struct ChatThreadView: View {
     }
 
     private var messagesList: some View {
-        ScrollViewReader { proxy in
+        // Built ONCE per render. `messages` maps the whole thread (dates and
+        // all) on every access, and the rows below used to read it — and the
+        // photo grouping, which reads it again — for every single row. On a
+        // long conversation that was quadratic work on the main thread, long
+        // enough for iOS's watchdog to kill the app.
+        let messages = self.messages
+        let photoGroups = photoGroups(in: messages)
+        return ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
                 LazyVStack(spacing: 10) {
                     // First-load state: no cached history yet + a fetch in

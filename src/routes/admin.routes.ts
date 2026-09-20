@@ -11,7 +11,7 @@ import { notifyUser, pushConfigured } from '../services/push';
 import { serializeMessage } from '../lib/serialize';
 import { broadcastMessage } from '../realtime/hub';
 import { configSnapshot } from '../services/config';
-import { adminIpGate, adminWriteLimiter } from '../middleware/adminSecurity';
+import { adminIpGate, adminWriteLimiter, requireConfirmation } from '../middleware/adminSecurity';
 import { adminUsersRouter } from './admin/users.routes';
 import { adminConfigRouter } from './admin/config.routes';
 import { adminModerationRouter } from './admin/moderation.routes';
@@ -296,14 +296,39 @@ adminRouter.patch(
   })
 );
 
-/** DELETE /api/admin/users/:id — permanent removal (Prisma cascades listings, messages…). */
+/**
+ * DELETE /api/admin/users/:id — permanent removal (Prisma cascades listings,
+ * messages…).
+ *
+ * Guarded exactly like `/users/:id/anonymize`: this is the *more* destructive
+ * of the two — the rows are gone, and reviews and threads other people relied
+ * on go with them — so it must not be the easier one to trigger. The audit
+ * entry is written *before* the delete, since afterwards there is no row left
+ * to describe.
+ */
 adminRouter.delete(
   '/users/:id',
+  requirePermission('user.delete'),
+  requireConfirmation((req) => req.params.id),
   asyncHandler(async (req, res) => {
     if (req.params.id === req.userId!) {
       throw new ApiError(400, 'Impossible de supprimer votre propre compte ici', 'VALIDATION_FAILED');
     }
-    await prisma.user.delete({ where: { id: req.params.id } }).catch(() => {
+
+    const target = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, fullName: true, phone: true, email: true },
+    });
+    if (!target) throw new ApiError(404, 'Utilisateur introuvable', 'NOT_FOUND');
+
+    await audit(req, {
+      action: 'user.delete',
+      targetType: 'user',
+      targetId: target.id,
+      before: target,
+    });
+
+    await prisma.user.delete({ where: { id: target.id } }).catch(() => {
       throw new ApiError(404, 'Utilisateur introuvable', 'NOT_FOUND');
     });
     res.json({ deleted: true });

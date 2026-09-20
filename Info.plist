@@ -57,8 +57,8 @@
 	<!--
 	  URL schemes the app claims. Google's OAuth for iOS uses the *reversed*
 	  client id as the redirect-uri scheme:
-	    client id  : 961218606453-3ovpslv8p174c6sii8t9h3otb7gn4er9.apps.googleusercontent.com
-	    reversed   : com.googleusercontent.apps.961218606453-3ovpslv8p174c6sii8t9h3otb7gn4er9
+	    client id  : 961218606453-eqc5653fn5spgnlse82kljemo0g59r4n.apps.googleusercontent.com
+	    reversed   : com.googleusercontent.apps.961218606453-eqc5653fn5spgnlse82kljemo0g59r4n
 	  ASWebAuthenticationSession only intercepts callbacks whose scheme is
 	  declared here — without it Google's redirect opens Safari instead of
 	  returning to the app.
@@ -70,7 +70,7 @@
 			<string>com.mobly.app.google</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.googleusercontent.apps.961218606453-3ovpslv8p174c6sii8t9h3otb7gn4er9</string>
+				<string>com.googleusercontent.apps.961218606453-eqc5653fn5spgnlse82kljemo0g59r4n</string>
 			</array>
 		</dict>
 		<!-- Didit redirects here (DIDIT_CALLBACK_URL) when the user taps

@@ -26,7 +26,7 @@ enum GoogleSignIn {
     /// The iOS OAuth client id from Google Cloud Console.
     /// Reversed = the URL scheme that the app registers in Info.plist.
     private static let clientId =
-        "961218606453-3ovpslv8p174c6sii8t9h3otb7gn4er9.apps.googleusercontent.com"
+        "961218606453-eqc5653fn5spgnlse82kljemo0g59r4n.apps.googleusercontent.com"
 
     /// The reversed-domain redirect URI Google expects for iOS OAuth.
     /// Standard shape: `<reversed-client-id>:/oauth2redirect`.
@@ -61,17 +61,24 @@ enum GoogleSignIn {
         ]
 
         let callbackURL: URL = try await withCheckedThrowingContinuation { cont in
+            // `presentationContextProvider` is a *weak* property, so the anchor
+            // needs an owner of its own or it deallocates before the sheet is
+            // presented and the session finds no window to present from. The
+            // completion handler captures it, and the session holds that
+            // handler until the flow ends — which outlives the presentation.
+            let anchor = WindowAnchor(window: presenter)
             let session = ASWebAuthenticationSession(
                 url: comps.url!,
                 callbackURLScheme: callbackScheme
             ) { url, error in
+                withExtendedLifetime(anchor) {}
                 if let url {
                     cont.resume(returning: url)
                 } else {
                     cont.resume(throwing: error ?? GoogleSignInError.cancelled)
                 }
             }
-            session.presentationContextProvider = WindowAnchor(window: presenter)
+            session.presentationContextProvider = anchor
             // Ephemeral so the user is asked which account each time; the
             // browser session doesn't stick around in Safari's cookies.
             session.prefersEphemeralWebBrowserSession = true

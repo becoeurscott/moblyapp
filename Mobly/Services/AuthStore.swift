@@ -418,6 +418,11 @@ final class AuthStore: ObservableObject {
         defer { isBusy = false }
         do {
             let res = try await api.signInWithApple(idToken: idToken, fullName: fullName)
+            // Persist the session before applying the user — without this the
+            // server's token is discarded and every authed request that
+            // `apply` kicks off comes back 401, bouncing us to the sign-in
+            // screen despite a successful sign-in.
+            api.store(token: res.token, refreshToken: res.refreshToken)
             apply(res.user)
             return true
         } catch let e as MoblyAPI.APIError {
@@ -439,6 +444,7 @@ final class AuthStore: ObservableObject {
         defer { isBusy = false }
         do {
             let res = try await api.signInWithGoogle(idToken: idToken)
+            api.store(token: res.token, refreshToken: res.refreshToken)
             apply(res.user)
             return true
         } catch let e as MoblyAPI.APIError {

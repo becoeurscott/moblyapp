@@ -96,9 +96,11 @@ struct ProfileView: View {
         }
         .animation(Motion.quick, value: loggingOut)
         .animation(Motion.panel, value: saidGoodbye)
-        .confirmationDialog("Se déconnecter de Mobly ?",
-                            isPresented: $confirmLogout,
-                            titleVisibility: .visible) {
+        // `alert`, not `confirmationDialog`: a confirmation dialog is an action
+        // sheet on iPhone, so it slid up from the bottom edge. Every other
+        // destructive confirmation in the app is a centred alert, and this one
+        // sat apart from them.
+        .alert("Se déconnecter de Mobly ?", isPresented: $confirmLogout) {
             Button("Se déconnecter", role: .destructive) { performLogout() }
             Button("Annuler", role: .cancel) {}
         } message: {
@@ -216,8 +218,17 @@ struct ProfileView: View {
         }
     }
 
-    private var displayName: String { auth.user?.fullName ?? "Invité" }
-    private var displayCity: String { auth.isSignedIn ? Session.shared.phone : "Non connecté" }
+    // "Invité" is a statement of fact about the account, so it waits until the
+    // session has actually been checked. While the check is in flight the card
+    // stays deliberately neutral rather than asserting either way.
+    private var displayName: String {
+        if let name = auth.user?.fullName { return name }
+        return auth.isRestoringSession ? "…" : "Invité"
+    }
+    private var displayCity: String {
+        if auth.isSignedIn { return Session.shared.phone }
+        return auth.isRestoringSession ? "Connexion…" : "Non connecté"
+    }
 
     private var identityCard: some View {
         VStack(spacing: 16) {

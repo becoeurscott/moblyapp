@@ -31,10 +31,23 @@ struct RootView: View {
     @ObservedObject private var remoteConfig = RemoteConfigStore.shared
     @ObservedObject private var auth = AuthStore.shared
     @State private var accountDeleted = false
+    /// The splash wordmark's flight into the onboarding header. One view that
+    /// moves and shrinks — a matchedGeometryEffect can't do this here because
+    /// slide 1 lives inside a paged TabView (UIKit-hosted), and it would only
+    /// cross-fade two logos in place.
+    @State private var wordmarkFlying = false
+    @State private var wordmarkLanded = false
+    @State private var wordmarkDestination: WordmarkFlight.Destination = .onboarding
     @State private var route: AppRoute = {
         // Allow launch arg to skip splash for screenshotting: -skipSplash 1
         if ProcessInfo.processInfo.environment["START_AT"] == "welcome" {
             return .welcome
+        }
+        // Onboarding is first-launch-only and signed-out-only, so on any device
+        // that has already been through it the slides are unreachable — you
+        // cannot review a design change without wiping the app and the keychain.
+        if ProcessInfo.processInfo.environment["START_AT"] == "onboarding" {
+            return .onboarding
         }
         if ProcessInfo.processInfo.environment["START_AT"] == "signup" {
             return .signup
@@ -89,10 +102,43 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
+            routes
+            if wordmarkFlying {
+                WordmarkFlight(landed: wordmarkLanded, destination: wordmarkDestination)
+                    .transition(.identity)
+                    .allowsHitTesting(false)
+                    .zIndex(100)
+            }
+        }
+    }
+
+    @ViewBuilder private var routes: some View {
+        ZStack {
             switch route {
             case .splash:
-                SplashView {
-                    withAnimation(Motion.standard) {
+                SplashView(hideWordmark: wordmarkFlying) {
+                    // `gentle` (0.5s), not `standard` (0.32s): this is the one
+                    // transition carrying the wordmark between two screens, and
+                    // a third of a second is too brief to read as movement.
+                    let toOnboarding = !MoblyAPI.shared.isAuthenticated
+                        && !UserDefaults.standard.bool(forKey: hasSeenOnboardingKey)
+                    let toWelcome = !MoblyAPI.shared.isAuthenticated && !toOnboarding
+                    wordmarkDestination = toWelcome ? .welcome : .onboarding
+                    if toOnboarding || toWelcome {
+                        // Appears exactly over the splash wordmark (which hides
+                        // in the same update), then flies on the next tick.
+                        wordmarkLanded = false
+                        wordmarkFlying = true
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.6)) {
+                                wordmarkLanded = true
+                            }
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            wordmarkFlying = false   // slide 1's own wordmark takes over
+                        }
+                    }
+                    withAnimation(Motion.gentle) {
                         // A token in the Keychain means this user was signed in
                         // last time, so go straight to the tab bar rather than
                         // replaying onboarding + welcome on every cold launch.
@@ -122,16 +168,16 @@ struct RootView: View {
                         }
                     }
                 }
-                .transition(.opacity)
+                .transition(.moblyScreen)
 
             case .onboarding:
-                OnboardingView {
+                OnboardingView(showWordmark: !wordmarkFlying) {
                     UserDefaults.standard.set(true, forKey: hasSeenOnboardingKey)
-                    withAnimation(Motion.standard) {
+                    withAnimation(Motion.gentle) {
                         route = .welcome
                     }
                 }
-                .transition(.opacity)
+                .transition(.moblyScreen)
 
             case .welcome:
                 WelcomeView(
@@ -140,9 +186,10 @@ struct RootView: View {
                     },
                     onSignIn: {
                         withAnimation(Motion.standard) { route = .connexion }
-                    }
+                    },
+                    showWordmark: !wordmarkFlying
                 )
-                .transition(.opacity)
+                .transition(.moblyScreen)
 
             case .signup:
                 // `.id` is load-bearing: both auth routes render ConnexionView,

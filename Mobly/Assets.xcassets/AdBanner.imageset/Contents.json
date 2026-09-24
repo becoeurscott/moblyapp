@@ -1,0 +1,8 @@
+{
+  "images" : [
+    { "filename" : "AdBanner.png",    "idiom" : "universal", "scale" : "1x" },
+    { "filename" : "AdBanner@2x.png", "idiom" : "universal", "scale" : "2x" },
+    { "filename" : "AdBanner@3x.png", "idiom" : "universal", "scale" : "3x" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}

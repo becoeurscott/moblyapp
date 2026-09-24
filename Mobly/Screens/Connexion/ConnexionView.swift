@@ -1,7 +1,17 @@
 import SwiftUI
+import PhotosUI
 
 enum AuthMode { case signin, signup }
-private enum AuthPhase { case form, code, loading, welcome, resetCode, resetPassword }
+private enum AuthPhase {
+    case form, code, loading, welcome, resetCode, resetPassword
+    /// Provider signup: the phone number a Google/Apple user still owes us,
+    /// and the code confirming it. No account exists until `oauthCode` passes.
+    case oauthPhone, oauthCode
+    /// Post-signup onboarding, in order: the name (only when a provider
+    /// created the account — the form already collected one), then an
+    /// optional profile photo. Both end at `welcome`.
+    case chooseName, chooseAvatar
+}
 
 /// Unified auth screen: the Connexion / Inscription toggle stays static at the
 /// top and only the form body swaps between the two modes — so the user can
@@ -23,6 +33,8 @@ struct ConnexionView: View {
         // Debug hook to screenshot a specific phase directly.
         if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "code" { return .code }
         if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "welcome" { return .welcome }
+        if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "name" { return .chooseName }
+        if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "avatar" { return .chooseAvatar }
         return .form
     }()
 
@@ -34,6 +46,13 @@ struct ConnexionView: View {
     @State private var email: String = ProcessInfo.processInfo.environment["PREFILL_EMAIL"] ?? ""
     @State private var password: String = ProcessInfo.processInfo.environment["PREFILL_PASSWORD"] ?? ""
     @State private var otp = ""
+    /// Name the provider gave us, used when the account is finally created.
+    @State private var oauthName: String?
+    /// Name typed on the post-signup screen, seeded from the provider.
+    @State private var nameInput = ""
+    @State private var pickerItems: [PhotosPickerItem] = []
+    @State private var uploadingAvatar = false
+    @State private var avatarError: String?
     @State private var newPassword = ""
 
     init(initialMode: AuthMode = .signin,
@@ -59,6 +78,10 @@ struct ConnexionView: View {
             case .welcome: welcomeView.transition(.opacity)
             case .resetCode:     resetCodeView.transition(.opacity)
             case .resetPassword: resetPasswordView.transition(.opacity)
+            case .oauthPhone:    oauthPhoneView.transition(.opacity)
+            case .oauthCode:     oauthCodeView.transition(.opacity)
+            case .chooseName:    chooseNameView.transition(.opacity)
+            case .chooseAvatar:  chooseAvatarView.transition(.opacity)
             }
         }
         .animation(Motion.standard, value: phase)
@@ -184,12 +207,15 @@ struct ConnexionView: View {
 
                     VStack(spacing: 11) {
                         if config.isEnabled("signup.method.google") {
-                            GoogleSignInButton()
+                            GoogleSignInButton { idToken in
+                                await handleOAuth(provider: "google", idToken: idToken,
+                                                  fullName: nil)
+                            }
                         }
                         if config.isEnabled("signup.method.apple") {
-                            AppleSignInButton { _ in
-                                // AuthStore updates `user` on success, which flips
-                                // RootView into the signed-in screen automatically.
+                            AppleSignInButton { idToken, name in
+                                await handleOAuth(provider: "apple", idToken: idToken,
+                                                  fullName: name)
                             }
                         }
                     }
@@ -557,6 +583,10 @@ struct ConnexionView: View {
     private var welcomeView: some View {
         AuthWelcomeBackView(
             firstName: firstName,
+            userId: auth.user?.id,
+            avatarUrl: auth.user?.avatarUrl,
+            avatarColor: auth.user?.avatarColor,
+            fullName: auth.user?.fullName ?? fullName,
             title: firstName.isEmpty
                 ? (mode == .signin ? "Bon retour" : "Bienvenue")
                 : (mode == .signin ? "Bon retour, \(firstName)" : "Bienvenue, \(firstName)"),
@@ -567,6 +597,271 @@ struct ConnexionView: View {
             // AuthStore — nothing to persist here.
             onDone: { onFinish() }
         )
+    }
+
+    // MARK: Provider signup — phone, then code
+
+    /// Google and Apple prove an e-mail, never a phone. A marketplace account
+    /// needs a reachable number, so the provider signup pauses here: nothing
+    /// exists server-side yet, and nothing will until the code below passes.
+    private var oauthPhoneView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            backButton {
+                auth.cancelOAuthSignup()
+                withAnimation { phase = .form }
+            }
+
+            Text("Votre numéro")
+                .font(.moblyHeading(24))
+                .foregroundStyle(Color.moblyTextPrimary)
+                .padding(.bottom, 6)
+            Text("Nous l'utilisons pour confirmer votre compte et vous mettre en relation avec les propriétaires.")
+                .font(.moblyBody(13.5))
+                .foregroundStyle(Color(hex: 0x9A9DAC))
+                .padding(.bottom, 26)
+
+            PhoneNumberField(country: $country, number: $phone,
+                             errorMessage: auth.fieldErrors["phone"])
+                .padding(.bottom, 16)
+
+            if let e = auth.errorMessage, auth.fieldErrors["phone"] == nil {
+                Text(e)
+                    .font(.moblyBody(12.5))
+                    .foregroundStyle(Color(hex: 0xD2453C))
+                    .padding(.bottom, 12)
+            }
+
+            PillButton(title: auth.isBusy ? "Envoi du code…" : "Recevoir le code",
+                       style: .primaryBlue, trailingIcon: nil) {
+                Task {
+                    if await auth.sendOAuthPhoneCode(phone: phoneForAuth) {
+                        otp = ""
+                        withAnimation { phase = .oauthCode }
+                    }
+                }
+            }
+            .opacity(AuthStore.isValidPhone(phoneForAuth) && !auth.isBusy ? 1 : 0.5)
+            .disabled(!AuthStore.isValidPhone(phoneForAuth) || auth.isBusy)
+
+            Spacer()
+        }
+        .padding(.horizontal, 26)
+        .padding(.top, 56)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var oauthCodeView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            backButton { withAnimation { phase = .oauthPhone } }
+
+            Text("Entrez le code")
+                .font(.moblyHeading(24))
+                .foregroundStyle(Color.moblyTextPrimary)
+                .padding(.bottom, 6)
+            Text("Code à \(auth.codeLength) chiffres envoyé \(codeDestination).")
+                .font(.moblyBody(13.5))
+                .foregroundStyle(Color(hex: 0x9A9DAC))
+                .padding(.bottom, 26)
+
+            SignupOTPStep(
+                otp: $otp,
+                destination: codeDestination,
+                devCode: auth.devCode,
+                isBusy: auth.isBusy,
+                error: auth.errorMessage,
+                resendCooldown: auth.resendCooldown,
+                length: auth.codeLength,
+                onVerify: { code in
+                    Task {
+                        if await auth.verifyOAuthPhone(code: code, fullName: oauthName) {
+                            // Provider signup: the name so far is Google's or
+                            // Apple's, so let the user confirm it themselves.
+                            nameInput = auth.user?.fullName ?? oauthName ?? ""
+                            withAnimation { phase = .chooseName }
+                        }
+                    }
+                },
+                onResend: { Task { _ = await auth.sendOAuthPhoneCode(phone: phoneForAuth) } }
+            )
+
+            Spacer()
+        }
+        .padding(.horizontal, 26)
+        .padding(.top, 56)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    // MARK: Post-signup — name, then photo
+
+    /// Only reached from a provider signup. A form signup already typed a name
+    /// on the first screen, so asking again there would be busywork.
+    private var chooseNameView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Comment vous appelez-vous ?")
+                .font(.moblyHeading(24))
+                .foregroundStyle(Color.moblyTextPrimary)
+                .padding(.bottom, 6)
+            Text("C'est le nom que verront les propriétaires et les locataires.")
+                .font(.moblyBody(13.5))
+                .foregroundStyle(Color(hex: 0x9A9DAC))
+                .padding(.bottom, 26)
+
+            MoblyTextField(label: "Nom complet", placeholder: "Jeanne Ndongo",
+                           systemIcon: "person", text: $nameInput,
+                           textContentType: .name)
+                .padding(.bottom, 16)
+
+            if let e = auth.errorMessage {
+                Text(e)
+                    .font(.moblyBody(12.5))
+                    .foregroundStyle(Color(hex: 0xD2453C))
+                    .padding(.bottom, 12)
+            }
+
+            PillButton(title: auth.isBusy ? "Enregistrement…" : "Continuer",
+                       style: .primaryBlue, trailingIcon: nil) {
+                Task { await saveNameThenAvatar() }
+            }
+            .opacity(nameIsValid && !auth.isBusy ? 1 : 0.5)
+            .disabled(!nameIsValid || auth.isBusy)
+
+            Spacer()
+        }
+        .padding(.horizontal, 26)
+        .padding(.top, 56)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var nameIsValid: Bool {
+        nameInput.trimmingCharacters(in: .whitespaces).count >= 2
+    }
+
+    /// Optional by design — "Passer" is as prominent as picking a photo, so
+    /// nobody is stranded here because they have no picture to hand.
+    private var chooseAvatarView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Ajoutez une photo")
+                .font(.moblyHeading(24))
+                .foregroundStyle(Color.moblyTextPrimary)
+                .padding(.bottom, 6)
+            Text("Une photo rassure : les annonces avec un visage reçoivent plus de réponses.")
+                .font(.moblyBody(13.5))
+                .foregroundStyle(Color(hex: 0x9A9DAC))
+                .padding(.bottom, 30)
+
+            HStack {
+                Spacer()
+                ZStack {
+                    UserAvatar(name: auth.user?.fullName ?? nameInput,
+                               userId: auth.user?.id,
+                               avatarUrl: auth.user?.avatarUrl,
+                               avatarColor: auth.user?.avatarColor,
+                               size: 132)
+                    if uploadingAvatar {
+                        Circle().fill(Color.black.opacity(0.35))
+                            .frame(width: 132, height: 132)
+                        ProgressView().tint(.white)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.bottom, 26)
+
+            PhotosPicker(selection: $pickerItems, maxSelectionCount: 1,
+                         matching: .images) {
+                Text(auth.user?.avatarUrl == nil ? "Choisir une photo" : "Changer la photo")
+                    .font(.moblyHeading(16))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+                    .background(Capsule().fill(Color.moblyPrimary))
+            }
+            .disabled(uploadingAvatar)
+            .padding(.bottom, 12)
+
+            if let avatarError {
+                Text(avatarError)
+                    .font(.moblyBody(12.5))
+                    .foregroundStyle(Color(hex: 0xD2453C))
+                    .padding(.bottom, 10)
+            }
+
+            Button {
+                withAnimation { phase = .welcome }
+            } label: {
+                Text(auth.user?.avatarUrl == nil ? "Passer" : "Continuer")
+                    .font(.moblyHeading(16))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+            }
+            .disabled(uploadingAvatar)
+
+            Spacer()
+        }
+        .padding(.horizontal, 26)
+        .padding(.top, 56)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .onChange(of: pickerItems) { _, items in
+            guard let item = items.first else { return }
+            Task { await uploadAvatar(item) }
+        }
+    }
+
+    private func saveNameThenAvatar() async {
+        let trimmed = nameInput.trimmingCharacters(in: .whitespaces)
+        await auth.updateFullName(trimmed)
+        // A failed rename must not trap the user on this screen: the account
+        // exists and carries the provider's name, so onboarding continues.
+        withAnimation { phase = .chooseAvatar }
+    }
+
+    private func uploadAvatar(_ item: PhotosPickerItem) async {
+        uploadingAvatar = true
+        avatarError = nil
+        defer { Task { @MainActor in uploadingAvatar = false; pickerItems = [] } }
+
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let jpeg = Self.compressAvatar(data) else {
+            await MainActor.run { avatarError = "Impossible de lire l'image." }
+            return
+        }
+        do {
+            let url = try await MoblyAPI.shared.uploadAvatar(jpeg)
+            await MainActor.run { auth.applyAvatarUrl(url) }
+        } catch {
+            await MainActor.run { avatarError = "Envoi impossible. Réessayez." }
+        }
+    }
+
+    /// 512px square JPEG — small enough for a Douala connection, large enough
+    /// to stay sharp on a retina avatar.
+    private static func compressAvatar(_ data: Data) -> Data? {
+        guard let ui = UIImage(data: data) else { return nil }
+        let side: CGFloat = 512
+        UIGraphicsBeginImageContextWithOptions(CGSize(width: side, height: side), false, 1)
+        let scale = max(side / ui.size.width, side / ui.size.height)
+        let drawSize = CGSize(width: ui.size.width * scale, height: ui.size.height * scale)
+        ui.draw(in: CGRect(origin: CGPoint(x: (side - drawSize.width) / 2,
+                                           y: (side - drawSize.height) / 2),
+                           size: drawSize))
+        let out = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        return out?.jpegData(compressionQuality: 0.85)
+    }
+
+    /// Shared entry point for both provider buttons: sign the user straight in
+    /// when the e-mail already has an account, otherwise start the phone step.
+    private func handleOAuth(provider: String, idToken: String, fullName: String?) async {
+        switch await auth.startOAuth(provider: provider, idToken: idToken, fullName: fullName) {
+        case .signedIn:
+            withAnimation { phase = .welcome }
+        case .needsPhone(_, let suggested):
+            oauthName = suggested ?? fullName
+            withAnimation { phase = .oauthPhone }
+        case .failed:
+            break // AuthStore already set errorMessage; stay on the form.
+        }
     }
 
     // MARK: Logic
@@ -737,7 +1032,9 @@ struct ConnexionView: View {
             ok = await auth.verifyCode(phone: phoneForAuth, code: code)
         }
         guard ok else { return }   // stay on the code screen; error shows inline
-        withAnimation { phase = .welcome }
+        // A form signup already gave us a name, so it skips the name step and
+        // goes straight to the optional photo. Signing in goes home as before.
+        withAnimation { phase = mode == .signup ? .chooseAvatar : .welcome }
     }
 }
 
@@ -853,6 +1150,14 @@ struct AuthSpinnerView: View {
 /// to Home via onDone().
 struct AuthWelcomeBackView: View {
     var firstName: String
+    /// Identity for the avatar. With a photo we show it; without one we fall
+    /// back to the initial on the account's own palette colour, so the circle
+    /// matches the avatar the user sees everywhere else in the app rather
+    /// than being a generic white disc.
+    var userId: String? = nil
+    var avatarUrl: String? = nil
+    var avatarColor: String? = nil
+    var fullName: String = ""
     var title: String
     var subtitle: String
     var onDone: () -> Void
@@ -896,10 +1201,11 @@ struct AuthWelcomeBackView: View {
                         .frame(width: 116, height: 116)
                         .rotationEffect(.degrees(-90))
 
-                    Circle().fill(.white).frame(width: 92, height: 92)
-                    Text(String(firstName.prefix(1)))
-                        .font(.moblyHeading(38))
-                        .foregroundStyle(Color.moblyPrimary)
+                    UserAvatar(name: fullName.isEmpty ? firstName : fullName,
+                               userId: userId,
+                               avatarUrl: avatarUrl,
+                               avatarColor: avatarColor,
+                               size: 92)
                 }
                 .scaleEffect(avatarPop ? 1 : 0.7)
                 .padding(.bottom, 26)

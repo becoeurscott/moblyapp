@@ -25,6 +25,9 @@ final class LocationSearchCompleter: NSObject, ObservableObject {
     }
 
     @Published private(set) var suggestions: [Suggestion] = []
+    /// True between a new query and its answer. Lets the UI hold its current
+    /// rows instead of flashing "Aucun lieu trouvé" on every keystroke.
+    @Published private(set) var isSearching = false
 
     private let completer = MKLocalSearchCompleter()
     /// Bias completion to Cameroon so worldwide matches don't outrank local ones.
@@ -41,7 +44,8 @@ final class LocationSearchCompleter: NSObject, ObservableObject {
 
     func update(query: String) {
         let q = query.trimmingCharacters(in: .whitespaces)
-        if q.isEmpty { suggestions = []; completer.queryFragment = ""; return }
+        if q.isEmpty { suggestions = []; isSearching = false; completer.queryFragment = ""; return }
+        isSearching = true
         completer.queryFragment = q
     }
 
@@ -98,9 +102,9 @@ extension LocationSearchCompleter: MKLocalSearchCompleterDelegate {
             .map { Suggestion(title: $0.title, subtitle: $0.subtitle, native: $0) }
         // Cap so the dropdown never grows unbounded; 8 fits below the bar.
         let capped = Array(mapped.prefix(8))
-        Task { @MainActor in self.suggestions = capped }
+        Task { @MainActor in self.suggestions = capped; self.isSearching = false }
     }
     nonisolated func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
-        Task { @MainActor in self.suggestions = [] }
+        Task { @MainActor in self.suggestions = []; self.isSearching = false }
     }
 }

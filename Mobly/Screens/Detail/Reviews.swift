@@ -46,7 +46,7 @@ extension MoblyAPI.ReviewDTO {
 struct StarRow: View {
     var count: Int
     var size: CGFloat = 12
-    var color: Color = .moblyPrimary
+    var color: Color = .moblyAccent
     var body: some View {
         HStack(spacing: 2) {
             ForEach(1...5, id: \.self) { i in
@@ -168,7 +168,7 @@ struct LeaveReviewSheet: View {
                     } label: {
                         Image(systemName: i <= stars ? "star.fill" : "star")
                             .font(.system(size: 32))
-                            .foregroundStyle(i <= stars ? Color.moblyPrimary : Color(hex: 0xD5D8E2))
+                            .foregroundStyle(i <= stars ? Color.moblyAccent : Color(hex: 0xD5D8E2))
                             .scaleEffect(i == stars ? 1.15 : 1)
                             .animation(Motion.pop, value: stars)
                     }
@@ -297,7 +297,7 @@ struct AllReviewsView: View {
                                 .frame(width: 14)
                             Image(systemName: "star.fill")
                                 .font(.system(size: 10))
-                                .foregroundStyle(Color.moblyPrimary)
+                                .foregroundStyle(Color.moblyAccent)
                             GeometryReader { geo in
                                 ZStack(alignment: .leading) {
                                     RoundedRectangle(cornerRadius: 3)

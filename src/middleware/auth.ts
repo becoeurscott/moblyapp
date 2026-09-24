@@ -4,6 +4,7 @@ import type { AdminRole } from '@prisma/client';
 import { verifyToken } from '../lib/jwt';
 import { ApiError } from '../lib/http';
 import { prisma } from '../lib/prisma';
+import { ownerActive } from '../lib/ownerTrial';
 import {
   activeRestrictions,
   restrictionMessage,
@@ -23,6 +24,8 @@ declare global {
         isAdmin: boolean;
         adminRole: AdminRole | null;
         identityVerified: boolean;
+        ownerPaid: boolean;
+        ownerTrialStartedAt: Date | null;
       };
       /**
        * Every active restriction on the caller, loaded once by `requireAuth`
@@ -43,6 +46,9 @@ const AUTH_SELECT = {
   identityVerified: true,
   isActive: true,
   tokenVersion: true,
+  // Carried so `requireActiveOwner` can decide without a second query.
+  ownerPaid: true,
+  ownerTrialStartedAt: true,
 } as const;
 
 /** Require a valid Bearer token; attaches req.user. */
@@ -103,6 +109,8 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
       isAdmin: user.isAdmin,
       adminRole: user.adminRole,
       identityVerified: user.identityVerified,
+      ownerPaid: user.ownerPaid,
+      ownerTrialStartedAt: user.ownerTrialStartedAt,
     };
     req.restrictions = restrictions;
     next();
@@ -144,6 +152,8 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
         isAdmin: user.isAdmin,
         adminRole: user.adminRole,
         identityVerified: user.identityVerified,
+        ownerPaid: user.ownerPaid,
+        ownerTrialStartedAt: user.ownerTrialStartedAt,
       };
       req.restrictions = await activeRestrictions(user.id);
     }
@@ -154,6 +164,33 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
 }
 
 /** Require an authenticated owner. */
+/**
+ * Require an owner whose account is still active — paid, or inside the 7-day
+ * free trial.
+ *
+ * `ownerActive` already existed but was only ever applied to a *read*: the
+ * public feed hid a lapsed owner's annonces. Nothing guarded the writes, so an
+ * owner whose trial had run out could still publish. The paywall in the app
+ * looked like the rule, but it was only a suggestion — the API accepted the
+ * request from anyone who reached it, and a lapsed owner could keep adding
+ * annonces that the feed then refused to show.
+ *
+ * Must come after `requireOwner`, which establishes that the caller is an
+ * owner at all.
+ */
+export function requireActiveOwner(req: Request, _res: Response, next: NextFunction) {
+  const u = req.user;
+  if (!u) return next(new ApiError(401, 'Session invalide', 'UNAUTHENTICATED'));
+  if (ownerActive({ isOwner: u.isOwner, ownerPaid: u.ownerPaid, ownerTrialStartedAt: u.ownerTrialStartedAt })) {
+    return next();
+  }
+  next(new ApiError(
+    402,
+    'Votre essai gratuit est terminé. Payez les frais d\'inscription pour publier.',
+    'OWNER_INACTIVE'
+  ));
+}
+
 export function requireOwner(req: Request, _res: Response, next: NextFunction) {
   if (!req.user?.isOwner) {
     return next(new ApiError(403, 'Compte propriétaire requis', 'OWNER_REQUIRED'));

@@ -3,6 +3,9 @@ import MapKit
 
 struct ExploreView: View {
     var onOpenListing: (Listing) -> Void = { _ in }
+    /// Opens a space the user found by typing its name, credited to
+    /// "search" rather than "explore".
+    var onOpenListingFromSearch: ((Listing) -> Void)? = nil
     var initialLocation: String = ""
     /// Preloaded filter state (typically from a saved recherche the user
     /// tapped on Favoris). Nil means keep the current in-memory filters.
@@ -18,6 +21,22 @@ struct ExploreView: View {
     @ObservedObject private var savedSearches = SavedSearchStore.shared
     @ObservedObject private var config = RemoteConfigStore.shared
     @State private var activeChip = "Tous"
+    /// Mirrors `searchActive` through an explicit animation (focus changes
+    /// carry no animation, so the dropdown popped instead of sliding).
+    @State private var showDropdown = false
+    /// What the dropdown renders; frozen while it closes (see Home).
+    @State private var panelText = ""
+    /// The space picked from the name search, until the user moves on.
+    @State private var searchedListingId: String?
+    /// Set when the user runs a name search without picking a suggestion:
+    /// the map shows only the spaces whose name matched, and the user picks
+    /// the one they want. Nil means no name filter.
+    @State private var nameMatchIds: Set<String>?
+    /// Where the searched place is and how far around it counts as "in" it.
+    /// Most annonces don't name their quartier (only the city), but nearly all
+    /// have exact coordinates — so "Akwa" is matched by position, not text.
+    @State private var searchCenter: CLLocationCoordinate2D?
+    @State private var searchRadiusMeters: CLLocationDistance = 0
     @State private var locatingUser = false
 
     /// All listings that pass the current category / filter panel. NO city
@@ -39,25 +58,25 @@ struct ExploreView: View {
         }
         var filtered = byCategory.filter { passesFilters($0) }
 
+        if let ids = nameMatchIds {
+            return filtered.filter { ids.contains($0.id) }
+        }
+
         if !committedLocation.isEmpty {
-            let city = committedLocation
+            let place = committedLocation
                 .split(separator: ",").first
                 .map { String($0).trimmingCharacters(in: .whitespaces) }
                 ?? committedLocation
-            let cityFolded = city.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-            var cityFiltered = filtered.filter {
-                $0.location.folding(options: .diacriticInsensitive, locale: .current)
-                    .lowercased().contains(cityFolded)
+            let placeFolded = Self.fold(place)
+            let origin = searchCenter.map { CLLocation(latitude: $0.latitude, longitude: $0.longitude) }
+            // In the place = its address names it, OR it physically sits
+            // inside the searched area.
+            filtered = filtered.filter { l in
+                if Self.fold(l.location).contains(placeFolded) { return true }
+                guard let origin, let lat = l.lat, let lng = l.lng, lat != 0 || lng != 0 else { return false }
+                return CLLocation(latitude: lat, longitude: lng).distance(from: origin) <= searchRadiusMeters
             }
-            if cityFiltered.isEmpty {
-                let words = cityFolded.split(separator: " ").map(String.init).filter { $0.count >= 3 }
-                cityFiltered = filtered.filter { listing in
-                    let loc = listing.location.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-                    return words.contains { loc.contains($0) }
-                }
-            }
-            filtered = cityFiltered
-            let target = locationCoordinate(committedLocation)
+            let target = searchCenter ?? locationCoordinate(committedLocation)
             filtered.sort { a, b in
                 distSq(target, baseCoord(for: a)) < distSq(target, baseCoord(for: b))
             }
@@ -182,6 +201,76 @@ struct ExploreView: View {
         zip(a, b).prefix(while: { $0 == $1 }).count
     }
 
+    private static func fold(_ s: String) -> String {
+        s.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+    }
+
+    /// Spaces whose name matches what is typed — accent- and case-insensitive,
+    /// and from the first letters: "kin" finds "Kinimo Résidence". A match on
+    /// the start of the title or of any word in it ranks above one buried in
+    /// the middle.
+    private func listingSuggestions(_ query: String, limit: Int = 5) -> [Listing] {
+        let q = Self.fold(query.trimmingCharacters(in: .whitespaces))
+        guard q.count >= 2 else { return [] }
+        func rank(_ l: Listing) -> Int? {
+            let t = Self.fold(l.title)
+            if t.hasPrefix(q) { return 0 }
+            if t.split(separator: " ").contains(where: { $0.hasPrefix(q) }) { return 1 }
+            if t.contains(q) { return 2 }
+            return nil
+        }
+        return MoblyData.all
+            .compactMap { l in rank(l).map { ($0, l) } }
+            .sorted { $0.0 < $1.0 }
+            .prefix(limit)
+            .map { $0.1 }
+    }
+
+    /// Open a space's detail, crediting the view to "search" when the user
+    /// found it through the name search.
+    private func openListing(_ l: Listing) {
+        let fromNameSearch = l.id == searchedListingId || (nameMatchIds?.contains(l.id) ?? false)
+        if fromNameSearch, let fromSearch = onOpenListingFromSearch {
+            fromSearch(l)
+        } else {
+            onOpenListing(l)
+        }
+    }
+
+    /// Keep only the spaces whose name matched, frame them on the map, and
+    /// leave the choice to the user (no pin is auto-selected).
+    private func showNameMatches(_ spaces: [Listing], query: String) {
+        searchedListingId = nil
+        searchCenter = nil
+        nameMatchIds = Set(spaces.map(\.id))
+        committedLocation = ""
+        selected = nil
+        searchActive = false
+        searchText = query
+        SavedSearchStore.shared.add(label: query, query: query, filters: filters)
+        // `listings` now holds only the matches; fit the camera on them.
+        DispatchQueue.main.async { fitAllListings() }
+    }
+
+    /// Put one space front and centre: clear any city filter (the space may
+    /// be anywhere), select its pin and zoom the map onto it.
+    private func focusListing(_ l: Listing) {
+        searchedListingId = l.id
+        nameMatchIds = nil
+        searchActive = false
+        searchText = l.title
+        committedLocation = ""
+        SavedSearchStore.shared.add(label: l.title, query: l.title, filters: filters)
+        // `listings` is recomputed without the city filter above, so the
+        // pin index is looked up after that change.
+        DispatchQueue.main.async {
+            withAnimation(Motion.panel) { selected = l.id }
+            if let i = listings.firstIndex(where: { $0.id == l.id }) {
+                zoomTo(coord(i), span: MKCoordinateSpan(latitudeDelta: 0.012, longitudeDelta: 0.012))
+            }
+        }
+    }
+
     private func bestCityMatch(_ query: String) -> (name: String, region: String)? {
         let q = query.folding(options: .diacriticInsensitive, locale: .current).lowercased()
         return MoblyData.searchableLocations.first {
@@ -253,12 +342,33 @@ struct ExploreView: View {
     /// Return true when the searched name is a quartier of a bigger city
     /// (contains a comma, e.g. "Bonapriso, Douala").
     private func isQuartier(_ location: String) -> Bool {
-        location.contains(",")
+        if location.contains(",") { return true }
+        let name = Self.fold(location.trimmingCharacters(in: .whitespaces))
+        return CameroonGeo.quartiers.values.contains { list in
+            list.contains { Self.fold($0) == name }
+        }
+    }
+
+    /// Whether `locationCoordinate` has a real entry for this place, rather
+    /// than falling back to the default map centre.
+    private func knowsCoordinate(_ name: String) -> Bool {
+        let key = name.lowercased()
+        return Self.cityTable.contains { key.contains($0.key) }
     }
 
     private func goTo(_ location: String) {
+        nameMatchIds = nil
         let coord = locationCoordinate(location)
-        let span = isQuartier(location) ? Self.quartierSpan : Self.citySpan
+        let quartier = isQuartier(location)
+        let span = quartier ? Self.quartierSpan : Self.citySpan
+        // A known place gets a geographic area; an unknown name falls back
+        // to matching the address text only.
+        if knowsCoordinate(location) {
+            searchCenter = coord
+            searchRadiusMeters = quartier ? 2_500 : 20_000
+        } else {
+            searchCenter = nil
+        }
         searchActive = false
         searchText = location       // keep the searched location in the bar
         committedLocation = location
@@ -285,12 +395,15 @@ struct ExploreView: View {
     /// on the city that was just cancelled, so "annuler" widened the data
     /// underneath a viewport that still showed one quartier.
     private func clearSearch() {
+        searchedListingId = nil
+        nameMatchIds = nil
+        searchCenter = nil
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         searchText = ""
         committedLocation = ""
         selected = nil
         withAnimation(Motion.instant) { searchActive = false }
-        fitAllListings()
+        DispatchQueue.main.async { fitAllListings() }
     }
 
     /// Coordinate for a listing on the map.
@@ -353,6 +466,10 @@ struct ExploreView: View {
         // One tap handler for the whole map: hitting a pin selects it,
         // hitting anywhere else clears the selection.
         .onTapGesture { pt in
+            if searchActive {
+                searchActive = false
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
             withAnimation(Motion.panel) {
                 selected = listingID(atScreenPoint: pt, proxy: proxy)
             }
@@ -365,16 +482,22 @@ struct ExploreView: View {
         .overlay(alignment: .top) {
             VStack(spacing: 0) {
                 topBar
-                if searchActive {
+                if showDropdown {
                     searchDropdown
                         .padding(.horizontal, 18)
                         .padding(.top, 6)
+                        .transition(SearchDropdown.transition)
+                }
+                if !showDropdown {
+                    chipRow.padding(.top, 10)
                         .transition(.opacity)
                 }
-                if !searchActive {
-                    chipRow.padding(.top, 10)
-                }
             }
+            .onChange(of: searchActive) { _, open in
+                if open { panelText = searchText }
+                withAnimation(open ? SearchDropdown.animation : SearchDropdown.closeAnimation) { showDropdown = open }
+            }
+            .onChange(of: searchText) { _, t in if searchActive { panelText = t } }
         }
         .overlay(alignment: .bottom) {
             if !searchActive {
@@ -569,8 +692,9 @@ struct ExploreView: View {
     // camera zooms to that point.
 
     private var searchDropdown: some View {
+        CappedScroll(maxHeight: SearchDropdown.maxHeight) {
         VStack(spacing: 0) {
-            if searchText.isEmpty {
+            if panelText.isEmpty {
                 // Recent searches on top — the same store Profil → Recherches
                 // enregistrées reads, so the two never disagree.
                 if config.isEnabled("search.savedSearches"), !savedSearches.items.isEmpty {
@@ -601,8 +725,27 @@ struct ExploreView: View {
                     }
                 }
             } else {
+                let spaces = listingSuggestions(panelText)
+                if !spaces.isEmpty {
+                    Text("Espaces")
+                        .font(.moblyBody(11, weight: .semibold))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 2)
+                    ForEach(spaces) { l in
+                        suggestionRow(title: l.title,
+                                      subtitle: "\(l.location) · \(l.price)",
+                                      icon: "house.fill",
+                                      action: { focusListing(l) })
+                    }
+                }
                 let local = locationSuggestions
                 if !local.isEmpty {
+                    if !spaces.isEmpty {
+                        Text("Lieux")
+                            .font(.moblyBody(11, weight: .semibold))
+                            .foregroundStyle(Color(hex: 0x9A9DAC))
+                            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 2)
+                    }
                     ForEach(local, id: \.name) { s in
                         suggestionRow(title: s.name,
                                       subtitle: "\(s.region), Cameroun",
@@ -615,10 +758,10 @@ struct ExploreView: View {
                                   subtitle: s.subtitle.isEmpty ? "Cameroun" : s.subtitle,
                                   action: { pickPlaceSuggestion(s) })
                 }
-                if local.isEmpty && placeCompleter.suggestions.isEmpty {
+                if spaces.isEmpty && local.isEmpty && placeCompleter.suggestions.isEmpty && !placeCompleter.isSearching {
                     HStack(spacing: 10) {
                         Image(systemName: "magnifyingglass").foregroundStyle(Color(hex: 0x9A9DAC))
-                        Text("Aucun résultat pour \"\(searchText)\"")
+                        Text("Aucun résultat pour \"\(panelText)\"")
                             .font(.moblyBody(13))
                             .foregroundStyle(Color(hex: 0x9A9DAC))
                     }
@@ -627,13 +770,19 @@ struct ExploreView: View {
             }
         }
         .padding(.vertical, 4)
+        // Always full width: a short state ("Aucun lieu trouvé") no
+        // longer shrinks the panel to its text and snaps it back.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        }
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white)
         )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: Color(hex: 0x14152A).opacity(0.14), radius: 16, y: 8)
-        .fixedSize(horizontal: false, vertical: true)
-        .onChange(of: searchText) { _, q in placeCompleter.update(query: q) }
+        // Follows the frozen panel text, so closing never clears the rows
+        // out from under the fade.
+        .onChange(of: panelText) { _, q in placeCompleter.update(query: q) }
     }
 
     private func suggestionRow(title: String, subtitle: String,
@@ -678,7 +827,11 @@ struct ExploreView: View {
         SavedSearchStore.shared.add(label: label, query: s.title, filters: filters)
         Task {
             if let coord = await placeCompleter.resolve(s) {
-                await MainActor.run { zoomTo(coord) }
+                await MainActor.run {
+                    searchCenter = coord
+                    searchRadiusMeters = 2_500
+                    zoomTo(coord)
+                }
             } else {
                 await MainActor.run { goTo(s.title) }
             }
@@ -755,7 +908,19 @@ struct ExploreView: View {
                             .onSubmit {
                                 let q = searchText.trimmingCharacters(in: .whitespaces)
                                 guard !q.isEmpty else { return }
-                                if let match = bestCityMatch(q) {
+                                let exactCity = MoblyData.searchableLocations.first {
+                                    Self.fold($0.name) == Self.fold(q)
+                                }
+                                if let city = exactCity {
+                                    goTo("\(city.name), \(city.region)")
+                                } else if case let spaces = listingSuggestions(q, limit: 50), !spaces.isEmpty {
+                                    // Name search without picking a suggestion:
+                                    // show every space whose name matched on
+                                    // the map and let the user choose — "kina"
+                                    // with two Kina annonces shows both.
+                                    showNameMatches(spaces, query: q)
+                                    return
+                                } else if let match = bestCityMatch(q) {
                                     goTo("\(match.name), \(match.region)")
                                 } else {
                                     goTo(q)
@@ -926,7 +1091,7 @@ struct ExploreView: View {
                 }
                 .buttonStyle(.plain)
 
-                Button { onOpenListing(l) } label: {
+                Button { openListing(l) } label: {
                     Text(L("Détails"))
                         .font(.moblyBody(12, weight: .semibold))
                         .foregroundStyle(.white)
@@ -985,7 +1150,7 @@ struct ExploreView: View {
                 HStack(spacing: 14) {
                     ForEach(listings) { l in
                         ExploreCard(listing: l, highlighted: selected == l.id) {
-                            onOpenListing(l)
+                            openListing(l)
                         }
                         .id(l.id)
                         .onTapGesture {
@@ -1061,7 +1226,7 @@ private struct ExploreCard: View {
                     } else {
                         HStack(spacing: 3) {
                             Image(systemName: "star.fill")
-                                .font(.system(size: 9)).foregroundStyle(Color.moblyPrimary)
+                                .font(.system(size: 9)).foregroundStyle(Color.moblyAccent)
                             Text(listing.rating)
                                 .font(.moblyBody(10.5, weight: .semibold))
                                 .foregroundStyle(Color.moblyTextPrimary)

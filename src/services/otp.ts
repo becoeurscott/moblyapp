@@ -31,6 +31,15 @@ const PHONE_DAILY_CAP = 15;
 export type OtpVerifyResult = 'ok' | 'invalid' | 'expired' | 'locked';
 
 const VERIFY_OTP_LENGTH = 6;
+/** Twilio Verify's own code lifetime, used for the send-budget row below. */
+const VERIFY_TTL_MS = 10 * 60 * 1000;
+/**
+ * Placeholder stored in `Otp.code` for a Twilio Verify send. Those rows exist
+ * only so the per-phone send budget can count them; Twilio holds the real
+ * code. `hashCode` returns 64 hex characters, so this can never collide with
+ * one and can never satisfy the local verify path.
+ */
+const VERIFY_SEND_MARKER = 'twilio-verify';
 
 /** Exposed so routes can validate length without duplicating the constant. */
 export function otpLength(): number {
@@ -99,13 +108,18 @@ export async function createOtp(
     throw new ApiError(503, 'Service SMS indisponible', 'INTERNAL');
   }
 
-  if (verifyConfigured() && !env.otpDevMode) {
-    await startVerify(phone);
-    return { code: null };
-  }
-
   // Per-phone volume caps, checked before the cooldown so a caller who has
   // burned their budget is told that, not asked to wait 60s and try again.
+  //
+  // These run for BOTH providers. The Twilio Verify branch used to return
+  // above this block, so the only limit on resends was the 60s countdown the
+  // app draws — nothing server-side. A user chasing a slow SMS could tap
+  // "Renvoyer" until Twilio hit its own ceiling of 5 sends (error 60203),
+  // which kills the pending verification: the codes already in flight then
+  // fail their check with 20404, which we report as "code expiré". Since the
+  // only way out of that state is to wait it out, the loop looked to the user
+  // like the code never worked. Throttling here keeps a number inside
+  // Twilio's budget so the dead-verification state is never reached.
   const now = Date.now();
   const [hourCount, dayCount] = await Promise.all([
     prisma.otp.count({ where: { phone, createdAt: { gt: new Date(now - 60 * 60 * 1000) } } }),
@@ -124,6 +138,20 @@ export async function createOtp(
     if (elapsed < RESEND_COOLDOWN_MS) {
       return { code: null, cooldown: Math.ceil((RESEND_COOLDOWN_MS - elapsed) / 1000) };
     }
+  }
+
+  if (verifyConfigured() && !env.otpDevMode) {
+    await startVerify(phone);
+    // Bookkeeping only: this row is what the budget above counts on the next
+    // call. Written after the send so a failed send costs nothing.
+    await prisma.otp.create({
+      data: {
+        phone,
+        code: VERIFY_SEND_MARKER,
+        expiresAt: new Date(Date.now() + VERIFY_TTL_MS),
+      },
+    });
+    return { code: null };
   }
 
   await prisma.otp.updateMany({

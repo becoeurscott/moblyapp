@@ -153,6 +153,11 @@ struct ChatMessage: Identifiable, Equatable {
     var reaction: String? = nil
     var replyToText: String? = nil
     var replyToMe: Bool = false
+    /// The quoted message's id, so tapping the quote can scroll back to it.
+    var replyToId: String? = nil
+    /// Set when the quoted message is a photo: drawn as a small thumbnail in
+    /// the quote so the reply shows *which* photo it answers.
+    var replyToMediaUrl: String? = nil
     var voiceDuration: String? = nil     // e.g. "0:12"
     var voiceSeconds: Int? = nil         // integer duration used by the player
     var imageName: String? = nil

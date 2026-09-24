@@ -46,6 +46,17 @@ final class AuthStore: ObservableObject {
 
     var isSignedIn: Bool { user != nil }
 
+    /// True while `bootstrap()` is confirming a Keychain token against /me.
+    ///
+    /// `user` is nil for the whole of that call and `isSignedIn` is derived
+    /// from it, so a valid session was indistinguishable from no session at
+    /// all: the profile announced "Invité / Non connecté" to a signed-in user
+    /// and then corrected itself once the round trip landed. On a cold backend
+    /// that is several seconds of telling people they are logged out. Holding
+    /// a token means we *had* a session; this says we are still finding out
+    /// whether it is still good.
+    @Published private(set) var isRestoringSession = false
+
     private let api = MoblyAPI.shared
     private var cooldownTimer: Timer?
 
@@ -102,6 +113,11 @@ final class AuthStore: ObservableObject {
     /// confirms with /me rather than trusting local state.
     func bootstrap() async {
         guard api.isAuthenticated else { return }
+        // Only while there is nothing to show. bootstrap() is also called to
+        // refresh an already-loaded user (after a profile edit, on
+        // foreground); those must not blank the card that is already correct.
+        if user == nil { isRestoringSession = true }
+        defer { isRestoringSession = false }
         do {
             let u = try await api.me()
             apply(u)
@@ -405,6 +421,126 @@ final class AuthStore: ObservableObject {
         }
     }
 
+    // MARK: - Provider sign-in / sign-up (phone-verified)
+
+    /// Outcome of handing a provider token to the server.
+    enum OAuthOutcome {
+        /// The e-mail already had an account; the session is live.
+        case signedIn
+        /// Brand-new e-mail: the phone step must run before any account exists.
+        case needsPhone(email: String, suggestedName: String?)
+        case failed
+    }
+
+    /// Set while a provider signup is waiting on its phone number. Nil at all
+    /// other times — it is the only proof the phone step is authorised, and it
+    /// expires server-side after ten minutes.
+    @Published private(set) var pendingOAuthToken: String?
+    /// The number the code went to, so the OTP screen can show and re-send it.
+    @Published private(set) var pendingPhone: String?
+
+    /// Step 1: exchange the provider token.
+    func startOAuth(provider: String, idToken: String, fullName: String?) async -> OAuthOutcome {
+        isBusy = true
+        errorMessage = nil
+        lastErrorCode = nil
+        fieldErrors = [:]
+        defer { isBusy = false }
+        do {
+            let res = try await api.oauthExchange(provider: provider, idToken: idToken,
+                                                  fullName: fullName)
+            if res.needsPhone {
+                pendingOAuthToken = res.pendingToken
+                if let n = res.codeLength { codeLength = n }
+                return .needsPhone(email: res.email ?? "", suggestedName: res.fullName)
+            }
+            guard let u = res.user else { return .failed }
+            apply(u)
+            return .signedIn
+        } catch let e as MoblyAPI.APIError {
+            lastErrorCode = e.code
+            fieldErrors = e.fields
+            errorMessage = message(for: e)
+            return .failed
+        } catch {
+            errorMessage = "Connexion impossible. Réessayez."
+            return .failed
+        }
+    }
+
+    /// Step 2: send a code to the number they typed.
+    func sendOAuthPhoneCode(phone: String) async -> Bool {
+        guard let pending = pendingOAuthToken else {
+            errorMessage = "Session d'inscription expirée. Recommencez."
+            return false
+        }
+        let normalized = Self.normalizePhone(phone)
+        guard Self.isValidPhone(normalized) else {
+            errorMessage = "Numéro de téléphone invalide."
+            return false
+        }
+
+        isBusy = true
+        errorMessage = nil
+        lastErrorCode = nil
+        fieldErrors = [:]
+        defer { isBusy = false }
+        do {
+            let res = try await api.oauthPhoneStart(pendingToken: pending, phone: normalized)
+            pendingPhone = res.phone
+            devCode = res.devCode
+            if let n = res.codeLength { codeLength = n }
+            startCooldown(60)
+            return true
+        } catch let e as MoblyAPI.APIError {
+            if e.code == .otpRateLimited, let secs = Self.secondsIn(e.message) {
+                startCooldown(secs)
+            }
+            lastErrorCode = e.code
+            fieldErrors = e.fields
+            errorMessage = message(for: e)
+            return false
+        } catch {
+            errorMessage = "Impossible d'envoyer le code. Réessayez."
+            return false
+        }
+    }
+
+    /// Step 3: confirm the code. The account is created server-side here — this
+    /// is the first moment anything exists to sign in to.
+    func verifyOAuthPhone(code: String, fullName: String?) async -> Bool {
+        guard let pending = pendingOAuthToken, let phone = pendingPhone else {
+            errorMessage = "Session d'inscription expirée. Recommencez."
+            return false
+        }
+        isBusy = true
+        errorMessage = nil
+        lastErrorCode = nil
+        defer { isBusy = false }
+        do {
+            let res = try await api.oauthPhoneVerify(pendingToken: pending, phone: phone,
+                                                     code: code, fullName: fullName)
+            pendingOAuthToken = nil
+            pendingPhone = nil
+            apply(res.user)
+            return true
+        } catch let e as MoblyAPI.APIError {
+            lastErrorCode = e.code
+            fieldErrors = e.fields
+            errorMessage = message(for: e)
+            return false
+        } catch {
+            errorMessage = "Vérification impossible. Réessayez."
+            return false
+        }
+    }
+
+    /// Abandon a half-finished provider signup (back button, or a fresh start).
+    func cancelOAuthSignup() {
+        pendingOAuthToken = nil
+        pendingPhone = nil
+    }
+
     // MARK: - Sign in with Apple
 
     /// Complete a Sign-in with Apple after `ASAuthorizationController` returns
@@ -455,6 +591,19 @@ final class AuthStore: ObservableObject {
             errorMessage = "Connexion Google impossible. Réessayez."
             return false
         }
+    }
+
+    /// Rename the account after a provider signup, where the name came from
+    /// Google/Apple rather than the user. Best-effort: the account already
+    /// exists and carries a usable name, so a failure must not block
+    /// onboarding.
+    func updateFullName(_ name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 2 else { return }
+        isBusy = true
+        errorMessage = nil
+        defer { isBusy = false }
+        if let u = try? await api.updateMe(fullName: trimmed) { apply(u) }
     }
 
     /// Attach a password to the freshly created account so the user can sign in

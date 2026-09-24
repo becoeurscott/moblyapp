@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct OnboardingView: View {
+    /// False while the splash wordmark is still flying into the header.
+    var showWordmark: Bool = true
     var onFinished: () -> Void = {}
 
     @State private var index: Int = {
@@ -27,6 +29,7 @@ struct OnboardingView: View {
 
             TabView(selection: $index) {
                 OnboardingSlide1MapView(
+                    showWordmark: showWordmark,
                     onSkip: onFinished,
                     onNext: { advance() }
                 )
@@ -91,7 +94,7 @@ struct OnboardingTopBar: View {
 enum OnboardingShowcase {
     static let listings: [Listing] = [
         item(1, "Appartement · Bonapriso", "Douala", "250 000 FCFA", "4.9", "Appartements", "Meublé · 2 ch"),
-        item(2, "Studio moderne · Akwa", "Douala", "120 000 FCFA", "4.8", "Studios", "Meublé · 1 ch"),
+        item(2, "Local commercial · Akwa", "Douala", "350 000 FCFA", "4.8", "Commercial", "Vitrine · 45 m²"),
         item(3, "Bureau privé · Bonanjo", "Douala", "180 000 FCFA", "4.7", "Bureaux", "Bureau équipé"),
         item(4, "Bureau · Bastos", "Yaoundé", "150 000 FCFA", "4.6", "Bureaux", "Prêt à l'emploi"),
         item(5, "Salle de réunion · Bonanjo", "Douala", "25 000 FCFA", "4.8", "Coworking", "8 places · Écran"),

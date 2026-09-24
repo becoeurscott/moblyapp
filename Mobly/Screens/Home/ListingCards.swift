@@ -71,7 +71,7 @@ private struct HeroCard: View {
                         } else {
                             HStack(spacing: 4) {
                                 Image(systemName: "star.fill")
-                                    .font(.system(size: 11)).foregroundStyle(Color.moblyPrimary)
+                                    .font(.system(size: 11)).foregroundStyle(Color.moblyAccent)
                                 Text(listing.rating)
                                     .font(.moblyHeading(12)).foregroundStyle(Color(hex: 0x14152A))
                             }
@@ -146,7 +146,7 @@ struct RecommendedCard: View {
                                 .foregroundStyle(Color.moblyPrimary)
                         } else {
                             HStack(spacing: 3) {
-                                Image(systemName: "star.fill").font(.system(size: 10)).foregroundStyle(Color.moblyPrimary)
+                                Image(systemName: "star.fill").font(.system(size: 10)).foregroundStyle(Color.moblyAccent)
                                 Text(listing.rating).font(.moblyBody(12, weight: .semibold)).foregroundStyle(Color.moblyTextPrimary)
                             }
                         }

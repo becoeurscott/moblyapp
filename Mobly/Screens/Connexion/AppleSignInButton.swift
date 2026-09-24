@@ -14,7 +14,9 @@ import AuthenticationServices
 /// sign-ins arrive with those fields empty — the server persists them the
 /// first time so we don't have to.
 struct AppleSignInButton: View {
-    var onCompletion: (Bool) -> Void = { _ in }
+    /// Same contract as GoogleSignInButton: yield the token, let the screen
+    /// route. `fullName` is non-nil only on the very first authorization.
+    var onToken: (String, String?) async -> Void
 
     @State private var isBusy = false
 
@@ -50,13 +52,9 @@ struct AppleSignInButton: View {
             isBusy = false
             switch result {
             case .success(let (idToken, name)):
-                Task {
-                    let ok = await AuthStore.shared.signInWithApple(idToken: idToken, fullName: name)
-                    onCompletion(ok)
-                }
+                Task { await onToken(idToken, name) }
             case .failure:
-                // Includes user-cancelled. Silent — no toast needed.
-                onCompletion(false)
+                break // Includes user-cancelled. Silent — no toast needed.
             }
         }
         controller.delegate = delegate

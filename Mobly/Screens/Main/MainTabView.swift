@@ -69,6 +69,7 @@ struct MainTabView: View {
     /// Set when a notification points at a visit; MessagesView opens the hub.
     @State private var showVisitsFromRoute = false
     @State private var showSearch = false
+    @State private var searchRequest: SearchRequest?
     @State private var searchCategory: String?
     @State private var searchQuery: String = ""
     @State private var showExplore = false
@@ -134,6 +135,7 @@ struct MainTabView: View {
             ZStack {
                 HomeView(
                     onOpenListing: { openListing($0, from: "home") },
+                    onOpenRecommended: { openListing($0, from: "recommended") },
                     onNotifications: { showNotifications = true },
                     onOpenCategory: { cat in
                         searchCategory = cat
@@ -162,6 +164,7 @@ struct MainTabView: View {
 
                 ExploreView(
                     onOpenListing: { openListing($0, from: "explore") },
+                    onOpenListingFromSearch: { openListing($0, from: "search") },
                     initialLocation: exploreLocation,
                     initialFilters: explorePresetFilters,
                     onLocationConsumed: {
@@ -290,10 +293,17 @@ struct MainTabView: View {
             )
             .swipeToDismiss(onDismiss: { showExplore = false })
         }
-        .fullScreenCover(isPresented: $showSearch) {
+        // Item-based, not `isPresented:`. With `isPresented:` SwiftUI built
+        // the results screen with the *previous* `searchCategory` on the first
+        // tap, so a quick-filter opened unfiltered and only worked the second
+        // time. The request is captured after the category has been set.
+        .onChange(of: showSearch) { _, open in
+            searchRequest = open ? SearchRequest(category: searchCategory, query: searchQuery) : nil
+        }
+        .fullScreenCover(item: $searchRequest, onDismiss: { showSearch = false }) { req in
             SearchResultsView(
-                initialCategory: searchCategory,
-                initialQuery: searchQuery,
+                initialCategory: req.category,
+                initialQuery: req.query,
                 onClose: { showSearch = false }
             )
             .swipeToDismiss(onDismiss: { showSearch = false })
@@ -440,4 +450,12 @@ private struct TabPlaceholder: View {
 
 #Preview {
     MainTabView()
+}
+
+
+/// One opening of the search results screen, with the filter it was opened for.
+private struct SearchRequest: Identifiable {
+    let id = UUID()
+    let category: String?
+    let query: String
 }

@@ -6,7 +6,7 @@ import { requireAuth, requireOwner } from '../middleware/auth';
 import { writeLimiter } from '../middleware/security';
 import { featureGate, restrictionGate } from '../middleware/gates';
 import { notifyUser } from '../services/push';
-import { broadcastMessage } from '../realtime/hub';
+import { broadcastMessage, isOnline } from '../realtime/hub';
 
 export const visitsRouter = Router();
 export const listingVisitsRouter = Router({ mergeParams: true });
@@ -93,6 +93,7 @@ async function postVisitSystemMessage(opts: {
 }) {
   const { visit, action, senderId } = opts;
   const threadId = await ensureThread(visit.listingId, visit.visitorId, visit.ownerId);
+  const recipientId = senderId === visit.ownerId ? visit.visitorId : visit.ownerId;
   const message = await prisma.message.create({
     data: {
       threadId,
@@ -103,11 +104,44 @@ async function postVisitSystemMessage(opts: {
       visitAction: action,
     },
   });
-  await prisma.thread.update({
-    where: { id: threadId },
-    data: { updatedAt: new Date() },
-  }).catch(() => {});
+  await Promise.all([
+    prisma.thread.update({
+      where: { id: threadId },
+      data: { updatedAt: new Date() },
+    }).catch(() => {}),
+    prisma.threadParticipant.update({
+      where: { threadId_userId: { threadId, userId: recipientId } },
+      data: { unreadCount: { increment: 1 } },
+    }).catch(() => {}),
+  ]);
   await broadcastMessage(threadId, { ...message, senderId });
+
+  const pushTitles: Record<string, string> = {
+    REQUESTED: 'Nouvelle demande de visite',
+    CONFIRMED: 'Visite confirmée',
+    CANCELLED: 'Visite annulée',
+    COMPLETED: 'Visite terminée',
+    RESCHEDULED: 'Visite reprogrammée',
+  };
+  if (!isOnline(recipientId)) {
+    const sender = await prisma.user.findUnique({
+      where: { id: senderId },
+      select: { fullName: true },
+    });
+    const unread = await prisma.threadParticipant.findUnique({
+      where: { threadId_userId: { threadId, userId: recipientId } },
+      select: { unreadCount: true },
+    });
+    void notifyUser({
+      userId: recipientId,
+      type: 'visit',
+      title: pushTitles[action] ?? 'Demande de visite',
+      body: `${sender?.fullName ?? 'Quelqu\'un'} — ${visitMessageText(action, visit.scheduledAt)}`,
+      payload: { threadId, visitId: visit.id },
+      threadId,
+      badge: unread?.unreadCount ?? 1,
+    }).catch((err) => console.error('[push] visit notification failed', err));
+  }
 }
 
 function serializeVisit(v: any) {

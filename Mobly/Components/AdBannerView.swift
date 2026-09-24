@@ -22,54 +22,16 @@ enum AdConfig {
 
 struct AdBannerView: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("SPONSORISÉ")
-                .font(.moblyBody(10, weight: .bold))
-                .foregroundStyle(Color(hex: 0x9A9DAC))
-                .tracking(0.5)
-
-            if AdConfig.enabled {
-                // Real AdMob banner (requires the SDK — see the header comment).
-                // AdMobBanner(adUnitID: AdConfig.bannerAdUnitID)
-                //     .frame(height: 90)
-                //     .clipShape(RoundedRectangle(cornerRadius: 16))
-                placeholder
-            } else {
-                placeholder
-            }
-        }
-        .padding(.horizontal, 22)
+        placeholder
+            .padding(.horizontal, 22)
     }
 
-    // On-brand placeholder that reads as an ad slot until AdMob is wired.
     private var placeholder: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12).fill(Color(hex: 0xEEF0FE))
-                Image(systemName: "megaphone.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(Color.moblyPrimary)
-            }
-            .frame(width: 64, height: 64)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Votre publicité ici")
-                    .font(.moblyHeading(14)).foregroundStyle(Color.moblyTextPrimary)
-                Text("Espace Google Ads · touchez des milliers d'utilisateurs")
-                    .font(.moblyBody(11.5)).foregroundStyle(Color(hex: 0x9A9DAC))
-                    .lineLimit(2)
-            }
-            Spacer(minLength: 0)
-            Image(systemName: "arrow.up.right")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color(hex: 0xC4C7D2))
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity)
-        .background(RoundedRectangle(cornerRadius: 16).fill(.white))
-        .overlay(RoundedRectangle(cornerRadius: 16)
-            .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
-            .foregroundStyle(Color(hex: 0xE2E4EC)))
+        Image("AdBanner")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 

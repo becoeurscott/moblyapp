@@ -105,7 +105,12 @@ struct ManageListingView: View {
         }
         .alert("Modifications non enregistrées",
                isPresented: $confirmDiscard) {
-            Button("Ignorer", role: .destructive) { onClose(); dismiss() }
+            // `dismiss()` alone: it already clears the `fullScreenCover(item:)`
+            // binding. Calling `onClose()` too set that binding to nil first,
+            // so the second dismissal travelled up to the dashboard's own
+            // presentation and popped it — landing the user on Profil instead
+            // of back on the dashboard.
+            Button("Ignorer", role: .destructive) { dismiss() }
             Button("Continuer l'édition", role: .cancel) {}
         } message: {
             Text("Vos modifications seront perdues si vous quittez maintenant.")
@@ -123,7 +128,7 @@ struct ManageListingView: View {
     private var header: some View {
         HStack {
             Button {
-                if hasChanges { confirmDiscard = true } else { onClose(); dismiss() }
+                if hasChanges { confirmDiscard = true } else { dismiss() }
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 18, weight: .semibold))
@@ -353,7 +358,6 @@ struct ManageListingView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                     showSaveSuccess = false
                     onClose()
-                    dismiss()
                 }
             } else {
                 saveError = "La sauvegarde a échoué. Vérifiez votre connexion et réessayez."

@@ -79,9 +79,14 @@ enum GoogleSignIn {
                 }
             }
             session.presentationContextProvider = anchor
-            // Ephemeral so the user is asked which account each time; the
-            // browser session doesn't stick around in Safari's cookies.
-            session.prefersEphemeralWebBrowserSession = true
+            // Deliberately NOT ephemeral. An ephemeral session gets a private
+            // cookie jar, so Safari's existing Google login is invisible to it
+            // and the user has to retype their password — and clear 2FA — on
+            // every single sign-in. Sharing Safari's cookies lets the
+            // `prompt=select_account` above list the accounts they are already
+            // signed into, so choosing one is a single tap. The chooser still
+            // appears, so this does not silently reuse the last account.
+            session.prefersEphemeralWebBrowserSession = false
             session.start()
         }
 

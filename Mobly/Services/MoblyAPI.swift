@@ -274,10 +274,7 @@ final class MoblyAPI {
         let data: Data
         let http: HTTPURLResponse
         do {
-            let start = CFAbsoluteTimeGetCurrent()
             let (d, resp) = try await session.data(for: req)
-            let elapsed = CFAbsoluteTimeGetCurrent() - start
-            Task { @MainActor in NetworkMonitor.shared.recordLatency(elapsed) }
             data = d
             http = resp as? HTTPURLResponse ?? HTTPURLResponse()
         } catch let urlError as URLError {
@@ -537,6 +534,50 @@ final class MoblyAPI {
         struct Body: Encodable { let idToken: String }
         let res: AuthResponse = try await request(
             "auth/google", method: "POST", body: Body(idToken: idToken)
+        )
+        store(token: res.token, refreshToken: res.refreshToken)
+        return res
+    }
+
+    // MARK: - OAuth signup (phone-verified)
+
+    /// Exchange a provider ID token for either a session or a pending signup.
+    ///
+    /// Unlike `auth/google` / `auth/apple`, this endpoint creates no account
+    /// for a new email — a marketplace user without a reachable number isn't
+    /// useful, so the row is only written once the phone is confirmed.
+    func oauthExchange(provider: String, idToken: String,
+                       fullName: String? = nil) async throws -> OAuthExchangeResponse {
+        struct Body: Encodable { let provider: String; let idToken: String; let fullName: String? }
+        let res: OAuthExchangeResponse = try await request(
+            "auth/oauth", method: "POST",
+            body: Body(provider: provider, idToken: idToken, fullName: fullName)
+        )
+        // Only an existing account comes back signed in; a pending signup has
+        // no tokens to store yet.
+        if let token = res.token { store(token: token, refreshToken: res.refreshToken) }
+        return res
+    }
+
+    /// Send a code to the number a provider-signup user just typed. Authorised
+    /// by the pending token — there is no session yet.
+    func oauthPhoneStart(pendingToken: String, phone: String) async throws -> OTPStartResponse {
+        struct Body: Encodable { let pendingToken: String; let phone: String }
+        return try await request(
+            "auth/signup/oauth/phone/start", method: "POST",
+            body: Body(pendingToken: pendingToken, phone: phone)
+        )
+    }
+
+    /// Confirm the code; the account is created here and a session returned.
+    func oauthPhoneVerify(pendingToken: String, phone: String, code: String,
+                          fullName: String? = nil) async throws -> AuthResponse {
+        struct Body: Encodable {
+            let pendingToken: String; let phone: String; let code: String; let fullName: String?
+        }
+        let res: AuthResponse = try await request(
+            "auth/signup/oauth/phone/verify", method: "POST",
+            body: Body(pendingToken: pendingToken, phone: phone, code: code, fullName: fullName)
         )
         store(token: res.token, refreshToken: res.refreshToken)
         return res
@@ -847,6 +888,15 @@ final class MoblyAPI {
     /// scratch. The other participant keeps the full conversation.
     func clearThread(_ threadId: String) async throws {
         _ = try await request("threads/\(threadId)", method: "DELETE", authorized: true) as EmptyResponse
+    }
+
+    /// DELETE /threads/:threadId/messages/:messageId — delete a single message.
+    func deleteMessage(threadId: String, messageId: String, mode: String) async throws {
+        struct Body: Encodable { let mode: String }
+        _ = try await request(
+            "threads/\(threadId)/messages/\(messageId)", method: "DELETE",
+            body: Body(mode: mode), authorized: true
+        ) as EmptyResponse
     }
 
     /// PATCH /listings/:id/availability — flip disponible / indisponible.
@@ -1186,6 +1236,31 @@ struct EmptyResponse: Decodable {}
 struct OTPRequestResponse: Decodable {
     let sent: Bool
     let devCode: String?   // present only when the server runs in dev mode
+}
+
+/// `auth/oauth`: either a finished sign-in (`needsPhone == false`) or a
+/// pending signup that still owes us a verified phone number.
+struct OAuthExchangeResponse: Decodable {
+    let needsPhone: Bool
+    // Present when the email already had an account.
+    let token: String?
+    let refreshToken: String?
+    let refreshExpiresAt: Date?
+    let user: UserDTO?
+    // Present when it did not.
+    let pendingToken: String?
+    let email: String?
+    let fullName: String?
+    let codeLength: Int?
+}
+
+/// `auth/signup/oauth/phone/start`.
+struct OTPStartResponse: Decodable {
+    let sent: Bool
+    let phone: String
+    let codeLength: Int?
+    /// Echoed back only while OTP_DEV_MODE is on, so the simulator can prefill.
+    let devCode: String?
 }
 
 struct AuthResponse: Decodable {

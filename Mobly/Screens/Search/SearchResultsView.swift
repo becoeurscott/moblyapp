@@ -278,7 +278,7 @@ struct ResultCard: View {
                     } else {
                         HStack(spacing: 3) {
                             Image(systemName: "star.fill")
-                                .font(.system(size: 10)).foregroundStyle(Color.moblyPrimary)
+                                .font(.system(size: 10)).foregroundStyle(Color.moblyAccent)
                             Text(listing.rating)
                                 .font(.moblyBody(11.5, weight: .semibold))
                                 .foregroundStyle(Color.moblyTextPrimary)

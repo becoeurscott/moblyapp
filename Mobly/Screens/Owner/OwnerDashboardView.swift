@@ -9,6 +9,14 @@ struct OwnerDashboardView: View {
     @ObservedObject private var auth = AuthStore.shared
     /// Aggregate figures + real 30-day deltas from /owner/overview.
     @State private var overview: MoblyAPI.OwnerOverview?
+    /// Nil `overview` alone can't tell "the numbers haven't arrived" from "the
+    /// numbers really are zero", and the card rendered `?? 0` for both — so a
+    /// new owner and an owner on a slow connection saw the identical, wrong
+    /// screen. This drives the placeholder instead.
+    @State private var overviewLoading = true
+    /// The fetch came back empty-handed. Kept apart from `overviewLoading` so a
+    /// failure stops the shimmer rather than spinning forever.
+    @State private var overviewFailed = false
     @State private var showAddListing = false
     @State private var showVisits = false
     @State private var filter: Filter = .all
@@ -228,7 +236,7 @@ struct OwnerDashboardView: View {
                     }
                     Spacer(minLength: 6)
                     Button { showReactivate = true } label: {
-                        Text("Payer")
+                        Text("Souscrire")
                             .font(.moblyHeading(12))
                             .foregroundStyle(Color.moblyPrimary)
                             .padding(.horizontal, 14).padding(.vertical, 8)
@@ -244,7 +252,7 @@ struct OwnerDashboardView: View {
                     }
                 }
                 .frame(height: 6)
-                Text("Payez une fois 5 000 FCFA pour garder votre compte actif.")
+                Text("Souscrivez pour garder votre compte actif.")
                     .font(.moblyBody(11)).foregroundStyle(.white.opacity(0.85))
             }
             .onChange(of: left == 0) { _, ended in
@@ -269,12 +277,12 @@ struct OwnerDashboardView: View {
                 Text(days <= 0 ? "Dernier jour d'essai gratuit"
                                : "Essai gratuit · \(days) jour\(days > 1 ? "s" : "") restant\(days > 1 ? "s" : "")")
                     .font(.moblyHeading(13)).foregroundStyle(.white)
-                Text("Payez une fois pour garder votre compte actif.")
+                Text("Souscrivez pour garder votre compte actif.")
                     .font(.moblyBody(11)).foregroundStyle(.white.opacity(0.85))
             }
             Spacer(minLength: 6)
             Button { showReactivate = true } label: {
-                Text("Payer")
+                Text("Souscrire")
                     .font(.moblyHeading(12))
                     .foregroundStyle(Color.moblyPrimary)
                     .padding(.horizontal, 14).padding(.vertical, 8)
@@ -328,7 +336,7 @@ struct OwnerDashboardView: View {
                 Button { showReactivate = true } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "lock.open.fill").font(.system(size: 14, weight: .bold))
-                        Text("Payer 5 000 FCFA").font(.moblyHeading(14))
+                        Text("Souscrire · 5 000 FCFA").font(.moblyHeading(14))
                     }
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 56)
@@ -395,22 +403,36 @@ struct OwnerDashboardView: View {
                             .shadow(color: Color(hex: 0x14152A).opacity(0.05), radius: 8, y: 2))
                 }
                 Spacer()
-                Button { showAddListing = true } label: {
+                // `topBar` sits ABOVE the `if ownerLocked` branch, so it keeps
+                // rendering while the paywall replaces the dashboard below it.
+                // This button therefore stayed live after the trial ran out and
+                // a lapsed owner could publish straight past the lock. It now
+                // routes to the payment sheet instead of the publish wizard.
+                Button {
+                    if ownerLocked { showReactivate = true } else { showAddListing = true }
+                } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: "plus").font(.system(size: 14, weight: .bold))
+                        Image(systemName: ownerLocked ? "lock.fill" : "plus")
+                            .font(.system(size: 14, weight: .bold))
                         Text("Publier").font(.moblyHeading(13))
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18).padding(.vertical, 11)
-                    .background(Capsule().fill(Color.moblyPrimary))
-                    .shadow(color: Color.moblyPrimary.opacity(0.3), radius: 10, y: 5)
+                    .background(Capsule().fill(ownerLocked ? Color(hex: 0xC4C7D2) : Color.moblyPrimary))
+                    .shadow(color: (ownerLocked ? Color.clear : Color.moblyPrimary.opacity(0.3)),
+                            radius: 10, y: 5)
                 }
             }
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(greeting)
-                        .font(.moblyHeading(20))
-                        .foregroundStyle(Color.moblyTextPrimary)
+                    HStack(spacing: 6) {
+                        Text(greeting)
+                            .font(.moblyHeading(20))
+                            .foregroundStyle(Color.moblyTextPrimary)
+                        if auth.user?.identityVerified == true {
+                            VerifiedBadge(size: 16)
+                        }
+                    }
                     Text("Bienvenue dans votre\nespace propriétaire")
                         .font(.moblyBody(12.5))
                         .foregroundStyle(Color.moblyTextSecondary)
@@ -469,9 +491,20 @@ struct OwnerDashboardView: View {
     /// Best-effort: on failure the card falls back to the listing totals and
     /// simply shows no trend badge, rather than a stale or invented one.
     private func loadOverview() async {
-        guard let fresh = try? await MoblyAPI.shared.ownerOverview() else { return }
-        // Keep the last-known figures when the call fails, and ease the new
-        // ones in when it succeeds.
+        // Only show the placeholder on the first load. A silent refresh (app
+        // foregrounded, a view came in) must not blank figures already on
+        // screen — that reads as data being lost.
+        if overview == nil { overviewLoading = true }
+        guard let fresh = try? await MoblyAPI.shared.ownerOverview() else {
+            // Keep the last-known figures when the call fails; only the very
+            // first load has nothing to fall back on, and that's the one case
+            // the user needs told about.
+            overviewLoading = false
+            overviewFailed = overview == nil
+            return
+        }
+        overviewFailed = false
+        overviewLoading = false
         withAnimation(Motion.content) { overview = fresh }
     }
 
@@ -509,6 +542,26 @@ struct OwnerDashboardView: View {
                          "\(overview?.last30d.favorites ?? 0)",
                          "Favoris", overview?.deltas30d.favorites)
             }
+            if overviewFailed {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Chiffres indisponibles")
+                        .font(.moblyBody(11.5, weight: .medium))
+                    Spacer(minLength: 4)
+                    Button {
+                        Task { await loadOverview() }
+                    } label: {
+                        Text("Réessayer")
+                            .font(.moblyBody(11.5, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Capsule().fill(.white.opacity(0.22)))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .foregroundStyle(.white.opacity(0.9))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
@@ -536,9 +589,16 @@ struct OwnerDashboardView: View {
             Image(systemName: icon)
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.85))
-            Text(value).font(.moblyHeading(20)).foregroundStyle(.white)
-                .contentTransition(.numericText())
-                .animation(Motion.content, value: value)
+            if overviewLoading {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(.white.opacity(0.28))
+                    .frame(width: 46, height: 22)
+                    .shimmer()
+            } else {
+                Text(value).font(.moblyHeading(20)).foregroundStyle(.white)
+                    .contentTransition(.numericText())
+                    .animation(Motion.content, value: value)
+            }
             Text(LT(label)).font(.moblyBody(10.5)).foregroundStyle(.white.opacity(0.8))
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -550,7 +610,9 @@ struct OwnerDashboardView: View {
 
     @ViewBuilder
     private func deltaBadge(_ delta: Int?) -> some View {
-        if let d = delta {
+        if overviewLoading {
+            EmptyView()
+        } else if let d = delta {
             if d == 0 {
                 HStack(spacing: 3) {
                     Image(systemName: "minus").font(.system(size: 9, weight: .bold))

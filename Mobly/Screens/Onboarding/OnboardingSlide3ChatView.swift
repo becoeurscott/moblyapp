@@ -176,7 +176,7 @@ private struct ChatCard: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 5) {
                     Text(ownerName).font(.moblyHeading(13.5)).foregroundStyle(Color(hex: 0x14152A))
-                    Image(systemName: "checkmark.seal.fill").font(.system(size: 11)).foregroundStyle(Color(hex: 0x1F8A5B))
+                    VerifiedBadge(size: 13)
                 }
                 HStack(spacing: 5) {
                     Circle().fill(Color(hex: 0x1F8A5B)).frame(width: 6, height: 6)

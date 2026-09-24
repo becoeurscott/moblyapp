@@ -66,14 +66,27 @@ final class CachedImageLoader: ObservableObject {
     private var url: URL?
     private var task: Task<Void, Never>?
 
-    func load(_ url: URL) {
+    /// - Parameter persistent: keep the bytes in `ChatMediaStore` (Application
+    ///   Support) instead of `URLCache`. Chat photos pass true because the
+    ///   server deletes chat media after its retention window, which makes the
+    ///   handset copy the only one left — an iOS cache eviction would destroy
+    ///   it permanently. Listing covers and avatars pass false: they can always
+    ///   be re-fetched, so caching them is correct and keeps the permanent
+    ///   directory from growing without bound.
+    func load(_ url: URL, persistent: Bool = false) {
         guard self.url != url else { return }
         self.url = url
         task?.cancel()
         failed = false
 
         let request = URLRequest(url: url)
-        if let cached = URLCache.shared.cachedResponse(for: request),
+
+        if persistent, let data = ChatMediaStore.data(for: url),
+           let img = UIImage(data: data) {
+            image = img
+            return
+        }
+        if !persistent, let cached = URLCache.shared.cachedResponse(for: request),
            let img = UIImage(data: cached.data) {
             image = img
             return
@@ -86,8 +99,12 @@ final class CachedImageLoader: ObservableObject {
                 guard !Task.isCancelled else { return }
                 if let img = UIImage(data: data) {
                     withAnimation(Motion.instant) { image = img }
-                    let cached = CachedURLResponse(response: response, data: data)
-                    URLCache.shared.storeCachedResponse(cached, for: request)
+                    if persistent {
+                        ChatMediaStore.store(data, for: url)
+                    } else {
+                        let cached = CachedURLResponse(response: response, data: data)
+                        URLCache.shared.storeCachedResponse(cached, for: request)
+                    }
                 } else {
                     failed = true
                 }

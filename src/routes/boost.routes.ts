@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
-import { requireAuth, requireOwner } from '../middleware/auth';
+import { requireAuth, requireOwner, requireActiveOwner } from '../middleware/auth';
 import { featureGate, restrictionGate } from '../middleware/gates';
 import { configSnapshot } from '../services/config';
 import { serializeListing } from '../lib/serialize';
@@ -52,6 +52,7 @@ boostRouter.post(
   '/:listingId',
   requireAuth,
   requireOwner,
+  requireActiveOwner,
   featureGate('boost.enabled'),
   restrictionGate('BOOST'),
   asyncHandler(async (req, res) => {

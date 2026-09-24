@@ -9,12 +9,11 @@ final class NetworkMonitor: ObservableObject {
     @Published private(set) var isConnected = true
     @Published private(set) var isCellular = false
     @Published private(set) var isConstrained = false
-    @Published private(set) var isSlow = false
 
+    // API response times include server processing and cannot establish
+    // whether the user’s internet connection is slow. Track reachability only.
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "cm.mobly.netmon", qos: .utility)
-    private var slowTimer: Task<Void, Never>?
-    private var recentLatencies: [TimeInterval] = []
 
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
@@ -26,8 +25,6 @@ final class NetworkMonitor: ObservableObject {
                 self.isConstrained = path.isConstrained
 
                 if self.isConnected && !wasConnected {
-                    self.isSlow = false
-                    self.recentLatencies.removeAll()
                     NotificationCenter.default.post(name: Self.didReconnect, object: nil)
                 }
             }
@@ -37,10 +34,4 @@ final class NetworkMonitor: ObservableObject {
 
     static let didReconnect = Notification.Name("NetworkMonitorDidReconnect")
 
-    func recordLatency(_ duration: TimeInterval) {
-        recentLatencies.append(duration)
-        if recentLatencies.count > 5 { recentLatencies.removeFirst() }
-        let avg = recentLatencies.reduce(0, +) / Double(recentLatencies.count)
-        isSlow = avg > 4.0
-    }
 }

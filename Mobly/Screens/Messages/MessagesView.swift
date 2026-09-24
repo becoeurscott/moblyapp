@@ -482,13 +482,7 @@ struct ChatRow: View {
                         .foregroundStyle(Color.moblyTextPrimary)
                         .lineLimit(1)
                     if thread.verified {
-                        ZStack {
-                            Circle().fill(Color(hex: 0xB8CCFF))
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 7, weight: .heavy))
-                                .foregroundStyle(Color.moblyPrimary)
-                        }
-                        .frame(width: 16, height: 16)
+                        VerifiedBadge(size: 15)
                     }
                     if prefs.muted {
                         Image(systemName: "bell.slash.fill")

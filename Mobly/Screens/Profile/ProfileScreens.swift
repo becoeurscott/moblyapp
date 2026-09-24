@@ -2063,8 +2063,7 @@ private struct TestimonialCard: View {
                     HStack(spacing: 4) {
                         Text(testimonial.name).font(.moblyHeading(13))
                             .foregroundStyle(Color.moblyTextPrimary)
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 10)).foregroundStyle(Color.moblyPrimary)
+                        VerifiedBadge(size: 13)
                     }
                     Text("\(testimonial.role) · \(testimonial.city)")
                         .font(.moblyBody(11))

@@ -297,25 +297,29 @@ final class ChatStore: ObservableObject {
     /// the owner themselves and fail.
     func openThread(listingId: String, otherUserId: String? = nil) async -> ThreadDTO? {
         do {
-            struct Body: Encodable { let listingId: String; let otherUserId: String? }
-            struct Wrap: Decodable { let thread: ThreadDTO }
-            let w: Wrap = try await api.request(
-                "threads", method: "POST",
-                body: Body(listingId: listingId, otherUserId: otherUserId),
-                authorized: true
-            )
-            // Keep it locally so the conversation screen can render straight
-            // away; it joins the inbox once a message exists.
-            if !threads.contains(where: { $0.id == w.thread.id }) {
-                threads.insert(w.thread, at: 0)
-            }
-            return w.thread
+            return try await openThreadOrThrow(listingId: listingId, otherUserId: otherUserId)
         } catch let e as MoblyAPI.APIError {
             isOffline = e.isOffline
             return nil
         } catch {
             return nil
         }
+    }
+
+    /// Preserve the server's reason so the contact flow can explain a refusal.
+    func openThreadOrThrow(listingId: String, otherUserId: String? = nil) async throws -> ThreadDTO {
+        struct Body: Encodable { let listingId: String; let otherUserId: String? }
+        struct Wrap: Decodable { let thread: ThreadDTO }
+        let w: Wrap = try await api.request(
+            "threads", method: "POST",
+            body: Body(listingId: listingId, otherUserId: otherUserId),
+            authorized: true
+        )
+        if !threads.contains(where: { $0.id == w.thread.id }) {
+            threads.insert(w.thread, at: 0)
+        }
+        isOffline = false
+        return w.thread
     }
 
     /// Open (or reopen) the conversation with Mobly support.
@@ -353,6 +357,48 @@ final class ChatStore: ObservableObject {
     /// on that same `clientId`, a retry after a dropped connection resolves to
     /// the existing message rather than posting twice.
     @discardableResult
+    func sendPhotoBatch(threadId: String, urls: [String], myUserId: String) async {
+        var placeholders: [(clientId: String, url: String)] = []
+        for url in urls {
+            let clientId = UUID().uuidString
+            let optimistic = MessageDTO(
+                id: "local-\(clientId)", threadId: threadId, senderId: myUserId,
+                clientId: clientId, kind: "IMAGE", text: "📷 Photo", mediaUrl: url,
+                durationSec: nil, replyToId: nil, visitId: nil, visitAction: nil,
+                read: false, readAt: nil, createdAt: Date()
+            )
+            messages[threadId, default: []].append(optimistic)
+            placeholders.append((clientId, url))
+        }
+        if let last = placeholders.last {
+            if let m = messages[threadId]?.last(where: { $0.clientId == last.clientId }) {
+                bumpThreadToTop(threadId, lastMessage: m)
+            }
+        }
+        for p in placeholders {
+            do {
+                struct Body: Encodable {
+                    let text: String; let clientId: String; let kind: String
+                    let mediaUrl: String?; let durationSec: Int?; let replyToId: String?
+                }
+                struct Wrap: Decodable { let message: MessageDTO }
+                let w: Wrap = try await api.request(
+                    "threads/\(threadId)/messages", method: "POST",
+                    body: Body(text: "📷 Photo", clientId: p.clientId, kind: "IMAGE",
+                               mediaUrl: p.url, durationSec: nil, replyToId: nil),
+                    authorized: true
+                )
+                if let i = messages[threadId]?.firstIndex(where: { $0.clientId == p.clientId }) {
+                    messages[threadId]?[i] = w.message
+                }
+            } catch {
+                isOffline = (error as? MoblyAPI.APIError)?.isOffline ?? false
+            }
+        }
+        saveToDisk()
+        await PushService.shared.requestIfAppropriate()
+    }
+
     func send(threadId: String, text: String, myUserId: String,
               kind: String = "TEXT", mediaUrl: String? = nil,
               durationSec: Int? = nil,
@@ -415,6 +461,17 @@ final class ChatStore: ObservableObject {
         } catch {
             // If the server call fails the row will simply resurface on the next
             // loadThreads(); we don't roll back the optimistic removal.
+            isOffline = (error as? MoblyAPI.APIError)?.isOffline ?? false
+        }
+    }
+
+    func deleteMessage(threadId: String, messageId: String, forBoth: Bool) async {
+        messages[threadId]?.removeAll { $0.id == messageId }
+        saveToDisk()
+        do {
+            try await api.deleteMessage(threadId: threadId, messageId: messageId,
+                                        mode: forBoth ? "forBoth" : "forMe")
+        } catch {
             isOffline = (error as? MoblyAPI.APIError)?.isOffline ?? false
         }
     }
@@ -598,14 +655,14 @@ final class ChatStore: ObservableObject {
 
     private func saveToDisk() {
         guard let url = cacheURL else { return }
-        // Only the recent tail is worth keeping — full history is a server
-        // concern, and an unbounded file would grow forever on disk.
         let trimmed = messages.mapValues { Array($0.suffix(200)) }
         let snapshot = Snapshot(threads: threads, messages: trimmed)
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(snapshot) else { return }
-        try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        Task.detached(priority: .utility) {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            guard let data = try? encoder.encode(snapshot) else { return }
+            try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
     }
 
     private func loadFromDisk() {

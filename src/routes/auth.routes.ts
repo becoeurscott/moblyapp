@@ -45,7 +45,16 @@ authRouter.post(
   otpRequestLimiter,
   asyncHandler(async (req, res) => {
     const { phone } = z.object({ phone: z.string().min(6) }).parse(req.body);
-    const { code, cooldown } = await createOtp(phone);
+    const { code, cooldown, capped } = await createOtp(phone);
+    if (capped) {
+      throw new ApiError(
+        429,
+        capped === 'day'
+          ? 'Trop de codes demandés aujourd’hui. Réessayez demain.'
+          : 'Trop de codes demandés. Réessayez dans une heure.',
+        'OTP_RATE_LIMITED'
+      );
+    }
     if (cooldown) {
       throw new ApiError(
         429,

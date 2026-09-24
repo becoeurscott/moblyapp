@@ -18,12 +18,23 @@ struct BoostSheet: View {
         let popular: Bool
         var perDay: Int { Int((Double(price) / Double(days)).rounded()) }
     }
-    private let plans = [
-        Plan(days: 3,  price: 500,   tagline: "×2 plus de vues", popular: false),
-        Plan(days: 7,  price: 1_000, tagline: "×3 plus de vues", popular: true),
-        Plan(days: 30, price: 3_000, tagline: "×5 plus de vues · en tête", popular: false),
-    ]
-    @State private var selected: Int = 1     // index; default the popular plan
+    /// The plans come from the remote configuration — the same list the
+    /// server accepts. The sheet used to hard-code 3/7/30 days while the
+    /// server had moved to 5/14/30, so two of the three choices were refused
+    /// with "Forfait de boost invalide" and the button read "Boost impossible".
+    private var plans: [Plan] {
+        let remote = RemoteConfigStore.shared.config.boost?.plans ?? []
+        guard !remote.isEmpty else {
+            return [Plan(days: 30, price: 5_000, tagline: "30 jours", popular: true)]
+        }
+        let boosts = ["×2 plus de vues", "×3 plus de vues", "×5 plus de vues · en tête"]
+        return remote.enumerated().map { i, p in
+            Plan(days: p.days, price: p.priceFcfa,
+                 tagline: boosts[min(i, boosts.count - 1)], popular: p.popular)
+        }
+    }
+    @State private var selected: Int = 0
+    private var safeSelected: Int { min(selected, max(0, plans.count - 1)) }
 
     /// Most expensive per-day rate (the shortest plan) — the savings baseline.
     private var baselinePerDay: Int { plans.map(\.perDay).max() ?? 1 }
@@ -45,6 +56,9 @@ struct BoostSheet: View {
             }
         }
         .animation(Motion.quick, value: phase)
+        .onAppear {
+            if let i = plans.firstIndex(where: { $0.popular }) { selected = i }
+        }
         .alert("Boost impossible", isPresented: Binding(
             get: { failure != nil }, set: { if !$0 { failure = nil } }
         )) {
@@ -177,7 +191,7 @@ struct BoostSheet: View {
     private var footer: some View {
         VStack(spacing: 0) {
             Divider()
-            PillButton(title: "Activer le boost · \(plans[selected].price.formattedGrouped) FCFA",
+            PillButton(title: "Activer le boost · \(plans[safeSelected].price.formattedGrouped) FCFA",
                        style: .primaryBlue, trailingIcon: "bolt.fill") {
                 startProcessing()
             }
@@ -216,7 +230,7 @@ struct BoostSheet: View {
             }
             VStack(spacing: 8) {
                 Text("Boost activé !").font(.moblyHeading(22)).foregroundStyle(Color.moblyTextPrimary)
-                Text("« \(annonce.listing.title) » est boostée pour \(plans[selected].days) jours.")
+                Text("« \(annonce.listing.title) » est boostée pour \(plans[safeSelected].days) jours.")
                     .font(.moblyBody(13.5)).foregroundStyle(Color(hex: 0x9A9DAC))
                     .multilineTextAlignment(.center)
             }
@@ -235,7 +249,7 @@ struct BoostSheet: View {
         Task {
             // Keep the processing beat readable even when the server is fast.
             async let pause: Void = { try? await Task.sleep(nanoseconds: 1_200_000_000) }()
-            let error = await onActivate(plans[selected].days)
+            let error = await onActivate(plans[safeSelected].days)
             _ = await pause
             if let error {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)

@@ -81,12 +81,12 @@ final class AudioPlayerManager: ObservableObject {
         }
     }
 
+    /// Permanent, not `Caches`. A received note is deleted from the server
+    /// once it passes `CHAT_MEDIA_RETENTION_DAYS`, so after that the file here
+    /// is the only copy — an iOS cache purge used to erase it for good while
+    /// leaving the other participant's phone intact.
     private static func cacheURL(for id: String, ext: String) -> URL {
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("voice-notes", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // Message ids are cuid/uuid — filesystem-safe as-is.
-        return dir.appendingPathComponent("\(id).\(ext)")
+        ChatMediaStore.fileURL(id: id, ext: ext)
     }
 
     /// Return the recorded waveform samples for a message, if available.

@@ -37,15 +37,14 @@ struct PeerProfileView: View {
 
     private var peerListings: [Listing] {
         guard let id = peerId else { return [] }
-        return listingStore.listings.filter { l in
-            // The public listings feed doesn't expose ownerId directly on the
-            // Swift `Listing`, so fall back to the thread's listing when it
-            // matches, and to any listing whose ownerName equals the peer.
-            if l.title == thread.listingTitle { return true }
-            if let name = loaded?.fullName, l.ownerName == name { return true }
-            _ = id
-            return false
-        }
+        // Match on ownerId and nothing else. This used to fall back to
+        // "same title as the thread's annonce" or "same owner *name*", which
+        // attributed other people's property to this peer: titles repeat
+        // constantly ("Studio Akwa"), and two owners can share a name. The
+        // profile then advertised annonces its owner had never published.
+        // `Listing.ownerId` is populated from the feed in ListingStore, so
+        // the identity is available and nothing has to be inferred.
+        return listingStore.listings.filter { $0.ownerId == id }
     }
 
     var body: some View {
@@ -101,14 +100,7 @@ struct PeerProfileView: View {
                        size: 108)
             .overlay(alignment: .bottomTrailing) {
                 if peerVerified {
-                    ZStack {
-                        Circle().fill(Color.moblyPrimary)
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 12, weight: .heavy))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 26, height: 26)
-                    .overlay(Circle().stroke(Color(hex: 0xF7F8FA), lineWidth: 3))
+                    VerifiedAvatarBadge(size: 26)
                 }
             }
             .shadow(color: thread.color.opacity(0.35), radius: 12, y: 6)
@@ -150,7 +142,7 @@ struct PeerProfileView: View {
                 infoRow(icon: "star.fill",
                         label: "Note moyenne",
                         value: String(format: "%.1f (%d avis)", avg, loaded?.totalReviews ?? 0),
-                        tint: Color(hex: 0xF5B301))
+                        tint: Color.moblyAccent)
             }
         }
         .background(RoundedRectangle(cornerRadius: 18).fill(.white))

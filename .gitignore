@@ -40,3 +40,6 @@ secrets/
 
 # Database dumps
 backups/
+
+# Next.js build artifact (stray - admin lives in its own repo)
+.next/

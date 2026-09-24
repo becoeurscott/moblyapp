@@ -6,7 +6,7 @@ import { serializeMessage } from '../lib/serialize';
 import { ownerActive } from '../lib/ownerTrial';
 import { requireAuth } from '../middleware/auth';
 import { writeLimiter } from '../middleware/security';
-import { broadcastMessage, isOnline, emitToUsers } from '../realtime/hub';
+import { broadcastMessage, isOnline, emitToUsers, threadParticipantIds } from '../realtime/hub';
 import { notifyUser } from '../services/push';
 import {
   featureGate,
@@ -127,60 +127,6 @@ chatRouter.post(
     if (peerId === req.userId!) {
       throw new ApiError(422, 'Vous ne pouvez pas vous écrire à vous-même', 'VALIDATION_FAILED');
     }
-    // Block contacting an owner whose free trial lapsed without paying the
-    // one-time inscription fee — their account is deactivated until they pay.
-    const peerOwner = await prisma.user.findUnique({
-      where: { id: peerId },
-      select: { isOwner: true, ownerPaid: true, ownerTrialStartedAt: true },
-    });
-    if (peerOwner && !ownerActive(peerOwner)) {
-      throw new ApiError(403, "Ce propriétaire n'est plus disponible.", 'OWNER_INACTIVE');
-    }
-    // An explicit peer is client-supplied. Accepting it unconditionally would
-    // turn this route into "DM any user id you can guess" — an unsolicited-
-    // message vector that the listing-derived path never had. So require a
-    // real prior relationship: an existing thread, or a visit request between
-    // the two of them. Owners reaching a visitor from their inbox satisfy the
-    // second; nobody else gets a free channel.
-    if (otherUserId) {
-      const peer = await prisma.user.findUnique({
-        where: { id: peerId }, select: { id: true },
-      });
-      if (!peer) throw new ApiError(404, 'Utilisateur introuvable', 'NOT_FOUND');
-
-      const [sharedVisit, sharedThread] = await Promise.all([
-        prisma.visitRequest.findFirst({
-          where: {
-            OR: [
-              { ownerId: req.userId!, visitorId: peerId },
-              { ownerId: peerId, visitorId: req.userId! },
-            ],
-          },
-          select: { id: true },
-        }),
-        prisma.thread.findFirst({
-          where: {
-            AND: [
-              { participants: { some: { userId: req.userId! } } },
-              { participants: { some: { userId: peerId } } },
-            ],
-          },
-          select: { id: true },
-        }),
-      ]);
-      if (!sharedVisit && !sharedThread) {
-        throw new ApiError(403, 'Aucune relation avec cet utilisateur', 'FORBIDDEN');
-      }
-    }
-
-    /**
-     * Return the *whole* thread, not just its id.
-     *
-     * GET /threads hides conversations with no messages, so a caller that
-     * created one and then re-fetched the list would find nothing — which is
-     * exactly how the "Message l'hôte" button broke. Handing back the full
-     * shape lets the client open the conversation immediately.
-     */
     const include = {
       listing: {
         select: { id: true, title: true, imageName: true, coverUrl: true, priceFcfa: true, priceUnit: true, ownerId: true },
@@ -206,16 +152,58 @@ chatRouter.post(
       updatedAt: t.updatedAt,
     });
 
-    const existing = await prisma.thread.findFirst({
-      where: {
-        listingId: listingId ?? null,
-        AND: [
-          { participants: { some: { userId: req.userId! } } },
-          { participants: { some: { userId: peerId } } },
-        ],
-      },
-      include,
-    });
+    // Run the owner-active check and existing-thread lookup in parallel —
+    // each is an independent DB round-trip and together they were the
+    // biggest chunk of the ~1.3s the "Message l'hôte" button took.
+    const [peerOwner, existing, peerRelation] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: peerId },
+        select: { id: true, isOwner: true, ownerPaid: true, ownerTrialStartedAt: true },
+      }),
+      prisma.thread.findFirst({
+        where: {
+          listingId: listingId ?? null,
+          AND: [
+            { participants: { some: { userId: req.userId! } } },
+            { participants: { some: { userId: peerId } } },
+          ],
+        },
+        include,
+      }),
+      otherUserId
+        ? Promise.all([
+            prisma.visitRequest.findFirst({
+              where: {
+                OR: [
+                  { ownerId: req.userId!, visitorId: peerId },
+                  { ownerId: peerId, visitorId: req.userId! },
+                ],
+              },
+              select: { id: true },
+            }),
+            prisma.thread.findFirst({
+              where: {
+                AND: [
+                  { participants: { some: { userId: req.userId! } } },
+                  { participants: { some: { userId: peerId } } },
+                ],
+              },
+              select: { id: true },
+            }),
+          ])
+        : null,
+    ]);
+
+    if (peerOwner && !ownerActive(peerOwner)) {
+      throw new ApiError(403, "Ce propriétaire n'est plus disponible.", 'OWNER_INACTIVE');
+    }
+    if (otherUserId) {
+      if (!peerOwner) throw new ApiError(404, 'Utilisateur introuvable', 'NOT_FOUND');
+      const [sharedVisit, sharedThread] = peerRelation!;
+      if (!sharedVisit && !sharedThread) {
+        throw new ApiError(403, 'Aucune relation avec cet utilisateur', 'FORBIDDEN');
+      }
+    }
     if (existing) {
       return res.json({ thread: serializeThread(existing as never), created: false });
     }
@@ -474,6 +462,52 @@ chatRouter.post(
   })
 );
 
+
+/**
+ * DELETE /api/threads/:id/messages/:mid — delete a single message.
+ *
+ * `mode` controls visibility:
+ * - "forMe"   — client-side only: the server confirms and the app removes the
+ *               bubble locally. The other participant still sees the message.
+ * - "forBoth" — soft-deletes the message row (`deletedAt`) so it disappears
+ *               from both sides. Only the original sender may use this mode.
+ */
+chatRouter.delete(
+  '/:id/messages/:mid',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    await assertParticipant(req.params.id, req.userId!);
+    const { mode } = z
+      .object({ mode: z.enum(['forMe', 'forBoth']) })
+      .parse(req.body ?? {});
+
+    const message = await prisma.message.findUnique({
+      where: { id: req.params.mid },
+      select: { id: true, threadId: true, senderId: true, deletedAt: true },
+    });
+    if (!message || message.threadId !== req.params.id) {
+      throw new ApiError(404, 'Message introuvable', 'NOT_FOUND');
+    }
+    if (message.deletedAt) return res.json({ ok: true });
+
+    if (mode === 'forBoth') {
+      if (message.senderId !== req.userId!) {
+        throw new ApiError(403, 'Vous ne pouvez supprimer que vos propres messages pour les deux', 'FORBIDDEN');
+      }
+      await prisma.message.update({
+        where: { id: message.id },
+        data: { deletedAt: new Date(), deletedBy: req.userId! },
+      });
+      const ids = await threadParticipantIds(message.threadId);
+      emitToUsers(ids, { type: 'message:deleted', threadId: message.threadId, messageId: message.id });
+    }
+    // "forMe" needs no server-side persistence — the client removes the bubble
+    // from its local cache and the message reappears on a fresh login (same as
+    // every other chat app's "delete for me" behaviour).
+
+    res.json({ ok: true });
+  })
+);
 
 /**
  * Notify the other participants of a new message.

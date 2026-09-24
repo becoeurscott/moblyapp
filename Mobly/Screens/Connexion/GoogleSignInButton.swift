@@ -3,6 +3,12 @@ import SwiftUI
 /// "Continuer avec Google" — visually matches the existing social buttons but
 /// actually drives the OAuth flow.
 struct GoogleSignInButton: View {
+    /// Hands the provider's idToken back to the auth screen, which decides
+    /// whether this ends in a sign-in or a phone-verification signup. The
+    /// button deliberately does not call AuthStore itself — only the screen
+    /// knows which phase to move to afterwards.
+    var onToken: (String) async -> Void
+
     @State private var isBusy = false
 
     var body: some View {
@@ -40,7 +46,7 @@ struct GoogleSignInButton: View {
                 .first { $0.isKeyWindow }
             do {
                 let idToken = try await GoogleSignIn.presentAndGetIdToken(from: anchor)
-                _ = await AuthStore.shared.signInWithGoogle(idToken: idToken)
+                await onToken(idToken)
             } catch {
                 // Cancelled / offline / bad callback — AuthStore surfaces
                 // sign-in errors, and cancel isn't worth its own toast.

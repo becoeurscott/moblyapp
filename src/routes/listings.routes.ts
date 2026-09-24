@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { Prisma, DealType, ListingStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
-import { optionalAuth, requireAuth, requireOwner, requireVerified } from '../middleware/auth';
+import { optionalAuth, requireAuth, requireOwner, requireActiveOwner, requireVerified } from '../middleware/auth';
 import { serializeListing } from '../lib/serialize';
 import { activeOwnerRelationWhere } from '../lib/ownerTrial';
 import { cacheGet, cacheSet, cacheBust } from '../lib/cache';
@@ -194,6 +194,7 @@ listingsRouter.post(
   '/',
   requireAuth,
   requireOwner,
+  requireActiveOwner,
   featureGate('listings.publish'),
   restrictionGate('LISTING_PUBLISH'),
   // Identity verification, but only while the `owners.identityRequired` switch
@@ -271,6 +272,7 @@ listingsRouter.patch(
   '/:id',
   requireAuth,
   requireOwner,
+  requireActiveOwner,
   featureGate('listings.edit'),
   restrictionGate('LISTING_EDIT'),
   asyncHandler(async (req, res) => {

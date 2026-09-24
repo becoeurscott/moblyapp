@@ -204,18 +204,33 @@ struct OwnerStatsView: View {
 
     // MARK: Boost card
 
+    /// Boost progress, from the real dates. The bar used to be days-left / 30,
+    /// fixed for the whole boost (the server stores the plan length, not a
+    /// countdown), so it never moved. Now it fills day by day: day 1 of 14 is
+    /// 1/14, and it is full on the last day.
+    private var boostProgress: (total: Int, day: Int, left: Int, frac: CGFloat) {
+        let total = max(annonce.boostDaysLeft ?? 1, 1)
+        guard let end = annonce.boostEndsAt else { return (total, 1, total, 1 / CGFloat(total)) }
+        let secondsLeft = max(0, end.timeIntervalSinceNow)
+        let left = min(total, Int((secondsLeft / 86_400).rounded(.up)))
+        let day = min(total, max(1, total - left + 1))
+        let elapsed = min(1, max(0, 1 - secondsLeft / (Double(total) * 86_400)))
+        return (total, day, left, CGFloat(elapsed))
+    }
+
     private var boostCard: some View {
-        let days = annonce.boostDaysLeft ?? 0
-        let frac = CGFloat(days) / 30.0
+        let p = boostProgress
+        let frac = p.frac
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "bolt.fill").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                 Text("Boost Premium actif").font(.moblyHeading(16)).foregroundStyle(.white)
             }
             HStack {
-                Text("Expire dans \(days) jours").font(.moblyBody(12.5)).foregroundStyle(.white.opacity(0.9))
+                Text("Jour \(p.day) sur \(p.total)").font(.moblyBody(12.5)).foregroundStyle(.white.opacity(0.9))
                 Spacer()
-                Text("\(days) jours restants").font(.moblyHeading(13)).foregroundStyle(.white)
+                Text(p.left <= 1 ? "Dernier jour" : "\(p.left) jours restants")
+                    .font(.moblyHeading(13)).foregroundStyle(.white)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -288,7 +303,8 @@ struct OwnerStatsView: View {
         case "favorites":    return "Favoris"
         case "detail-similar": return "Annonces similaires"
         case "profile":      return "Profil hôte"
-        default:             return "Autre"
+        case "detail":       return "Depuis une annonce"
+        default:             return key.capitalized
         }
     }
 }

@@ -365,10 +365,16 @@ struct FavoriteRow: View {
 
             rowCard
                 .offset(x: offsetX)
-                .highPriorityGesture(
-                    DragGesture(minimumDistance: 12)
+                // A plain gesture, not high-priority: the list's vertical
+                // scroll wins a vertical drag and only a clearly horizontal
+                // swipe reaches the row. High-priority stole every scroll
+                // attempt, so the list froze while a row "armed" itself.
+                .gesture(
+                    DragGesture(minimumDistance: 20)
                         .onChanged { v in
-                            // right → left only
+                            // right → left only, and only when the drag is
+                            // clearly sideways rather than a wobbly scroll.
+                            guard abs(v.translation.width) > abs(v.translation.height) * 1.5 else { return }
                             if v.translation.width < 0 {
                                 offsetX = max(v.translation.width, -120)
                             }
@@ -395,10 +401,7 @@ struct FavoriteRow: View {
                         .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     if fav.listing.ownerVerified {
-                        ZStack {
-                            Circle().fill(Color(hex: 0xB8CCFF))
-                            Image(systemName: "checkmark").font(.system(size: 8, weight: .heavy)).foregroundStyle(Color.moblyPrimary)
-                        }.frame(width: 22, height: 22).padding(7)
+                        VerifiedAvatarBadge(size: 20, ring: .white).padding(7)
                     }
                     // heart top-right
                     HStack { Spacer()
@@ -430,7 +433,7 @@ struct FavoriteRow: View {
                                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.moblySurfaceTint))
                         } else {
                             HStack(spacing: 3) {
-                                Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(Color.moblyPrimary)
+                                Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(Color.moblyAccent)
                                 Text(fav.listing.rating).font(.moblyBody(10.5, weight: .bold)).foregroundStyle(Color.moblyTextPrimary)
                             }
                             .padding(.horizontal, 6).padding(.vertical, 3)

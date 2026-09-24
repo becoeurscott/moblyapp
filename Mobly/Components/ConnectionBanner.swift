@@ -4,8 +4,8 @@ import SwiftUI
 ///
 /// Sits in the layout (a top safe-area inset), not over it, so it pushes the
 /// screen down when it slides in and lets it back up when it leaves — an
-/// overlay used to hide the top of whatever screen was open. Offline and slow
-/// are shown in red with the time of the last successful sync; when the
+/// overlay used to hide the top of whatever screen was open. Offline status
+/// is shown in red with the time of the last successful sync; when the
 /// connection comes back it turns green for a moment, then slides away.
 struct ConnectionBanner: View {
     @ObservedObject private var net = NetworkMonitor.shared
@@ -14,12 +14,11 @@ struct ConnectionBanner: View {
     @State private var lastOnline = Date()
     @State private var showRestored = false
 
-    private enum Mode: Equatable { case offline, slow, restored }
+    private enum Mode: Equatable { case offline, restored }
 
     private var mode: Mode? {
         if !net.isConnected { return .offline }
         if showRestored { return .restored }
-        if net.isSlow { return .slow }
         return nil
     }
 
@@ -32,6 +31,17 @@ struct ConnectionBanner: View {
         }
         .frame(maxWidth: .infinity)
         .clipped()
+        // The strip is a top safe-area inset, so it lays out *below* the status
+        // bar. The tint therefore stopped at the notch and left a white band
+        // above a red banner. `.clipped()` above is needed for the slide-in, and
+        // it also cut off the inner `ignoresSafeArea`, so the fill is painted
+        // here instead — behind the clip, reaching up through the status bar so
+        // the whole bar reads as one piece.
+        .background {
+            if let mode {
+                tintBackground(mode).ignoresSafeArea(edges: .top)
+            }
+        }
         .animation(.spring(response: 0.4, dampingFraction: 0.9), value: mode)
         .onChange(of: net.isConnected) { was, now in
             if !now { lastOnline = Date() }
@@ -39,6 +49,15 @@ struct ConnectionBanner: View {
                 showRestored = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { showRestored = false }
             }
+        }
+    }
+
+    /// Fill for each mode, shared by the strip itself and the status-bar
+    /// extension behind it so the two can never drift apart.
+    private func tintBackground(_ mode: Mode) -> Color {
+        switch mode {
+        case .offline: return Color(hex: 0xFDE7E7)
+        case .restored:       return Color(hex: 0xE3F6EC)
         }
     }
 
@@ -50,9 +69,6 @@ struct ConnectionBanner: View {
         case .offline:
             strip(icon: "icloud.slash.fill", title: "Vous n'êtes pas connecté à Internet.",
                   tint: red, background: Color(hex: 0xFDE7E7), showSync: true)
-        case .slow:
-            strip(icon: "tortoise.fill", title: "Connexion lente…",
-                  tint: red, background: Color(hex: 0xFDE7E7), showSync: false)
         case .restored:
             strip(icon: "checkmark.icloud.fill", title: "Connexion rétablie",
                   tint: green, background: Color(hex: 0xE3F6EC), showSync: false)
@@ -77,6 +93,6 @@ struct ConnectionBanner: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 9)
-        .background(background.ignoresSafeArea(edges: .top))
+        .background(background)
     }
 }

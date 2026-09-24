@@ -41,6 +41,11 @@ struct ListingDetailView: View {
     /// is re-checked on appear, because the copy that got us here may be a
     /// cached feed entry or a chat pill from days ago.
     @State private var isAvailable: Bool = true
+    @State private var refreshedOwnerContactActive: Bool?
+
+    private var ownerContactActive: Bool {
+        refreshedOwnerContactActive ?? listing.ownerContactActive
+    }
 
     /// Owner name from the listing's server payload. Was hardcoded "Marie
     /// Ngono" on every listing, crediting one invented person as the owner of
@@ -77,6 +82,7 @@ struct ListingDetailView: View {
     }
 
     private func contactOwner() {
+        guard !isOwnListing, ownerContactActive, isAvailable else { return }
         guard auth.isSignedIn else { needsSignIn = true; return }
         // Present the chat screen immediately with a skeleton preview so the
         // ~1.3s Supabase round-trip on POST /threads doesn't leave the user
@@ -197,7 +203,10 @@ struct ListingDetailView: View {
             }
             Task {
                 if let fresh = try? await MoblyAPI.shared.listing(id: listing.id) {
-                    await MainActor.run { isAvailable = fresh.available }
+                    await MainActor.run {
+                        isAvailable = fresh.available
+                        refreshedOwnerContactActive = fresh.owner?.active
+                    }
                 }
             }
             Task {
@@ -460,7 +469,7 @@ struct ListingDetailView: View {
                         .foregroundStyle(Color(hex: 0x9A9DAC))
                 } else {
                     Image(systemName: "star.fill")
-                        .font(.system(size: 12)).foregroundStyle(Color.moblyPrimary)
+                        .font(.system(size: 12)).foregroundStyle(Color.moblyAccent)
                     Text(reviews.isEmpty ? listing.rating : String(format: "%.1f", averageRating))
                         .font(.moblyBody(13, weight: .semibold))
                         .foregroundStyle(Color.moblyTextPrimary)
@@ -500,12 +509,12 @@ struct ListingDetailView: View {
                 Spacer()
                 // Same rule as the sticky bar: you are the owner, so there is
                 // no one on the other end of these.
-                if !isOwnListing {
+                if !isOwnListing && ownerContactActive {
                     CircleIconButton(icon: "phone.fill", bg: .white,
                                      tint: .moblyPrimary, size: 44, action: onCall)
                     CircleIconButton(icon: "bubble.left.fill", bg: .white,
                                      tint: .moblyPrimary, size: 44, action: contactOwner)
-                } else {
+                } else if isOwnListing {
                     Text("Votre espace")
                         .font(.moblyBody(11.5, weight: .semibold))
                         .foregroundStyle(Color.moblyPrimary)
@@ -735,7 +744,7 @@ struct ListingDetailView: View {
                     .foregroundStyle(Color.moblyTextPrimary)
                 if reviews.isEmpty && listing.reviewCount > 0 {
                     Image(systemName: "star.fill")
-                        .font(.system(size: 12)).foregroundStyle(Color.moblyPrimary)
+                        .font(.system(size: 12)).foregroundStyle(Color.moblyAccent)
                     Text(listing.rating)
                         .font(.moblyBody(13, weight: .semibold))
                         .foregroundStyle(Color.moblyTextPrimary)
@@ -748,7 +757,7 @@ struct ListingDetailView: View {
                         .foregroundStyle(Color(hex: 0x9A9DAC))
                 } else {
                     Image(systemName: "star.fill")
-                        .font(.system(size: 12)).foregroundStyle(Color.moblyPrimary)
+                        .font(.system(size: 12)).foregroundStyle(Color.moblyAccent)
                     Text(String(format: "%.1f", averageRating))
                         .font(.moblyBody(13, weight: .semibold))
                         .foregroundStyle(Color.moblyTextPrimary)
@@ -935,15 +944,7 @@ struct ListingDetailView: View {
         }
     }
 
-    private var verifiedBadge: some View {
-        ZStack {
-            Circle().fill(Color(hex: 0xB8CCFF))
-            Image(systemName: "checkmark")
-                .font(.system(size: 8, weight: .heavy))
-                .foregroundStyle(Color.moblyPrimary)
-        }
-        .frame(width: 16, height: 16)
-    }
+    private var verifiedBadge: some View { VerifiedBadge(size: 16) }
 
     private var divider: some View {
         Rectangle().fill(Color(hex: 0xEFF0F4)).frame(height: 1)
@@ -994,7 +995,7 @@ struct ListingDetailView: View {
 
     /// Passive bottom label (no CTA) — own listing, or an owner whose account
     /// is deactivated and can no longer be contacted.
-    private var passiveBar: Bool { isOwnListing || !listing.ownerContactActive }
+    private var passiveBar: Bool { isOwnListing || !ownerContactActive }
 
     private var contactDisabledNotice: some View {
         HStack(spacing: 9) {
@@ -1017,7 +1018,7 @@ struct ListingDetailView: View {
         Group {
             if isOwnListing {
                 ownListingNotice
-            } else if !listing.ownerContactActive {
+            } else if !ownerContactActive {
                 contactDisabledNotice
             } else {
                 stickyCTARow

@@ -3,6 +3,8 @@ import SwiftUI
 struct WelcomeView: View {
     var onSignUp: () -> Void = {}
     var onSignIn: () -> Void = {}
+    /// False while the splash wordmark is still flying into place.
+    var showWordmark: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var heroZoom: CGFloat = 1.08
@@ -27,6 +29,10 @@ struct WelcomeView: View {
                         .font(.moblyWordmark(size: 26))
                         .tracking(-0.3)
                         .foregroundStyle(.white)
+                        // Fixed box so RootView's flying wordmark knows exactly
+                        // where to land; hidden until it has.
+                        .frame(height: WordmarkFlight.headerHeight)
+                        .opacity(showWordmark ? 1 : 0)
 
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark.shield.fill")
@@ -46,7 +52,7 @@ struct WelcomeView: View {
                     .offset(y: chipsIn ? 0 : -8)
                 }
                 .frame(maxHeight: .infinity, alignment: .top)
-                .padding(.top, geo.safeAreaInsets.top + 8)
+                .padding(.top, WordmarkFlight.welcomeTop)
 
                 // NOTE: GlassListingChip's HStack contains a Spacer(), which
                 // greedily expands to fill whatever width the ZStack proposes
@@ -170,24 +176,22 @@ private struct GlassListingChip: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color.white.opacity(0.22))
-                Image(systemName: "house.fill")
+                Image(systemName: "storefront.fill")
                     .font(.system(size: 19, weight: .semibold))
                     .foregroundStyle(.white)
             }
             .frame(width: 46, height: 46)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Studio Akwa")
+                Text("Votre espace")
                     .font(.moblyHeading(14))
                     .foregroundStyle(.white)
-                Text("Douala · 350m")
+                Text("Espace disponible")
                     .font(.moblyBody(11))
                     .foregroundStyle(Color.white.opacity(0.7))
             }
             Spacer()
-            Text("80k")
-                .font(.moblyHeading(13.5))
-                .foregroundStyle(.white)
+            VerifiedBadge(size: 18, tint: .white)
         }
         .padding(12)
         .background(

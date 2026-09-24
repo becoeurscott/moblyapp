@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct SplashView: View {
+    /// True while RootView's flying wordmark has taken over, so two logos
+    /// never show at once.
+    var hideWordmark: Bool = false
     var onFinished: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -48,7 +51,7 @@ struct SplashView: View {
                         .font(.moblyWordmark(size: wordmarkSize))
                         .tracking(-0.5)
                         .foregroundStyle(.white)
-                        .opacity(wordmarkOpacity)
+                        .opacity(hideWordmark ? 0 : wordmarkOpacity)
                         .scaleEffect(wordmarkScale)
                 }
                 .offset(y: -26)

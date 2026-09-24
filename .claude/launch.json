@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "/Users/annybabeni/Developer/mobly app/admin", "run", "dev"],
       "port": 3001
+    },
+    {
+      "name": "admin-trial",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["API_URL=http://127.0.0.1:4011/api/v1", "npm", "--prefix", "/Users/annybabeni/Developer/mobly app/admin", "exec", "--", "next", "dev", "/Users/annybabeni/Developer/mobly app/admin", "--port", "3002"],
+      "port": 3002
     }
   ]
 }

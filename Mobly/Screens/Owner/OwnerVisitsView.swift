@@ -242,9 +242,7 @@ private struct VisitCard: View {
                         .font(.moblyHeading(16)).foregroundStyle(Color.moblyTextPrimary)
                         .lineLimit(1)
                     if visit.visitor?.verified == true {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.moblyPrimary)
+                        VerifiedBadge(size: 15)
                     }
                 }
                 HStack(spacing: 6) {

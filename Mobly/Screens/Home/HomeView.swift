@@ -5,6 +5,10 @@ struct HomeView: View {
     /// someone who hasn't signed in.
     var userName: String = ""
     var onOpenListing: (Listing) -> Void = { _ in }
+    /// Opens from the Recommandé row, so the view is credited to
+    /// "recommended" in the owner's "Origine des vues". Falls back to
+    /// `onOpenListing` when not provided.
+    var onOpenRecommended: ((Listing) -> Void)? = nil
     var onSearch: () -> Void = {}
     var onProfile: () -> Void = {}
     var onNotifications: () -> Void = {}
@@ -28,9 +32,19 @@ struct HomeView: View {
     @State private var showBecomeOwner = false
     @State private var showOwnerDashboard = false
     @State private var carouselSetIndex = 0
+    /// Mirrors `searching` through an explicit animation. Keyboard focus
+    /// changes don't carry an animation transaction, so driving the panel
+    /// straight from focus made it pop in and out.
+    @State private var showSuggestions = false
+    /// What the panel renders. Follows the search text while the panel is
+    /// open and freezes while it closes, so "Annuler" (which clears the text)
+    /// doesn't swap the panel to the recent-searches list mid-fade.
+    @State private var panelText = ""
     @FocusState private var searchActive: Bool
 
-    private let carouselRotation = Timer.publish(every: 180, on: .main, in: .common).autoconnect()
+    // One pass through a 6-card set at the hero's 3.5s slide cadence is ~21s;
+    // rotate just after so each set is seen once before the next comes in.
+    private let carouselRotation = Timer.publish(every: 25, on: .main, in: .common).autoconnect()
 
     private var searching: Bool { searchActive || !searchText.isEmpty }
 
@@ -45,6 +59,22 @@ struct HomeView: View {
                 || region.contains(q)
                 || Self.commonPrefixLen(name, q) >= 4
         }
+    }
+
+    /// Quartiers and cities Mobly knows, matching what's typed from the first
+    /// letters, accent- and case-insensitive ("akw" → Akwa, Douala).
+    private func localPlaces(_ query: String) -> [(name: String, region: String)] {
+        func fold(_ s: String) -> String {
+            s.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+        }
+        let q = fold(query.trimmingCharacters(in: .whitespaces))
+        guard !q.isEmpty else { return [] }
+        var out: [(name: String, region: String)] = []
+        for (city, list) in CameroonGeo.quartiers.sorted(by: { $0.key < $1.key }) {
+            if fold(city).hasPrefix(q) { out.append((city, "Cameroun")) }
+            for qt in list where fold(qt).hasPrefix(q) { out.append((qt, city)) }
+        }
+        return Array(out.prefix(6))
     }
 
     private static func commonPrefixLen(_ a: String, _ b: String) -> Int {
@@ -78,7 +108,7 @@ struct HomeView: View {
                     await UserDataStore.shared.loadFavorites()
                 }
 
-                if searching {
+                if showSuggestions {
                     Color.black.opacity(0.06)
                         .ignoresSafeArea()
                         .onTapGesture { dismissSearch() }
@@ -86,10 +116,14 @@ struct HomeView: View {
 
                     suggestionsCard
                         .padding(.horizontal, 22)
-                        .transition(.opacity)
+                        .transition(SearchDropdown.transition)
                 }
             }
-            .animation(Motion.instant, value: searching)
+            .onChange(of: searching) { _, open in
+                if open { panelText = searchText }
+                withAnimation(open ? SearchDropdown.animation : SearchDropdown.closeAnimation) { showSuggestions = open }
+            }
+            .onChange(of: searchText) { _, t in if searching { panelText = t } }
         }
         .background(Color.white)
         .opacity(appeared ? 1 : 0)
@@ -126,70 +160,68 @@ struct HomeView: View {
         return sets[carouselSetIndex % sets.count]
     }
 
-    /// Builds up to 3 distinct sets of 6 listings that the carousel rotates
-    /// through every 3 minutes:
-    ///   0 – Boosted spaces first, filled with top-rated
-    ///   1 – Highly rated from diverse categories
-    ///   2 – Recent/nearby spaces based on user location
+    /// Three sets of 6 the carousel rotates through:
+    ///   0 – Boostées : every boosted space, any region, first — then top-rated
+    ///   1 – Mieux notées : best rated, one per category for variety
+    ///   2 – Près de vous : best rated in the user's city
+    /// Boosted spaces are what owners pay for, so they lead set 0 and are
+    /// also woven into sets 1 and 2 (from the third slot on) — a boost never
+    /// disappears for two thirds of the cycle.
     private var carouselSets: [[Listing]] {
         let all = liveListings
         guard !all.isEmpty else { return [] }
-        var sets: [[Listing]] = []
-
-        // --- Set 0: Boosted first, then top-rated fill ---
         let boosted = all.filter { $0.boosted }
         let topRated = all.sorted { score($0) > score($1) }
-        var set0 = boosted
+        var sets: [[Listing]] = []
+
+        // --- Set 0: Boostées ---
+        var set0 = Array(boosted.prefix(6))
         for l in topRated where set0.count < 6 && !set0.contains(where: { $0.id == l.id }) {
             set0.append(l)
         }
-        sets.append(Array(set0.prefix(6)))
+        sets.append(set0)
 
-        // --- Set 1: Highly rated, one per category for diversity ---
-        var usedIds = Set(set0.prefix(6).map(\.id))
-        let byCategory = Dictionary(grouping: all, by: \.category)
+        // --- Set 1: Mieux notées, one per category ---
         var set1: [Listing] = []
-        let sortedCats = byCategory.keys.sorted()
-        for cat in sortedCats {
+        let byCategory = Dictionary(grouping: all.filter { !$0.boosted }, by: \.category)
+        for cat in byCategory.keys.sorted() {
             guard set1.count < 6,
-                  let best = byCategory[cat]?.sorted(by: { score($0) > score($1) })
-                    .first(where: { !usedIds.contains($0.id) }) else { continue }
+                  let best = byCategory[cat]?.max(by: { score($0) < score($1) }) else { continue }
             set1.append(best)
-            usedIds.insert(best.id)
         }
-        if set1.count < 6 {
-            for l in topRated where set1.count < 6 && !usedIds.contains(l.id) {
-                set1.append(l)
-                usedIds.insert(l.id)
-            }
+        for l in topRated where set1.count < 6 && !l.boosted && !set1.contains(where: { $0.id == l.id }) {
+            set1.append(l)
         }
-        if !set1.isEmpty { sets.append(Array(set1.prefix(6))) }
+        sets.append(weave(boosted, into: set1))
 
-        // --- Set 2: Nearby / location-based ---
-        let city = userCity
-        let nearby: [Listing]
-        if let city {
-            nearby = all.filter {
-                $0.location.folding(options: .diacriticInsensitive, locale: .current)
-                    .lowercased().contains(city)
-            }
-        } else {
-            nearby = all
-        }
+        // --- Set 2: Près de vous ---
         var set2: [Listing] = []
-        for l in nearby.sorted(by: { score($0) > score($1) }) where set2.count < 6 && !usedIds.contains(l.id) {
+        if let city = userCity {
+            set2 = Array(topRated.filter {
+                !$0.boosted && $0.location.folding(options: .diacriticInsensitive, locale: .current)
+                    .lowercased().contains(city)
+            }.prefix(6))
+        }
+        for l in topRated where set2.count < 6 && !l.boosted && !set2.contains(where: { $0.id == l.id }) {
             set2.append(l)
-            usedIds.insert(l.id)
         }
-        if set2.count < 6 {
-            for l in topRated where set2.count < 6 && !usedIds.contains(l.id) {
-                set2.append(l)
-                usedIds.insert(l.id)
-            }
-        }
-        if !set2.isEmpty { sets.append(Array(set2.prefix(6))) }
+        sets.append(weave(boosted, into: set2))
 
-        return sets
+        return sets.filter { !$0.isEmpty }
+    }
+
+    /// Slot boosted spaces into a set from the third position on, one every
+    /// other card, keeping the set at 6.
+    private func weave(_ boosted: [Listing], into base: [Listing]) -> [Listing] {
+        guard !boosted.isEmpty else { return Array(base.prefix(6)) }
+        var out = base
+        var slot = 2
+        for b in boosted {
+            guard slot <= out.count, slot < 6 else { break }
+            out.insert(b, at: slot)
+            slot += 2
+        }
+        return Array(out.prefix(6))
     }
 
     // MARK: Feed (scrolls under the pinned search bar)
@@ -255,10 +287,8 @@ struct HomeView: View {
             recommendedRow
                 .padding(.bottom, 24)
 
-            if config.isEnabled("ads.banner") {
-                AdBannerView()
-                    .padding(.bottom, 24)
-            }
+            AdBannerView()
+                .padding(.bottom, 24)
 
             Text(L("Filtre rapide"))
                 .font(.moblyHeading(17))
@@ -272,9 +302,14 @@ struct HomeView: View {
 
     // MARK: Search suggestions overlay (same bar, expands in place)
 
+    /// Six rows is the most the panel ever shows at once; past that the list
+    /// scrolls inside the panel instead of growing and shoving the header up.
+    private static let maxSuggestionRows = 6
+
     private var suggestionsCard: some View {
+        CappedScroll(maxHeight: SearchDropdown.maxHeight) {
         VStack(alignment: .leading, spacing: 0) {
-            if searchText.isEmpty {
+            if panelText.isEmpty {
                 // Recent searches first — the same list as Profil → Recherches
                 // enregistrées, so what you searched is where you expect it in
                 // both places. Tapping one runs it again.
@@ -295,7 +330,7 @@ struct HomeView: View {
                     }
                     .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 4)
 
-                    ForEach(Array(savedSearches.items.prefix(4))) { item in
+                    ForEach(Array(savedSearches.items.prefix(Self.maxSuggestionRows))) { item in
                         Button {
                             dismissSearch()
                             onOpenCityMap(item.query.isEmpty ? item.label : item.query)
@@ -320,7 +355,18 @@ struct HomeView: View {
                         .buttonStyle(.plain)
                     }
                 }
-            } else if placeCompleter.suggestions.isEmpty {
+            } else {
+                // Mobly's own quartiers and cities first — the places annonces
+                // are actually in — then Apple's wider place search below.
+                let local = localPlaces(panelText)
+                ForEach(local, id: \.name) { p in
+                    suggestionRow(p.name, p.region, action: {
+                        dismissSearch()
+                        onOpenCityMap(p.region == "Cameroun" ? p.name : "\(p.name), \(p.region)")
+                    })
+                }
+                let localNames = Set(local.map { $0.name.lowercased() })
+                if local.isEmpty && placeCompleter.suggestions.isEmpty && !placeCompleter.isSearching {
                 HStack(spacing: 10) {
                     Image(systemName: "mappin.slash")
                         .foregroundStyle(Color(hex: 0xC4C7D2))
@@ -329,8 +375,8 @@ struct HomeView: View {
                         .foregroundStyle(Color(hex: 0x9A9DAC))
                 }
                 .padding(.horizontal, 18).padding(.vertical, 16)
-            } else {
-                ForEach(placeCompleter.suggestions) { s in
+                }
+                ForEach(placeCompleter.suggestions.filter { !localNames.contains($0.title.lowercased()) }) { s in
                     suggestionRow(s.title,
                                   s.subtitle.isEmpty ? "Cameroun" : s.subtitle,
                                   action: {
@@ -342,12 +388,18 @@ struct HomeView: View {
             }
         }
         .padding(.vertical, 4)
+        // Always full width: a short state ("Aucun lieu trouvé") no
+        // longer shrinks the panel to its text and snaps it back.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        }
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(hex: 0xF4F5F8))
         )
-        .fixedSize(horizontal: false, vertical: true)
-        .onChange(of: searchText) { _, q in placeCompleter.update(query: q) }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // Follows the frozen panel text, so closing never clears the rows
+        // out from under the fade.
+        .onChange(of: panelText) { _, q in placeCompleter.update(query: q) }
     }
 
     private func suggestionRow(_ name: String, _ region: String,
@@ -614,10 +666,11 @@ struct HomeView: View {
             .padding(.horizontal, 22)
         }
         .onChange(of: chips.map(\.chip.id)) { _, ids in
-            // If the current selection no longer matches any live listing
-            // (owner un-published the last matching annonce, filter chip
-            // vanished), clear it rather than leaving a "ghost" selection.
-            if let cur = selectedQuickFilter, !ids.contains(cur) {
+            // Listings stream in after the first render, so the chip list
+            // changes right after a first tap; clearing the selection then
+            // made the first tap look like it did nothing. Only clear when
+            // there are no chips left at all.
+            if selectedQuickFilter != nil, ids.isEmpty {
                 selectedQuickFilter = nil
             }
         }
@@ -652,7 +705,7 @@ struct HomeView: View {
                             else { showBecomeOwner = true }
                         }) {
                             if session.isOwner {
-                                Text(L("Ouvrir"))
+                                Text(L("Mon espace"))
                                     .font(.moblyBody(12.5, weight: .semibold))
                                     .foregroundStyle(Color.moblyPrimary)
                                     .padding(.horizontal, 16).padding(.vertical, 9)
@@ -735,23 +788,29 @@ struct HomeView: View {
         } else {
             base = liveListings
         }
-        // Best-rated first, always — "Recommandé" should mean recommended, and
-        // the row was previously in whatever order the API returned.
-        let ranked = base.sorted { score($0) > score($1) }
+        // Boosted first, then best-rated — within whatever geography applies
+        // below. A boost bought in Yaoundé must never lead the row for someone
+        // in Douala, so the boost ordering is applied *after* the city filter.
+        func order(_ list: [Listing]) -> [Listing] {
+            list.sorted {
+                if $0.boosted != $1.boosted { return $0.boosted }
+                return score($0) > score($1)
+            }
+        }
 
         // Someone outside Cameroon has no useful "near me": their city will
-        // never match a listing, so they get the best-rated spaces nationwide
+        // never match a listing, so they get the best spaces nationwide
         // rather than an empty or arbitrary row.
-        guard let city = userCity, isInCameroon else { return ranked }
+        guard let city = userCity, isInCameroon else { return order(base) }
 
-        let near = ranked.filter {
+        let near = base.filter {
             $0.location
                 .folding(options: .diacriticInsensitive, locale: .current)
                 .lowercased()
                 .contains(city)
         }
         // A city with nothing in it falls back to the national ranking too.
-        return near.isEmpty ? ranked : near
+        return order(near.isEmpty ? base : near)
     }
 
     /// Sort key: the rating, with the number of avis breaking ties so a lone
@@ -788,7 +847,7 @@ struct HomeView: View {
                         .padding(.horizontal, 22).padding(.vertical, 30)
                 } else {
                     ForEach(filteredRecommended) { l in
-                        RecommendedCard(listing: l) { onOpenListing(l) }
+                        RecommendedCard(listing: l) { (onOpenRecommended ?? onOpenListing)(l) }
                     }
                 }
             }

@@ -290,7 +290,8 @@ struct OwnerOverallStatsView: View {
         case "favorites":      return "Favoris"
         case "detail-similar": return "Annonces similaires"
         case "profile":        return "Profil hôte"
-        default:               return "Autre"
+        case "detail":         return "Depuis une annonce"
+        default:               return key.capitalized
         }
     }
 

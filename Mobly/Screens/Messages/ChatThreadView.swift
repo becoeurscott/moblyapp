@@ -23,12 +23,18 @@ struct ChatThreadView: View {
     @StateObject private var recorder = VoiceRecorder()
 
     @State private var reactionTarget: ChatMessage?
-    @State private var showDetail = false
+    @State private var deleteTarget: ChatMessage?
+    @State private var selectedListing: Listing?
+    @State private var pendingProfileListing: Listing?
+    @State private var fetchedThreadListing: Listing?
+    @State private var openingListing = false
+    @State private var listingOpenFailed = false
     @State private var showPeerProfile = false
     @State private var showProposeVisit = false
     @State private var visitActionBusy = false
     @State private var isUploading = false
     @State private var uploadingPreview: UIImage?
+    @State private var uploadingPreviews: [UIImage] = []
     /// Non-nil when a voice note failed to send. Surfaced as an alert: a note
     /// that silently vanishes is worse than one that says why it didn't go.
     @State private var voiceSendError: String?
@@ -49,6 +55,9 @@ struct ChatThreadView: View {
     /// Photos of a tapped stack, shown in a paged full-screen gallery.
     @State private var galleryURLs: [URL] = []
     @State private var galleryStart = 0
+    @State private var galleryMessages: [ChatMessage] = []
+    /// The message a tapped quote jumped to; flashes briefly so the eye finds it.
+    @State private var highlightedId: String?
     @State private var fullScreenLocalImage: UIImage?
     /// Server-reported availability of the listing this conversation is
     /// about. `.unavailable` greys the pill and shows "Non disponible";
@@ -57,9 +66,11 @@ struct ChatThreadView: View {
     @State private var listingState: ListingState = .available
     enum ListingState { case available, unavailable, missing }
     @State private var showMicPermissionAlert = false
+    @State private var showCallMaintenanceAlert = false
     @State private var showMicHint = false
     @State private var linkPreviewDismissed = false
     @StateObject private var linkPreview = LinkPreviewService()
+    @ObservedObject private var reactions = ReactionStore.shared
     @FocusState private var inputFocused: Bool
 
     /// Messages for this thread, mapped from the store on each render so a
@@ -83,6 +94,7 @@ struct ChatThreadView: View {
                 fromMe: dto.senderId == me,
                 status: dto.read ? .read : .sent,
                 kind: inferred,
+                reaction: reactions.reaction(for: dto.id),
                 replyToText: quoted.map {
                     let qk = Self.inferKind(dtoKind: $0.kind, text: $0.text, hasVisit: $0.visitAction != nil)
                     switch qk {
@@ -93,6 +105,11 @@ struct ChatThreadView: View {
                     }
                 },
                 replyToMe: quoted?.senderId == me,
+                replyToId: dto.replyToId,
+                replyToMediaUrl: quoted.flatMap {
+                    Self.inferKind(dtoKind: $0.kind, text: $0.text, hasVisit: $0.visitAction != nil) == .image
+                        ? $0.mediaUrl : nil
+                },
                 voiceDuration: voice.map { $0.label },
                 voiceSeconds: voice.map { $0.seconds },
                 mediaUrl: dto.mediaUrl,
@@ -167,18 +184,15 @@ struct ChatThreadView: View {
         return dayFormatter.string(from: date)
     }
 
-    /// The listing this conversation is about — resolve from data, or build
-    /// one from the thread's own fields as a fallback.
     private var partnerTyping: Bool { chat.typingIn.contains(thread.id) }
 
-    private var resolvedListing: Listing {
-        if let match = listingStore.listings.first(where: { $0.title == thread.listingTitle }) {
-            return match
+    /// Resolve by server identity only; titles can repeat across owners.
+    private var resolvedListing: Listing? {
+        guard let id = thread.listingId, !id.isEmpty else { return nil }
+        if let fetchedThreadListing, fetchedThreadListing.id == id {
+            return fetchedThreadListing
         }
-        return Listing(id: thread.id, title: thread.listingTitle,
-                       location: "Douala",
-                       price: thread.listingPrice.replacingOccurrences(of: " / mois", with: ""),
-                       rating: "4.7", imageName: thread.listingImage, category: "Appartements")
+        return listingStore.listings.first { $0.id == id }
     }
 
     // Voice recording is handled by the VoiceRecorder @StateObject above.
@@ -196,9 +210,15 @@ struct ChatThreadView: View {
     /// behaviour for a refused or cancelled appointment.
     private var latestVisitMessage: ChatMessage? {
         let terminal: Set<String> = ["CANCELLED", "COMPLETED", "NO_SHOW"]
-        return messages.reversed().first { m in
-            guard m.kind == .visit else { return false }
+        let visitMessages = messages.filter { $0.kind == .visit }
+        let closedVisitIds: Set<String> = Set(
+            visitMessages
+                .filter { terminal.contains($0.visitAction ?? "") }
+                .compactMap { $0.visitId }
+        )
+        return visitMessages.reversed().first { m in
             if terminal.contains(m.visitAction ?? "REQUESTED") { return false }
+            if let vid = m.visitId, closedVisitIds.contains(vid) { return false }
             if let scheduled = Self.visitScheduledDate(from: m.text, anchor: m.createdAt),
                scheduled < .now { return false }
             return true
@@ -263,12 +283,34 @@ struct ChatThreadView: View {
         do {
             let dto = try await MoblyAPI.shared.listing(id: id)
             await MainActor.run {
+                fetchedThreadListing = dto.asListing
                 listingState = dto.available ? .available : .unavailable
             }
         } catch let e as MoblyAPI.APIError where e.status == 404 {
-            await MainActor.run { listingState = .missing }
+            await MainActor.run {
+                fetchedThreadListing = nil
+                listingState = .missing
+            }
         } catch {
             // Network flake — leave whatever state we were in.
+        }
+    }
+
+    private func openThreadListing() {
+        guard listingState != .missing, !openingListing else { return }
+        if let listing = resolvedListing {
+            selectedListing = listing
+            return
+        }
+        openingListing = true
+        Task {
+            await refreshListingState()
+            openingListing = false
+            if listingState != .missing, let listing = resolvedListing {
+                selectedListing = listing
+            } else {
+                listingOpenFailed = true
+            }
         }
     }
 
@@ -326,13 +368,12 @@ struct ChatThreadView: View {
         .onAppear { recorder.requestPermissionIfNeeded() }
         .task {
             chat.activeThreadId = thread.id
-            // A conversation is exactly where a dead socket is most visible, so
-            // make sure there is one before the user starts waiting on a reply.
             chat.ensureConnected()
             ThreadPrefs.shared.clearManualUnread(thread.id)
-            await chat.loadMessages(threadId: thread.id)
+            async let msgs: () = chat.loadMessages(threadId: thread.id)
+            async let listing: () = refreshListingState()
+            _ = await (msgs, listing)
             chat.markRead(threadId: thread.id)
-            await refreshListingState()
         }
         .onDisappear { if chat.activeThreadId == thread.id { chat.activeThreadId = nil } }
         .sheet(item: $activeSheet) { sheet in
@@ -366,15 +407,25 @@ struct ChatThreadView: View {
                 .presentationDetents([.height(520)])
                 .presentationDragIndicator(.visible)
         }
-        .fullScreenCover(isPresented: $showDetail) {
-            ListingDetailView(listing: resolvedListing, source: "chat", onClose: { showDetail = false })
+        .fullScreenCover(item: $selectedListing) { listing in
+            ListingDetailView(listing: listing, source: "chat", onClose: { selectedListing = nil })
         }
-        .sheet(isPresented: $showPeerProfile) {
+        .sheet(isPresented: $showPeerProfile, onDismiss: {
+            // Present after the profile finishes dismissing, carrying the exact
+            // card selected instead of reopening the conversation's property.
+            if let listing = pendingProfileListing {
+                pendingProfileListing = nil
+                selectedListing = listing
+            }
+        }) {
             PeerProfileView(
                 thread: thread,
-                onOpenListing: { _ in showPeerProfile = false; showDetail = true },
-                onCall:  { showPeerProfile = false; CallService.shared.startCall(thread: thread, isVideo: false) },
-                onVideo: { showPeerProfile = false; CallService.shared.startCall(thread: thread, isVideo: true) },
+                onOpenListing: { listing in
+                    pendingProfileListing = listing
+                    showPeerProfile = false
+                },
+                onCall:  { showPeerProfile = false; showCallMaintenanceAlert = true },
+                onVideo: { showPeerProfile = false; showCallMaintenanceAlert = true },
                 onClose: { showPeerProfile = false }
             )
         }
@@ -386,6 +437,11 @@ struct ChatThreadView: View {
                 FullScreenImageViewer(url: url, onClose: { fullScreenImageURL = nil })
                     .ignoresSafeArea()
             }
+        }
+        .alert("Impossible d’ouvrir cette annonce", isPresented: $listingOpenFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("L’annonce est indisponible ou n’a pas pu être chargée. Réessayez dans un instant.")
         }
         .alert("Microphone désactivé", isPresented: $showMicPermissionAlert) {
             Button("Ouvrir Réglages") {
@@ -402,6 +458,11 @@ struct ChatThreadView: View {
         } message: {
             Text("Cet appareil n'a pas d'appareil photo. Choisissez une photo dans la galerie.")
         }
+        .alert("Fonctionnalité en maintenance", isPresented: $showCallMaintenanceAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Les appels sont temporairement indisponibles. Cette fonctionnalité sera bientôt de retour.")
+        }
         .alert("Note vocale non envoyée", isPresented: Binding(
             get: { voiceSendError != nil },
             set: { if !$0 { voiceSendError = nil } }
@@ -409,6 +470,25 @@ struct ChatThreadView: View {
             Button("OK", role: .cancel) { voiceSendError = nil }
         } message: {
             Text(voiceSendError ?? "")
+        }
+        .confirmationDialog("Supprimer ce message ?",
+                            isPresented: Binding(
+                                get: { deleteTarget != nil },
+                                set: { if !$0 { deleteTarget = nil } }),
+                            titleVisibility: .visible) {
+            Button("Supprimer pour moi", role: .destructive) {
+                guard let m = deleteTarget else { return }
+                deleteTarget = nil
+                Task { await chat.deleteMessage(threadId: thread.id, messageId: m.id, forBoth: false) }
+            }
+            if deleteTarget?.fromMe == true {
+                Button("Supprimer pour tout le monde", role: .destructive) {
+                    guard let m = deleteTarget else { return }
+                    deleteTarget = nil
+                    Task { await chat.deleteMessage(threadId: thread.id, messageId: m.id, forBoth: true) }
+                }
+            }
+            Button("Annuler", role: .cancel) { deleteTarget = nil }
         }
     }
 
@@ -432,11 +512,7 @@ struct ChatThreadView: View {
                         HStack(spacing: 5) {
                             Text(thread.name).font(.moblyHeading(15.5)).foregroundStyle(Color.moblyTextPrimary)
                             if thread.verified {
-                                ZStack {
-                                    Circle().fill(Color(hex: 0xB8CCFF))
-                                    Image(systemName: "checkmark").font(.system(size: 7, weight: .heavy))
-                                        .foregroundStyle(Color.moblyPrimary)
-                                }.frame(width: 15, height: 15)
+                                VerifiedBadge(size: 15)
                             }
                         }
                         Text(partnerTyping ? "en train d'écrire…" : (thread.online ? "En ligne" : "Vu récemment"))
@@ -454,10 +530,10 @@ struct ChatThreadView: View {
             // a ringing call that never connects reads as the app being broken.
             if !thread.isSupport {
                 if config.isEnabled("calls.audio") {
-                    Button { CallService.shared.startCall(thread: thread, isVideo: false) } label: { headerIcon("phone.fill") }
+                    Button { showCallMaintenanceAlert = true } label: { headerIcon("phone.fill") }
                 }
                 if config.isEnabled("calls.video") {
-                    Button { CallService.shared.startCall(thread: thread, isVideo: true) } label: { headerIcon("video.fill") }
+                    Button { showCallMaintenanceAlert = true } label: { headerIcon("video.fill") }
                 }
             }
         }
@@ -480,10 +556,17 @@ struct ChatThreadView: View {
     private var listingPill: some View {
         Button {
             // Deleted annonces have no detail to open — don't crash into a 404.
-            if listingState != .missing { showDetail = true }
+            openThreadListing()
         } label: {
             HStack(spacing: 11) {
-                ListingCover(listing: resolvedListing, width: ImageSlot.thumb)
+                Group {
+                    if let listing = resolvedListing {
+                        ListingCover(listing: listing, width: ImageSlot.thumb)
+                    } else {
+                        Color.moblySurface
+                            .overlay(Image(systemName: "house.fill").foregroundStyle(Color.moblyTextSecondary))
+                    }
+                }
                     .frame(width: 50, height: 50)
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
@@ -519,7 +602,9 @@ struct ChatThreadView: View {
                     }
                 }
                 Spacer()
-                if listingState == .available {
+                if openingListing {
+                    ProgressView()
+                } else if listingState == .available {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Color(hex: 0xC4C7D2))
@@ -545,7 +630,9 @@ struct ChatThreadView: View {
         var groups: [String: [ChatMessage]] = [:]
         var hidden = Set<String>()
         func groupable(_ m: ChatMessage) -> Bool {
-            m.kind == .image && m.replyToText == nil && m.reaction == nil
+            // Reacted photos stay in their group: the emoji is shown on the
+            // group instead of pulling the photo out of it.
+            m.kind == .image && m.replyToText == nil
         }
         var i = 0
         while i < messages.count {
@@ -597,9 +684,7 @@ struct ChatThreadView: View {
                                 DateSeparator(text: m.day)
                             }
                             CallLogLine(message: m) {
-                                let video = m.text.hasPrefix("Appel vidéo")
-                                guard config.isEnabled(video ? "calls.video" : "calls.audio") else { return }
-                                CallService.shared.startCall(thread: thread, isVideo: video)
+                                showCallMaintenanceAlert = true
                             }
                             .id(m.id)
                         } else if m.kind == .visit {
@@ -619,16 +704,16 @@ struct ChatThreadView: View {
                                 let last = group[group.count - 1]
                                 PhotoStackBubble(
                                     messages: group,
+                                    highlighted: highlightedId == m.id,
                                     onReply: { replyingTo = last },
                                     onReact: { reactionTarget = last },
                                     onOpen: { start in
-                                        let urls = group.compactMap { g -> URL? in
-                                            guard !g.mediaExpired, let s = g.mediaUrl else { return nil }
-                                            return URL(string: s)
-                                        }
+                                        let validPhotos = group.filter { !$0.mediaExpired && $0.mediaUrl != nil }
+                                        let urls = validPhotos.compactMap { URL(string: $0.mediaUrl!) }
                                         guard !urls.isEmpty else { return }
                                         galleryStart = min(start, urls.count - 1)
                                         galleryURLs = urls
+                                        galleryMessages = validPhotos
                                     }
                                 )
                                 .transition(.scale(scale: 0.85, anchor: m.fromMe ? .bottomTrailing : .bottomLeading).combined(with: .opacity))
@@ -638,8 +723,12 @@ struct ChatThreadView: View {
                                 message: m,
                                 onReply: { replyingTo = m },
                                 onReact: { reactionTarget = m },
-                                onDelete: { },   // TODO: DELETE /threads/:id/messages/:mid
-                                onImageTap: { url in fullScreenImageURL = url }
+                                onDelete: { deleteTarget = m },
+                                onImageTap: { url in fullScreenImageURL = url },
+                                onQuoteTap: m.replyToId.map { target in
+                                    { jump(to: target, in: messages, groups: photoGroups, proxy: proxy) }
+                                },
+                                highlighted: highlightedId == m.id
                             )
                             .transition(.scale(scale: 0.85, anchor: m.fromMe ? .bottomTrailing : .bottomLeading).combined(with: .opacity))
                             .id(m.id)
@@ -647,11 +736,29 @@ struct ChatThreadView: View {
                         }
                     }
 
-                    if let preview = uploadingPreview {
+                    if !uploadingPreviews.isEmpty {
+                        HStack {
+                            Spacer(minLength: 50)
+                            uploadPreviewStack(uploadingPreviews)
+                        }
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.6, anchor: .bottomTrailing)
+                                .combined(with: .opacity),
+                            removal: .scale(scale: 0.95, anchor: .bottomTrailing)
+                                .combined(with: .opacity)
+                        ))
+                        .id("uploading")
+                    } else if let preview = uploadingPreview {
                         HStack {
                             Spacer(minLength: 50)
                             uploadPreviewBubble(preview)
                         }
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.6, anchor: .bottomTrailing)
+                                .combined(with: .opacity),
+                            removal: .scale(scale: 0.95, anchor: .bottomTrailing)
+                                .combined(with: .opacity)
+                        ))
                         .id("uploading")
                     }
                     if let sending = sendingVoice {
@@ -667,6 +774,8 @@ struct ChatThreadView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .animation(Motion.panel, value: messages.count)
+                .animation(Motion.panel, value: uploadingPreviews.isEmpty)
+                .animation(Motion.panel, value: uploadingPreview == nil)
             }
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: messages.count) { _, _ in scrollDown(proxy) }
@@ -679,11 +788,31 @@ struct ChatThreadView: View {
         // full-screen presentations don't compete on the same view.
         .fullScreenCover(isPresented: Binding(
             get: { !galleryURLs.isEmpty },
-            set: { if !$0 { galleryURLs = [] } }
+            set: { if !$0 { galleryURLs = []; galleryMessages = [] } }
         )) {
-            FullScreenGalleryViewer(urls: galleryURLs, startIndex: galleryStart,
-                                    onClose: { galleryURLs = [] })
+            PhotoGroupViewer(urls: galleryURLs, startIndex: galleryStart,
+                             onClose: { galleryURLs = []; galleryMessages = [] },
+                             onReply: galleryMessages.isEmpty ? nil : { index in
+                                 let msg = galleryMessages[min(index, galleryMessages.count - 1)]
+                                 galleryURLs = []; galleryMessages = []
+                                 replyingTo = msg
+                             })
                 .ignoresSafeArea()
+        }
+    }
+
+    /// Scroll back to a quoted message and flash it. A photo inside a group
+    /// has no row of its own, so the jump lands on its group.
+    private func jump(to id: String, in messages: [ChatMessage],
+                      groups: (groups: [String: [ChatMessage]], hidden: Set<String>),
+                      proxy: ScrollViewProxy) {
+        let rowId = groups.groups.first(where: { $0.value.contains { $0.id == id } })?.key ?? id
+        guard messages.contains(where: { $0.id == rowId }) else { return }
+        withAnimation(Motion.panel) { proxy.scrollTo(rowId, anchor: .center) }
+        highlightedId = rowId
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            withAnimation(Motion.gentle) { if highlightedId == rowId { highlightedId = nil } }
         }
     }
 
@@ -701,20 +830,7 @@ struct ChatThreadView: View {
                 .frame(width: ChatImageSize.width, height: ChatImageSize.height)
                 .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay {
-                    ZStack {
-                        Color.black.opacity(0.35)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        VStack(spacing: 8) {
-                            ProgressView()
-                                .tint(.white)
-                                .scaleEffect(1.2)
-                            Text("Envoi…")
-                                .font(.moblyBody(11, weight: .semibold))
-                                .foregroundStyle(.white)
-                        }
-                    }
-                }
+                .overlay { UploadShimmerOverlay(count: 1) }
 
             Text(ChatThread.relativeTime(Date()))
                 .font(.system(size: 9.5))
@@ -729,6 +845,46 @@ struct ChatThreadView: View {
                 bottomTrailing: 5, topTrailing: 18))
                 .fill(Color.moblyPrimary)
         )
+    }
+
+    private func uploadPreviewStack(_ images: [UIImage]) -> some View {
+        let w: CGFloat = 140
+        let previews = Array(images.prefix(3))
+        let angles: [Double] = [-5, 3, -1]
+        let offsets: [(x: CGFloat, y: CGFloat)] = [(0, 8), (12, -4), (-10, 0)]
+        return ZStack {
+            ForEach(Array(previews.enumerated().reversed()), id: \.offset) { i, img in
+                uploadCard(img, width: w)
+                    .rotationEffect(.degrees(angles[i]))
+                    .offset(x: offsets[i].x, y: offsets[i].y)
+            }
+        }
+        .frame(width: w + 60, height: w * 16 / 9 + 30)
+        .overlay { UploadShimmerOverlay(count: images.count) }
+    }
+
+    private func uploadCard(_ image: UIImage, width: CGFloat) -> some View {
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFill()
+            .frame(width: width, height: width * 16 / 9)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .padding(4)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.white)
+            )
+            .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+    }
+
+    private func uploadCell(_ image: UIImage, size: CGFloat) -> some View {
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFill()
+            .frame(width: size, height: size)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
     // MARK: Sending voice bubble (optimistic, upload in flight)
@@ -778,12 +934,24 @@ struct ChatThreadView: View {
     private var replyPreview: some View {
         HStack(spacing: 8) {
             Rectangle().fill(Color.moblyPrimary).frame(width: 3, height: 26).clipShape(Capsule())
+            if replyingTo?.kind == .image, let s = replyingTo?.mediaUrl {
+                RemoteImage(source: s, width: 120)
+                    .frame(width: 30, height: 30)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(replyingTo?.fromMe == true ? "Vous" : thread.name)
                     .font(.moblyBody(11, weight: .semibold))
                     .foregroundStyle(Color.moblyPrimary)
-                Text(replyingTo?.kind == .voice ? "🎤 Note vocale"
-                     : (replyingTo?.kind == .image ? "📷 Photo" : replyingTo?.text ?? ""))
+                Group {
+                    if replyingTo?.kind == .image {
+                        Label("Photo", systemImage: "camera.fill")
+                    } else if replyingTo?.kind == .voice {
+                        Label("Note vocale", systemImage: "mic.fill")
+                    } else {
+                        Text(replyingTo?.text ?? "")
+                    }
+                }
                     .font(.moblyBody(11.5))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
                     .lineLimit(1)
@@ -1069,35 +1237,41 @@ struct ChatThreadView: View {
         guard let me = auth.user?.id else { return }
         let jpegs = images.compactMap { $0.jpegData(compressionQuality: 0.8) }
         guard !jpegs.isEmpty else { return }
-        withAnimation(Motion.quick) { uploadingPreview = images.first }
+        withAnimation(Motion.quick) {
+            uploadingPreview = images.first
+            uploadingPreviews = images
+        }
         isUploading = true
         Task {
-            // The preview only has to cover the UPLOAD window. `chat.send`
-            // inserts its own optimistic bubble synchronously, before it awaits
-            // anything — so the preview has to go the moment sending starts.
-            // Clearing it after the sends finished left both on screen and the
-            // photo appeared twice until the upload completed.
             func handOffToOptimisticBubble() {
-                withAnimation(Motion.quick) { uploadingPreview = nil }
+                withAnimation(Motion.quick) {
+                    uploadingPreview = nil
+                    uploadingPreviews = []
+                }
             }
             do {
                 var urls: [String] = []
-                // One photo per request via the chat-image endpoint (open to any
-                // signed-in user), so a visitor's photos actually transmit.
                 for jpeg in jpegs {
                     urls.append(try await MoblyAPI.shared.uploadChatImage(jpeg))
                 }
                 handOffToOptimisticBubble()
-                for url in urls {
+                if urls.count > 1 {
+                    await chat.sendPhotoBatch(threadId: thread.id, urls: urls, myUserId: me)
+                } else if let url = urls.first {
                     await chat.send(threadId: thread.id, text: "📷 Photo",
                                     myUserId: me, kind: "IMAGE", mediaUrl: url)
                 }
             } catch {
                 handOffToOptimisticBubble()
+                var localUrls: [String] = []
                 for jpeg in jpegs {
-                    let localUrl = Self.saveToLocalCache(jpeg)
+                    localUrls.append(Self.saveToLocalCache(jpeg))
+                }
+                if localUrls.count > 1 {
+                    await chat.sendPhotoBatch(threadId: thread.id, urls: localUrls, myUserId: me)
+                } else if let url = localUrls.first {
                     await chat.send(threadId: thread.id, text: "📷 Photo",
-                                    myUserId: me, kind: "IMAGE", mediaUrl: localUrl)
+                                    myUserId: me, kind: "IMAGE", mediaUrl: url)
                 }
             }
             isUploading = false
@@ -1200,10 +1374,12 @@ struct ChatThreadView: View {
         sendVoice()
     }
 
-    /// Reactions are local-only for now — there is no reactions table, so
-    /// persisting them would mean inventing state the server can't confirm.
+    /// Reactions are stored on the device (`ReactionStore`) — there is no
+    /// reactions table on the server yet. The picker used to close without
+    /// doing anything, so "réagir" looked broken.
     private func react(_ target: ChatMessage, _ emoji: String) {
         reactionTarget = nil
+        withAnimation(Motion.pop) { reactions.toggle(emoji, on: target.id) }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
@@ -1226,13 +1402,21 @@ struct MessageBubble: View {
     var onReact: () -> Void = {}
     var onDelete: () -> Void = {}
     var onImageTap: ((URL) -> Void)?
+    /// Tapping the quoted message scrolls back to it.
+    var onQuoteTap: (() -> Void)? = nil
+    /// Briefly true after a quote jumped here.
+    var highlighted: Bool = false
 
     @State private var dragOffset: CGFloat = 0
 
+    private static let maxBubbleWidth: CGFloat = min(UIScreen.main.bounds.width * 0.75, 300)
+
     var body: some View {
         HStack {
-            if message.fromMe { Spacer(minLength: 50) }
+            if message.fromMe { Spacer(minLength: 40) }
             bubble
+                .frame(maxWidth: message.kind == .image ? ChatImageSize.width : Self.maxBubbleWidth,
+                       alignment: message.fromMe ? .trailing : .leading)
                 .offset(x: dragOffset)
                 .gesture(replySwipe)
                 .contextMenu {
@@ -1247,8 +1431,9 @@ struct MessageBubble: View {
                         Label("Supprimer", systemImage: "trash")
                     }
                 }
-            if !message.fromMe { Spacer(minLength: 50) }
+            if !message.fromMe { Spacer(minLength: 40) }
         }
+        .background(QuoteHighlight(active: highlighted))
     }
 
     private var bubble: some View {
@@ -1261,14 +1446,28 @@ struct MessageBubble: View {
                         Text(message.replyToMe ? "Vous" : "Contact")
                             .font(.moblyBody(10.5, weight: .semibold))
                             .foregroundStyle(message.fromMe ? .white : Color.moblyPrimary)
-                        Text(reply).font(.moblyBody(11))
+                        Group {
+                            if reply == "📷 Photo" {
+                                Label("Photo", systemImage: "camera.fill")
+                            } else {
+                                Text(reply)
+                            }
+                        }
+                            .font(.moblyBody(11))
                             .foregroundStyle(message.fromMe ? Color.white.opacity(0.85) : Color(hex: 0x6B6F80))
                             .lineLimit(1)
+                    }
+                    if let s = message.replyToMediaUrl {
+                        RemoteImage(source: s, width: 120)
+                            .frame(width: 32, height: 32)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                 }
                 .padding(6)
                 .background(RoundedRectangle(cornerRadius: 8)
                     .fill(message.fromMe ? Color.white.opacity(0.15) : Color(hex: 0xF1F2F6)))
+                .contentShape(Rectangle())
+                .onTapGesture { onQuoteTap?() }
             }
 
             content
@@ -2332,12 +2531,41 @@ struct FullScreenImageViewer: View {
                             .frame(width: 36, height: 36)
                             .background(Circle().fill(.white.opacity(0.2)))
                     }
-                    .padding(.trailing, 16).padding(.top, 8)
+                    .padding(.trailing, 16).padding(.top, 54)
                 }
                 Spacer()
             }
         }
         .statusBarHidden()
+    }
+}
+
+// MARK: - Upload shimmer overlay
+
+private struct UploadShimmerOverlay: View {
+    let count: Int
+    @State private var shimmer = false
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.ultraThinMaterial)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.black.opacity(shimmer ? 0.25 : 0.4))
+                .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: shimmer)
+            VStack(spacing: 10) {
+                Circle()
+                    .trim(from: 0, to: 0.7)
+                    .stroke(Color.white, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .frame(width: 24, height: 24)
+                    .rotationEffect(.degrees(shimmer ? 360 : 0))
+                    .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: shimmer)
+                Text(count > 1 ? "Envoi de \(count) photos…" : "Envoi…")
+                    .font(.moblyBody(11, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .onAppear { shimmer = true }
     }
 }
 
@@ -2350,6 +2578,8 @@ struct FullScreenImageViewer: View {
 /// Time and ticks are the LAST photo's, since that is when the run finished.
 struct PhotoStackBubble: View {
     let messages: [ChatMessage]
+    /// Briefly true after a quote jumped to this group.
+    var highlighted: Bool = false
     var onReply: () -> Void = {}
     var onReact: () -> Void = {}
     /// Index (among the run's viewable photos) to open the gallery at.
@@ -2360,12 +2590,33 @@ struct PhotoStackBubble: View {
     private var last: ChatMessage { messages[messages.count - 1] }
     private var fromMe: Bool { last.fromMe }
 
+    /// Distinct reactions across the group's photos, in order.
+    private var groupReactions: [String] {
+        var seen = Set<String>()
+        return messages.compactMap(\.reaction).filter { seen.insert($0).inserted }
+    }
+
     var body: some View {
         HStack {
             if fromMe { Spacer(minLength: 30) }
+            // No contentShape / tap on the whole frame: each photo carries
+            // its own tap, so touching the empty margin beside a photo does
+            // nothing instead of opening the gallery.
             stack
-                .contentShape(Rectangle())
-                .onTapGesture { onOpen(0) }
+                // Reactions on any photo of the group show as one pill at the
+                // bottom of the group, WhatsApp-style.
+                .overlay(alignment: fromMe ? .bottomTrailing : .bottomLeading) {
+                    if !groupReactions.isEmpty {
+                        Text(groupReactions.joined())
+                            .font(.system(size: 15))
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(Capsule().fill(.white))
+                            .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
+                            .offset(x: fromMe ? -8 : 8, y: 12)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .padding(.bottom, groupReactions.isEmpty ? 0 : 10)
                 .offset(x: dragOffset)
                 .gesture(replySwipe)
                 .contextMenu {
@@ -2374,6 +2625,7 @@ struct PhotoStackBubble: View {
                 }
             if !fromMe { Spacer(minLength: 30) }
         }
+        .background(QuoteHighlight(active: highlighted))
     }
 
     @ViewBuilder private var stack: some View {
@@ -2394,30 +2646,42 @@ struct PhotoStackBubble: View {
             .frame(width: 2 * w + 24, height: w * 16 / 9 + 20)
             .overlay(alignment: .bottom) { label(showCount: false).padding(.bottom, 2) }
         } else {
-            // Deck: a third card peeks out behind, two photos on top.
-            let w: CGFloat = 170
+            let w: CGFloat = 160
+            let shown = Array(messages.prefix(3))
+            let angles: [Double] = [-5, 3, -1]
+            let offsets: [(x: CGFloat, y: CGFloat)] = [(0, 8), (12, -4), (-10, 0)]
             ZStack {
-                card(messages[2], width: w)
-                    .rotationEffect(.degrees(-9))
-                    .offset(x: -18, y: 4)
-                card(messages[1], width: w)
-                    .rotationEffect(.degrees(7))
-                    .offset(x: 20, y: 2)
-                card(messages[0], width: w)
-                    .rotationEffect(.degrees(-2))
-                    .overlay(alignment: .topTrailing) {
-                        Text("+\(messages.count - 2)")
-                            .font(.moblyBody(12, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 9).padding(.vertical, 4)
-                            .background(Capsule().fill(Color.black.opacity(0.45)))
-                            .padding(10)
-                            .rotationEffect(.degrees(-2))
-                    }
+                ForEach(Array(shown.enumerated().reversed()), id: \.offset) { i, m in
+                    card(m, width: w)
+                        .rotationEffect(.degrees(angles[i]))
+                        .offset(x: offsets[i].x, y: offsets[i].y)
+                        .onTapGesture { onOpen(i) }
+                }
             }
             .frame(width: w + 60, height: w * 16 / 9 + 30)
-            .overlay(alignment: .bottom) { label(showCount: true).padding(.bottom, 8) }
+            .contentShape(Rectangle())
+            .onTapGesture { onOpen(0) }
+            .overlay(alignment: .bottom) { label(showCount: true).padding(.bottom, 2) }
         }
+    }
+
+    /// One square cell of the grid, cropped to fill.
+    private func gridCell(_ m: ChatMessage, size: CGFloat) -> some View {
+        Group {
+            if !m.mediaExpired, let s = m.mediaUrl, let url = URL(string: s) {
+                CachedChatImage(url: url, imgWidth: size)
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                ZStack {
+                    Color(hex: 0xE4E6EE)
+                    Image(systemName: m.mediaExpired ? "clock.badge.xmark" : "photo")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipped()
     }
 
     /// Frosted capsule centred under the deck: "10 photos · 14:02 ✓✓".
@@ -2517,7 +2781,7 @@ struct FullScreenGalleryViewer: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12).padding(.vertical, 6)
                         .background(Capsule().fill(.white.opacity(0.2)))
-                        .padding(.leading, 16).padding(.top, 8)
+                        .padding(.leading, 16).padding(.top, 54)
                     Spacer()
                     Button(action: onClose) {
                         Image(systemName: "xmark")
@@ -2526,7 +2790,7 @@ struct FullScreenGalleryViewer: View {
                             .frame(width: 36, height: 36)
                             .background(Circle().fill(.white.opacity(0.2)))
                     }
-                    .padding(.trailing, 16).padding(.top, 8)
+                    .padding(.trailing, 16).padding(.top, 54)
                 }
                 Spacer()
             }
@@ -2594,7 +2858,7 @@ private struct CachedChatImage: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
-        .onAppear { loader.load(url) }
+        .onAppear { loader.load(url, persistent: true) }
     }
 }
 
@@ -2667,10 +2931,23 @@ private struct CachedFullScreenImage: View {
                 ProgressView().tint(.white).scaleEffect(1.3)
             }
         }
-        .onAppear { loader.load(url) }
+        .onAppear { loader.load(url, persistent: true) }
     }
 }
 
 #Preview {
     ChatThreadView(thread: ChatThread.preview)
+}
+
+
+/// Soft flash behind a message a tapped quote jumped to.
+private struct QuoteHighlight: View {
+    var active: Bool
+    var body: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color.moblyPrimary.opacity(active ? 0.14 : 0))
+            .padding(.horizontal, -10).padding(.vertical, -4)
+            .animation(Motion.standard, value: active)
+            .allowsHitTesting(false)
+    }
 }

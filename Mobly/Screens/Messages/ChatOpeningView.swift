@@ -2,13 +2,10 @@ import SwiftUI
 
 /// Bridging view shown the instant a user taps "Message l'hôte" on a listing.
 ///
-/// The real thread only exists after `POST /threads` finishes — on a Douala
-/// connection that's ~1.3s of blank silence if we wait before presenting
-/// anything. Instead we present *this* view immediately: the same header,
-/// listing pill, and composer as `ChatThreadView`, with skeleton message
-/// bubbles pulsing where the real messages will land. As soon as the thread
-/// id comes back, we swap to the real `ChatThreadView` — which itself has
-/// nothing left to fetch because it also observes `ChatStore.messages`.
+/// If a cached thread for this listing already exists (from a prior session or
+/// disk cache), we skip the skeleton entirely and show ChatThreadView with
+/// cached messages while `POST /threads` refreshes in the background.
+/// Otherwise we show a skeleton until the server responds.
 struct ChatOpeningView: View {
     let listing: Listing
     var onBack: () -> Void = {}
@@ -17,12 +14,16 @@ struct ChatOpeningView: View {
     @ObservedObject private var auth = AuthStore.shared
     @State private var resolvedThread: ChatThread?
     @State private var openFailed = false
+    @State private var openErrorMessage = ""
+
+    private var cachedThread: ChatThread? {
+        guard let dto = chat.threads.first(where: { $0.listing?.id == listing.id }) else { return nil }
+        return ChatThread.from(dto, myUserId: auth.user?.id)
+    }
 
     var body: some View {
         Group {
-            if let t = resolvedThread {
-                // Real thread is ready — hand off. ChatThreadView loads
-                // messages in its own .task the moment it appears.
+            if let t = resolvedThread ?? cachedThread {
                 ChatThreadView(thread: t, onBack: onBack)
                     .transition(.opacity)
             } else {
@@ -37,17 +38,39 @@ struct ChatOpeningView: View {
             Button("Réessayer") { Task { await open() } }
             Button("Annuler", role: .cancel) { onBack() }
         } message: {
-            Text("Vérifiez votre connexion et réessayez.")
+            Text(openErrorMessage)
         }
     }
 
     private func open() async {
-        guard auth.isSignedIn else { return }
-        guard let dto = await chat.openThread(listingId: listing.id) else {
+        guard auth.isSignedIn else {
+            openErrorMessage = "Votre session a expiré. Reconnectez-vous pour envoyer un message."
             openFailed = true
             return
         }
-        resolvedThread = ChatThread.from(dto, myUserId: auth.user?.id)
+        do {
+            let dto = try await chat.openThreadOrThrow(listingId: listing.id)
+            guard !Task.isCancelled else { return }
+            resolvedThread = ChatThread.from(dto, myUserId: auth.user?.id)
+        } catch let error as MoblyAPI.APIError {
+            guard !Task.isCancelled, !error.isCancelled else { return }
+            // If we're already showing cached messages, swallow the error
+            // silently — the user can still read old messages and type.
+            if cachedThread != nil { return }
+            openErrorMessage = error.message
+            openFailed = true
+            #if DEBUG
+            MoblyNetDebug.record("openThread status=\(error.status) code=\(error.code)")
+            #endif
+        } catch {
+            guard !Task.isCancelled else { return }
+            if cachedThread != nil { return }
+            openErrorMessage = "La conversation n'a pas pu être chargée. Réessayez dans un instant."
+            openFailed = true
+            #if DEBUG
+            MoblyNetDebug.record("openThread decoding/transport error: \(error)")
+            #endif
+        }
     }
 }
 

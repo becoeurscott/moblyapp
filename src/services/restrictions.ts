@@ -1,7 +1,7 @@
 import type { RestrictionKind } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { ApiError } from '../lib/http';
-import { cacheGet, cacheSet, cacheBust } from '../lib/cache';
+import { cacheRemember, cacheBust } from '../lib/cache';
 
 /**
  * Per-user capability blocks.
@@ -36,11 +36,9 @@ export function bustRestrictions(userId: string) {
 /** Every currently-active restriction for a user. Never throws. */
 export async function activeRestrictions(userId: string): Promise<ActiveRestriction[]> {
   const cacheKey = `${KEY}${userId}`;
-  const hit = cacheGet<ActiveRestriction[]>(cacheKey);
-  if (hit) return hit;
 
   try {
-    const rows = await prisma.userRestriction.findMany({
+    const rows = await cacheRemember(cacheKey, TTL_MS, () => prisma.userRestriction.findMany({
       where: {
         userId,
         revokedAt: null,
@@ -48,9 +46,8 @@ export async function activeRestrictions(userId: string): Promise<ActiveRestrict
       },
       select: { id: true, kind: true, reason: true, expiresAt: true },
       orderBy: { createdAt: 'desc' },
-    });
-    cacheSet(cacheKey, rows, TTL_MS);
-    return rows;
+    }));
+    return rows.filter((row) => !row.expiresAt || row.expiresAt.getTime() > Date.now());
   } catch (err) {
     // Failing open is deliberate: a database blip must not block every action
     // for every user. The worst case is a restricted user getting one more

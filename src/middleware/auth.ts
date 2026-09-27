@@ -61,10 +61,10 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     }
 
     const payload = verifyToken(token);
-    const user = await prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: AUTH_SELECT,
-    });
+    const [user, restrictions] = await Promise.all([
+      prisma.user.findUnique({ where: { id: payload.sub }, select: AUTH_SELECT }),
+      activeRestrictions(payload.sub),
+    ]);
     // Token verified but the account is gone — treat as unauthenticated, not
     // expired, so the client signs out instead of looping on refresh.
     if (!user) throw new ApiError(401, 'Session invalide', 'UNAUTHENTICATED');
@@ -85,7 +85,6 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
       );
     }
 
-    const restrictions = await activeRestrictions(user.id);
     const ban = restrictions.find((r) => r.kind === 'LOGIN');
     if (ban) {
       throw new ApiError(403, restrictionMessage(ban), 'ACCOUNT_SUSPENDED', {
@@ -136,10 +135,10 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
   if (scheme !== 'Bearer' || !token) return next();
   try {
     const payload = verifyToken(token);
-    const user = await prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: AUTH_SELECT,
-    });
+    const [user, restrictions] = await Promise.all([
+      prisma.user.findUnique({ where: { id: payload.sub }, select: AUTH_SELECT }),
+      activeRestrictions(payload.sub),
+    ]);
     // A suspended or force-logged-out user browses as an anonymous visitor
     // rather than being rejected — these routes are open to signed-out users
     // anyway, and personalising for a banned account would be wrong.
@@ -155,7 +154,7 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
         ownerPaid: user.ownerPaid,
         ownerTrialStartedAt: user.ownerTrialStartedAt,
       };
-      req.restrictions = await activeRestrictions(user.id);
+      req.restrictions = restrictions;
     }
   } catch {
     // A bad or expired token on an optional route is simply "not signed in".

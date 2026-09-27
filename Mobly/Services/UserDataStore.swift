@@ -29,11 +29,53 @@ final class UserDataStore: ObservableObject {
     private let api = MoblyAPI.shared
 
     private init() {
+        // Paint the owner dashboard from the last known annonces before the
+        // network is consulted. Without this `myListings` began every launch
+        // empty, so the dashboard showed nothing at all until /listings/mine
+        // returned — a wait the owner reads as the app losing their property.
+        loadFromDisk()
         NotificationCenter.default.addObserver(
             forName: MoblyAPI.sessionExpired, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.clear() }
         }
+    }
+
+    // MARK: Disk cache
+
+    /// Scoped to the signed-in user id: on a shared handset — common in this
+    /// market — an unscoped file would show the previous owner's annonces to
+    /// whoever signs in next, before the network could correct it.
+    private var cacheURL: URL? {
+        guard let uid = Session.shared.userId else { return nil }
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory,
+                                           in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("owner-listings-\(uid).json")
+    }
+
+    private func saveToDisk() {
+        guard let url = cacheURL else { return }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(myListings) else { return }
+        try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    private func loadFromDisk() {
+        guard let url = cacheURL, let data = try? Data(contentsOf: url) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let cached = try? decoder.decode([ListingDTO].self, from: data) else { return }
+        myListings = cached
+    }
+
+    /// Drop the file too — `clear()` runs on sign-out, and a cache that
+    /// outlived the session would hand the next user the previous one's
+    /// annonces on the very first frame.
+    private func clearDisk() {
+        guard let url = cacheURL else { return }
+        try? FileManager.default.removeItem(at: url)
     }
 
     /// Wipe everything. Called on sign-out so the next person on this device
@@ -44,6 +86,7 @@ final class UserDataStore: ObservableObject {
         notifications = []
         unreadNotifications = 0
         myListings = []
+        clearDisk()
     }
 
     func loadAll(silent: Bool = false) async {
@@ -163,7 +206,11 @@ final class UserDataStore: ObservableObject {
             } else {
                 myListings = fresh
             }
-        } catch {}
+            saveToDisk()
+        } catch {
+            // Keep whatever is already on screen. A failed refresh must not
+            // empty a dashboard that is showing perfectly good cached annonces.
+        }
     }
 }
 

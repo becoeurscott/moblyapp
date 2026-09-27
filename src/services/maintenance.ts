@@ -30,8 +30,13 @@ const OFF: MaintenanceState = {
 
 let cached: { at: number; state: MaintenanceState } | null = null;
 
+let generation = 0;
+let pending: Promise<MaintenanceState> | null = null;
+
 /** Drop the cache so the next read hits the database. */
 export function bustMaintenanceCache() {
+  generation++;
+  pending = null;
   cached = null;
 }
 
@@ -42,25 +47,35 @@ export function bustMaintenanceCache() {
  */
 export async function getMaintenance(): Promise<MaintenanceState> {
   if (cached && Date.now() - cached.at < TTL_MS) return cached.state;
+  if (pending) return pending;
+  const currentGeneration = generation;
+  const task = (async () => {
+    try {
+      const row = await prisma.maintenanceWindow.findUnique({
+        where: { id: 'singleton' },
+      });
+      const state: MaintenanceState = row
+        ? {
+            enabled: row.enabled,
+            message: row.message,
+            endsAt: row.endsAt,
+            startedAt: row.startedAt,
+            updatedAt: row.updatedAt,
+            updatedBy: row.updatedBy,
+          }
+        : OFF;
+      if (generation === currentGeneration) cached = { at: Date.now(), state };
+      return state;
+    } catch (err) {
+      console.error('[maintenance] read failed, failing open:', err);
+      return OFF;
+    }
+  })();
+  pending = task;
   try {
-    const row = await prisma.maintenanceWindow.findUnique({
-      where: { id: 'singleton' },
-    });
-    const state: MaintenanceState = row
-      ? {
-          enabled: row.enabled,
-          message: row.message,
-          endsAt: row.endsAt,
-          startedAt: row.startedAt,
-          updatedAt: row.updatedAt,
-          updatedBy: row.updatedBy,
-        }
-      : OFF;
-    cached = { at: Date.now(), state };
-    return state;
-  } catch (err) {
-    console.error('[maintenance] read failed, failing open:', err);
-    return OFF;
+    return await task;
+  } finally {
+    if (pending === task) pending = null;
   }
 }
 

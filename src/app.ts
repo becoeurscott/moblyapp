@@ -1,4 +1,5 @@
 import express from 'express';
+import { requestPerformance } from './lib/performance';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -26,6 +27,7 @@ export function createApp() {
   );
 
   app.use(requestId);
+  app.use(requestPerformance);
 
   app.use(
     cors({

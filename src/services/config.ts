@@ -30,11 +30,16 @@ import {
 const TTL_MS = 10_000;
 
 let cached: { at: number; doc: AppConfigDoc; version: number } | null = null;
+let generation = 0;
+let pending: Promise<AppConfigDoc> | null = null;
+
 /** Last value successfully read, kept indefinitely for the sync accessor. */
 let snapshot: AppConfigDoc = DEFAULT_CONFIG;
 let snapshotVersion = 0;
 
 export function bustConfigCache() {
+  generation++;
+  pending = null;
   cached = null;
 }
 
@@ -50,17 +55,29 @@ function parse(data: unknown): AppConfigDoc {
 
 export async function getConfig(): Promise<AppConfigDoc> {
   if (cached && Date.now() - cached.at < TTL_MS) return cached.doc;
+  if (pending) return pending;
+  const currentGeneration = generation;
+  const task = (async () => {
+    try {
+      const row = await prisma.appConfig.findUnique({ where: { id: 'singleton' } });
+      const doc = parse(row?.data);
+      const version = row?.version ?? 0;
+      if (generation === currentGeneration) {
+        cached = { at: Date.now(), doc, version };
+        snapshot = doc;
+        snapshotVersion = version;
+      }
+      return doc;
+    } catch (err) {
+      console.error('[config] read failed, using defaults:', err);
+      return snapshot;
+    }
+  })();
+  pending = task;
   try {
-    const row = await prisma.appConfig.findUnique({ where: { id: 'singleton' } });
-    const doc = parse(row?.data);
-    const version = row?.version ?? 0;
-    cached = { at: Date.now(), doc, version };
-    snapshot = doc;
-    snapshotVersion = version;
-    return doc;
-  } catch (err) {
-    console.error('[config] read failed, using defaults:', err);
-    return snapshot;
+    return await task;
+  } finally {
+    if (pending === task) pending = null;
   }
 }
 

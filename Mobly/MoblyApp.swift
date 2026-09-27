@@ -49,6 +49,10 @@ struct MoblyApp: App {
                     // should meet the maintenance screen, not a home feed that
                     // fails to load piece by piece.
                     await MaintenanceStore.shared.checkAtLaunch()
+                    // Restore auth before remote config/listing preloads. A
+                    // signed-in user should not see guest-only UI just because
+                    // the app is still fetching secondary launch data.
+                    await AuthStore.shared.bootstrap()
                     // Then the remote configuration: which features are on,
                     // the current limits and copy, and whether this build is
                     // still supported. Fetched before the UI settles so a
@@ -59,7 +63,6 @@ struct MoblyApp: App {
                     // sample cards. Detached so it doesn't get cancelled with
                     // the SwiftUI .task if the user navigates away.
                     Task.detached { await ListingStore.shared.fetch(silent: true) }
-                    await AuthStore.shared.bootstrap()
                     // If bootstrap surfaced a signed-in user, promote the
                     // anonymous session to their account.
                     if AuthStore.shared.isSignedIn {

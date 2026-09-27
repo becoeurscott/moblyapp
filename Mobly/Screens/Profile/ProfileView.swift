@@ -153,7 +153,9 @@ struct ProfileView: View {
                 stats
                     .padding(.bottom, 22)
 
-                if session.isOwner {
+                if auth.isRestoringSession {
+                    restoreSessionCTA.padding(.bottom, 22)
+                } else if session.isOwner {
                     ownerDashboardCTA.padding(.bottom, 22)
                 } else if config.isEnabled("owners.signup") {
                     becomeOwnerCTA.padding(.bottom, 22)
@@ -175,9 +177,16 @@ struct ProfileView: View {
             .padding(.bottom, 110)
         }
         .refreshable {
-            await AuthStore.shared.bootstrap()
-            await UserDataStore.shared.loadFavorites(silent: true)
-            await identity.refresh()
+            // In parallel. These three touch different endpoints and none reads
+            // the others' result, but they used to be awaited one after the
+            // next — so the screen cost the SUM of three round trips instead of
+            // the slowest one. At Cameroon-to-Oregon latency that is the
+            // difference between one wait and three, and against a cold backend
+            // it stacked three separate wake-ups.
+            async let me: Void = AuthStore.shared.bootstrap()
+            async let favs: Void = UserDataStore.shared.loadFavorites(silent: true)
+            async let kyc: Void = identity.refresh()
+            _ = await (me, favs, kyc)
         }
         // Keep the badge honest when the screen is opened: a decision may have
         // landed while the user was elsewhere in the app.
@@ -337,6 +346,20 @@ struct ProfileView: View {
     }
 
     // MARK: Become owner CTA (visitor)
+
+    private var restoreSessionCTA: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+                .tint(Color.moblyPrimary)
+            Text("Connexion en cours…")
+                .font(.moblyBody(13.5, weight: .semibold))
+                .foregroundStyle(Color.moblyTextPrimary)
+            Spacer()
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 18).fill(.white))
+        .shadow(color: Color(hex: 0x14152A).opacity(0.05), radius: 8, y: 2)
+    }
 
     // Same entry as the Home card: the onboarding flow itself walks the user
     // through the identity check before anything is published.

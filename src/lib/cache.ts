@@ -1,40 +1,45 @@
-/**
- * Tiny in-memory TTL cache for read-heavy GET responses.
- *
- * The listing search hits Supabase over the network, which costs ~1.3s of
- * fixed round-trip latency regardless of payload size (a no-DB endpoint on the
- * same server answers in 1ms). Browse traffic repeats the same handful of
- * queries, so caching the serialized response turns every repeat hit into a
- * memory read. Writes bust the whole namespace — listing data is small and
- * mutations are rare, so precise invalidation isn't worth the bug surface.
- */
-
+/** Bounded, process-local TTL cache. Writes invalidate pending loads too. */
 type Entry = { value: unknown; expiresAt: number };
-
+const MAX_ENTRIES = 200;
 const store = new Map<string, Entry>();
-
-/** Drop expired entries. Cheap — the map only ever holds a few dozen keys. */
-function sweep(now: number) {
-  for (const [k, e] of store) if (e.expiresAt <= now) store.delete(k);
-}
+const pending = new Map<string, Promise<unknown>>();
 
 export function cacheGet<T>(key: string): T | undefined {
-  const e = store.get(key);
-  if (!e) return undefined;
-  if (e.expiresAt <= Date.now()) {
+  const entry = store.get(key);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
     store.delete(key);
     return undefined;
   }
-  return e.value as T;
+  return entry.value as T;
 }
 
 export function cacheSet(key: string, value: unknown, ttlMs: number) {
   const now = Date.now();
-  if (store.size > 200) sweep(now);
+  for (const [k, entry] of store) if (entry.expiresAt <= now) store.delete(k);
+  store.delete(key);
+  while (store.size >= MAX_ENTRIES) store.delete(store.keys().next().value!);
   store.set(key, { value, expiresAt: now + ttlMs });
 }
 
-/** Invalidate every key beginning with `prefix` (call after any write). */
+/** Share concurrent misses; a write during a load prevents stale repopulation. */
+export async function cacheRemember<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+  const hit = cacheGet<T>(key);
+  if (hit !== undefined) return hit;
+  const running = pending.get(key);
+  if (running) return running as Promise<T>;
+  const task = Promise.resolve().then(load);
+  pending.set(key, task);
+  try {
+    const value = await task;
+    if (pending.get(key) === task) cacheSet(key, value, ttlMs);
+    return value;
+  } finally {
+    if (pending.get(key) === task) pending.delete(key);
+  }
+}
+
 export function cacheBust(prefix: string) {
-  for (const k of store.keys()) if (k.startsWith(prefix)) store.delete(k);
+  for (const key of store.keys()) if (key.startsWith(prefix)) store.delete(key);
+  for (const key of pending.keys()) if (key.startsWith(prefix)) pending.delete(key);
 }

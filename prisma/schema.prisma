@@ -521,6 +521,7 @@ model Thread {
   messages     Message[]
   participants ThreadParticipant[]
 
+  @@index([listingId])
   @@index([updatedAt])
 }
 
@@ -541,6 +542,7 @@ model ThreadParticipant {
 
   @@unique([threadId, userId])
   @@index([userId])
+  @@index([userId, threadId])
 }
 
 model Message {
@@ -583,7 +585,7 @@ model Message {
   replies Message[] @relation("MessageReply")
 
   @@unique([threadId, clientId])
-  @@index([threadId])
+  @@index([threadId, createdAt])
   @@index([createdAt])
 }
 

@@ -40,10 +40,52 @@ import { supportTools, runSupportTool, type ToolContext } from './supportTools';
  *    that thread, so it cannot talk over the human who took it.
  */
 
-const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const MAX_TURNS = 6;
 const HISTORY = 24;
 const TIMEOUT_MS = 45_000;
+// The self-hosted server is CPU-only: a reply takes 30-60 s. The user is not
+// waiting on a request (this runs after the response), so give it room.
+const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS) || 90_000;
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b';
+
+/**
+ * Where a completion is sent. The self-hosted Ollama server (shared with
+ * goodiesSnap, behind a key-checking proxy) comes first — it costs nothing per
+ * message and has no rate limit. OpenRouter is the backup when it is down or
+ * too slow. Both speak the OpenAI chat-completions shape.
+ */
+interface Provider {
+  name: 'ollama' | 'openrouter';
+  endpoint: string;
+  key: string;
+  model: string;
+  timeoutMs: number;
+}
+
+function providers(openRouterModel: string): Provider[] {
+  const list: Provider[] = [];
+  const ollama = (process.env.OLLAMA_URL ?? '').replace(/\/+$/, '');
+  if (ollama && process.env.OLLAMA_API_KEY) {
+    list.push({
+      name: 'ollama',
+      endpoint: `${ollama}/v1/chat/completions`,
+      key: process.env.OLLAMA_API_KEY,
+      model: OLLAMA_MODEL,
+      timeoutMs: OLLAMA_TIMEOUT_MS,
+    });
+  }
+  if (process.env.OPENROUTER_API_KEY) {
+    list.push({
+      name: 'openrouter',
+      endpoint: OPENROUTER_ENDPOINT,
+      key: process.env.OPENROUTER_API_KEY,
+      model: openRouterModel,
+      timeoutMs: TIMEOUT_MS,
+    });
+  }
+  return list;
+}
 
 /** Compiled in on purpose — see (2) above. */
 const SAFETY_RULES = `
@@ -83,7 +125,7 @@ MÉTHODE
 
 /** Whether the assistant is switched on AND actually usable. */
 export function supportAgentReady(): boolean {
-  return !!process.env.OPENROUTER_API_KEY && isFlagEnabled('support.ai');
+  return providers('').length > 0 && isFlagEnabled('support.ai');
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -108,27 +150,27 @@ interface Completion {
   error?: { message?: string };
 }
 
-/** One call to OpenRouter. `withTools` is false on the degraded retry below. */
+/** One call to a provider. `withTools` is false on the degraded retry below. */
 async function callOnce(
   messages: ChatMessage[],
-  model: string,
+  p: Provider,
   withTools: boolean
 ): Promise<{ ok: true; message: ChatMessage | null } | { ok: false; status: number; error: string }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), p.timeoutMs);
   try {
-    const res = await fetch(ENDPOINT, {
+    const res = await fetch(p.endpoint, {
       method: 'POST',
       signal: controller.signal,
       headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${p.key}`,
         'Content-Type': 'application/json',
         // Optional attribution headers OpenRouter uses for its rankings.
         'HTTP-Referer': 'https://mobly.cm',
         'X-Title': 'Mobly Support',
       },
       body: JSON.stringify({
-        model,
+        model: p.model,
         messages,
         ...(withTools ? { tools: supportTools } : {}),
         max_tokens: 700,
@@ -141,34 +183,43 @@ async function callOnce(
       return { ok: false, status: res.status, error: body.error?.message ?? '' };
     }
     return { ok: true, message: body.choices?.[0]?.message ?? null };
+  } catch (err) {
+    // Timeout or unreachable server: reported like an HTTP failure so the
+    // next provider gets a turn.
+    return { ok: false, status: 0, error: err instanceof Error ? err.message : String(err) };
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function complete(messages: ChatMessage[], model: string): Promise<ChatMessage | null> {
-  let res = await callOnce(messages, model, true);
+/** The reply and which provider/model produced it, for the audit trail. */
+async function complete(
+  messages: ChatMessage[],
+  openRouterModel: string
+): Promise<{ message: ChatMessage | null; model: string } | null> {
+  for (const p of providers(openRouterModel)) {
+    let res = await callOnce(messages, p, true);
 
-  // Free models are the point of using OpenRouter here, and not all of them
-  // support tool calling. Rather than fail outright, fall back to a plain
-  // completion: the assistant can still answer questions, it just cannot act.
-  // Degraded is far better than silent for someone waiting on an answer.
-  if (!res.ok && /tool|function/i.test(res.error)) {
-    console.warn(`[supportAgent] ${model} rejected tools — answering without them`);
-    res = await callOnce(messages, model, false);
-  }
-
-  if (!res.ok) {
-    // Logged only. A rate limit, billing or model problem must never become a
-    // user-visible failure — the thread just waits for a human.
-    if (res.status === 429) {
-      console.warn('[supportAgent] rate limited by OpenRouter (free tiers are capped)');
-    } else {
-      console.error('[supportAgent] OpenRouter', res.status, res.error);
+    // Not every model supports tool calling. Rather than fail outright, fall
+    // back to a plain completion: the assistant can still answer questions,
+    // it just cannot act. Degraded is far better than silent.
+    if (!res.ok && /tool|function/i.test(res.error)) {
+      console.warn(`[supportAgent] ${p.name}/${p.model} rejected tools — answering without them`);
+      res = await callOnce(messages, p, false);
     }
-    return null;
+
+    if (res.ok) return { message: res.message, model: `${p.name}/${p.model}` };
+
+    // Logged only. A rate limit, outage or model problem must never become a
+    // user-visible failure — the next provider is tried, and if none answers
+    // the thread just waits for a human.
+    if (res.status === 429) {
+      console.warn(`[supportAgent] rate limited by ${p.name}`);
+    } else {
+      console.error(`[supportAgent] ${p.name}`, res.status || 'network', res.error);
+    }
   }
-  return res.message;
+  return null;
 }
 
 /**
@@ -228,9 +279,13 @@ export async function runSupportAgent(threadId: string, userId: string): Promise
     const performed: { name: string; detail: Record<string, unknown> }[] = [];
     let escalatedReason: string | null = null;
     let reply = '';
+    let usedModel = model;
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
-      const msg = await complete(messages, model);
+      const res = await complete(messages, model);
+      if (!res) return;
+      usedModel = res.model;
+      const msg = res.message;
       if (!msg) return;
 
       if (msg.content) reply = msg.content.trim();
@@ -271,7 +326,7 @@ export async function runSupportAgent(threadId: string, userId: string): Promise
             targetType: 'thread',
             targetId: threadId,
             after: {
-              model,
+              model: usedModel,
               actions: performed,
               escalated: escalatedReason,
               reply: reply.slice(0, 300),

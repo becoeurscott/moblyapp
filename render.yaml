@@ -6,7 +6,7 @@ services:
   - type: web
     name: mobly-backend
     runtime: node
-    plan: free
+    plan: 0.5c-512mb
     buildCommand: npm install --include=dev && npm run build && npx prisma migrate deploy
     startCommand: npm start
     healthCheckPath: /api/v1/health

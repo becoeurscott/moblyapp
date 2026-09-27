@@ -467,7 +467,25 @@ final class MoblyAPI {
             } catch {
                 // Don't wipe a session that has already been replaced.
                 guard generation == self.sessionGeneration else { return false }
-                // Refused: expired, revoked, or reuse detected. Session is over.
+
+                // Only the SERVER may end a session. This used to treat every
+                // failure as a refusal, so a refresh that never reached the
+                // server — the user in a dead spot, the phone on a flaky
+                // connection, the backend still waking from a cold start —
+                // destroyed a perfectly valid 30-day session and forced a new
+                // sign-in. That is what made the session feel short: the tokens
+                // were long-lived, but any network blip during a renewal was
+                // fatal. A transient failure now leaves the refresh token in
+                // place so the next attempt can use it.
+                let refused: Bool
+                if let e = error as? APIError {
+                    refused = !e.isOffline && !e.isCancelled && !e.isRetryable
+                } else {
+                    refused = false
+                }
+                guard refused else { return false }
+
+                // Genuinely refused: expired, revoked, or reuse detected.
                 self.clearSession()
                 await MainActor.run {
                     NotificationCenter.default.post(name: MoblyAPI.sessionExpired, object: nil)

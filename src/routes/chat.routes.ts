@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
 import { serializeMessage } from '../lib/serialize';
@@ -108,10 +109,18 @@ chatRouter.post(
       .parse(req.body);
 
     let peerId = otherUserId;
+    let peerOwner:
+      | { id: string; isOwner: boolean; ownerPaid: boolean; ownerTrialStartedAt: Date | null }
+      | null = null;
     if (listingId) {
       const listing = await prisma.listing.findUnique({
         where: { id: listingId },
-        select: { ownerId: true },
+        select: {
+          ownerId: true,
+          owner: {
+            select: { id: true, isOwner: true, ownerPaid: true, ownerTrialStartedAt: true },
+          },
+        },
       });
       if (!listing) throw new ApiError(404, 'Annonce introuvable', 'NOT_FOUND');
       // Only DERIVE the peer from the listing when the caller didn't name one.
@@ -120,6 +129,7 @@ chatRouter.post(
       // and a 422 — the "Impossible d'ouvrir la conversation" alert. The
       // listing is still fetched above so an invalid listingId 404s.
       if (!peerId) peerId = listing.ownerId;
+      if (!otherUserId) peerOwner = listing.owner;
     }
     if (!peerId) {
       throw new ApiError(422, 'Destinataire manquant', 'VALIDATION_FAILED');
@@ -152,24 +162,33 @@ chatRouter.post(
       updatedAt: t.updatedAt,
     });
 
-    // Run the owner-active check and existing-thread lookup in parallel —
-    // each is an independent DB round-trip and together they were the
-    // biggest chunk of the ~1.3s the "Message l'hôte" button took.
-    const [peerOwner, existing, peerRelation] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: peerId },
-        select: { id: true, isOwner: true, ownerPaid: true, ownerTrialStartedAt: true },
-      }),
-      prisma.thread.findFirst({
-        where: {
-          listingId: listingId ?? null,
-          AND: [
-            { participants: { some: { userId: req.userId! } } },
-            { participants: { some: { userId: peerId } } },
-          ],
-        },
-        include,
-      }),
+    // Normal listing contact already has the owner from the listing query
+    // above. Only the less common explicit-peer path needs another user read.
+    const findExistingThreadId = async () => {
+      const rows = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+        SELECT t.id
+        FROM "Thread" t
+        JOIN "ThreadParticipant" me
+          ON me."threadId" = t.id AND me."userId" = ${req.userId!}
+        JOIN "ThreadParticipant" peer
+          ON peer."threadId" = t.id AND peer."userId" = ${peerId}
+        WHERE ${listingId == null
+          ? Prisma.sql`t."listingId" IS NULL`
+          : Prisma.sql`t."listingId" = ${listingId}`}
+        ORDER BY t."updatedAt" DESC
+        LIMIT 1
+      `);
+      return rows[0]?.id ?? null;
+    };
+
+    const [fetchedPeerOwner, existingId, peerRelation] = await Promise.all([
+      peerOwner
+        ? Promise.resolve(peerOwner)
+        : prisma.user.findUnique({
+            where: { id: peerId },
+            select: { id: true, isOwner: true, ownerPaid: true, ownerTrialStartedAt: true },
+          }),
+      findExistingThreadId(),
       otherUserId
         ? Promise.all([
             prisma.visitRequest.findFirst({
@@ -193,6 +212,7 @@ chatRouter.post(
           ])
         : null,
     ]);
+    peerOwner = fetchedPeerOwner;
 
     if (peerOwner && !ownerActive(peerOwner)) {
       throw new ApiError(403, "Ce propriétaire n'est plus disponible.", 'OWNER_INACTIVE');
@@ -204,7 +224,12 @@ chatRouter.post(
         throw new ApiError(403, 'Aucune relation avec cet utilisateur', 'FORBIDDEN');
       }
     }
-    if (existing) {
+    if (existingId) {
+      const existing = await prisma.thread.findUnique({
+        where: { id: existingId },
+        include,
+      });
+      if (!existing) throw new ApiError(404, 'Conversation introuvable', 'NOT_FOUND');
       return res.json({ thread: serializeThread(existing as never), created: false });
     }
 

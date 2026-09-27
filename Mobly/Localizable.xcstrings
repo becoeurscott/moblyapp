@@ -2967,6 +2967,9 @@
         }
       }
     },
+    "Connexion en cours…" : {
+
+    },
     "Connexion Google impossible. Réessayez." : {
       "extractionState" : "manual",
       "localizations" : {

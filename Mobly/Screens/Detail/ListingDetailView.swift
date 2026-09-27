@@ -81,9 +81,22 @@ struct ListingDetailView: View {
         return me == owner
     }
 
+    private var authActionDisabled: Bool {
+        auth.isRestoringSession
+    }
+
+    private func requireReadySession() -> Bool {
+        if auth.isRestoringSession { return false }
+        guard auth.isSignedIn else {
+            needsSignIn = true
+            return false
+        }
+        return true
+    }
+
     private func contactOwner() {
         guard !isOwnListing, ownerContactActive, isAvailable else { return }
-        guard auth.isSignedIn else { needsSignIn = true; return }
+        guard requireReadySession() else { return }
         // Present the chat screen immediately with a skeleton preview so the
         // ~1.3s Supabase round-trip on POST /threads doesn't leave the user
         // staring at an unresponsive button. ChatOpeningView swaps to the
@@ -399,7 +412,7 @@ struct ListingDetailView: View {
                 CircleIconButton(icon: liked ? "heart.fill" : "heart",
                                  tint: liked ? .moblyAccent : .moblyTextPrimary) {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    guard auth.isSignedIn else { needsSignIn = true; return }
+                    guard requireReadySession() else { return }
                     Task {
                         _ = await userData.toggleFavorite(listing)
                         SessionTracker.shared.log("favorite.toggle", [
@@ -1067,31 +1080,46 @@ struct ListingDetailView: View {
             Spacer(minLength: 4)
             if config.isEnabled("visits.request") {
                 Button {
-                    guard AuthStore.shared.isSignedIn else { needsSignIn = true; return }
+                    guard requireReadySession() else { return }
                     showVisitSheet = true
                 } label: {
-                    Image(systemName: "calendar")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color.moblyPrimary)
-                        .frame(width: 48, height: 48)
-                        .background(Circle().fill(Color(hex: 0xEEF0FE)))
+                    Group {
+                        if auth.isRestoringSession {
+                            ProgressView()
+                                .tint(Color.moblyPrimary)
+                        } else {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.moblyPrimary)
+                        }
+                    }
+                    .frame(width: 48, height: 48)
+                    .background(Circle().fill(Color(hex: 0xEEF0FE)))
                 }
                 .buttonStyle(.plain)
-                .disabled(!isAvailable)
+                .disabled(!isAvailable || authActionDisabled)
                 .opacity(isAvailable ? 1 : 0.4)
             }
             if config.isEnabled("chat.enabled") {
             Button(action: contactOwner) {
-                Text("Message")
-                    .font(.moblyHeading(14))
-                    .foregroundStyle(Color(hex: 0x3A4FF0))
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 16)
-                    .frame(height: 48)
-                    .background(Capsule().fill(isAvailable ? Color(hex: 0xDDE1FC) : Color(hex: 0xC4C7D2)))
+                Group {
+                    if auth.isRestoringSession {
+                        ProgressView()
+                            .tint(Color.moblyPrimary)
+                            .padding(.horizontal, 18)
+                    } else {
+                        Text("Message")
+                            .font(.moblyHeading(14))
+                            .foregroundStyle(Color(hex: 0x3A4FF0))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 16)
+                    }
+                }
+                .frame(height: 48)
+                .background(Capsule().fill(isAvailable ? Color(hex: 0xDDE1FC) : Color(hex: 0xC4C7D2)))
             }
-            .disabled(!isAvailable)
+            .disabled(!isAvailable || authActionDisabled)
             .buttonStyle(.plain)
             }
         }

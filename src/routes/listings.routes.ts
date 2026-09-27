@@ -6,7 +6,7 @@ import { asyncHandler, ApiError } from '../lib/http';
 import { optionalAuth, requireAuth, requireOwner, requireActiveOwner, requireVerified } from '../middleware/auth';
 import { serializeListing } from '../lib/serialize';
 import { activeOwnerRelationWhere } from '../lib/ownerTrial';
-import { cacheGet, cacheSet, cacheBust } from '../lib/cache';
+import { cacheGet, cacheRemember, cacheBust } from '../lib/cache';
 import {
   featureGate,
   restrictionGate,
@@ -51,8 +51,8 @@ listingsRouter.get(
         min: z.coerce.number().optional(),
         max: z.coerce.number().optional(),
         rooms: z.coerce.number().optional(),
-        limit: z.coerce.number().min(1).max(500).default(200),
-        offset: z.coerce.number().min(0).default(0),
+        limit: z.coerce.number().int().min(1).max(500).default(200),
+        offset: z.coerce.number().int().min(0).default(0),
       })
       .parse(req.query);
 
@@ -65,67 +65,59 @@ listingsRouter.get(
       return res.json(hit);
     }
 
-    const where: Prisma.ListingWhereInput = {
-      available: true,
-      status: { in: PUBLIC_LISTING_STATUSES },
-      // Hide listings whose owner's free trial lapsed without paying the
-      // one-time inscription fee. Legacy owners (no trial start) stay visible.
-      owner: activeOwnerRelationWhere(),
-    };
-    if (q.category && q.category !== 'Tous') where.category = q.category;
-    if (q.region) where.region = q.region;
-    if (q.city) where.city = { contains: q.city, mode: 'insensitive' };
-    if (q.deal) where.deal = q.deal;
-    if (q.furnished) where.furnished = q.furnished === 'true';
-    if (q.rooms !== undefined) where.rooms = { gte: q.rooms };
-    if (q.min !== undefined || q.max !== undefined) {
-      where.priceFcfa = {};
-      if (q.min !== undefined) where.priceFcfa.gte = q.min;
-      if (q.max !== undefined) where.priceFcfa.lte = q.max;
-    }
-    if (q.query) {
-      where.OR = [
-        { title: { contains: q.query, mode: 'insensitive' } },
-        { city: { contains: q.query, mode: 'insensitive' } },
-        { neighborhood: { contains: q.query, mode: 'insensitive' } },
-        { category: { contains: q.query, mode: 'insensitive' } },
-      ];
-    }
+    const payload = await cacheRemember(cacheKey, LIST_TTL_MS, async () => {
+      const where: Prisma.ListingWhereInput = {
+        available: true,
+        status: { in: PUBLIC_LISTING_STATUSES },
+        // Hide listings whose owner's free trial lapsed without paying the
+        // one-time inscription fee. Legacy owners (no trial start) stay visible.
+        owner: {
+          ...activeOwnerRelationWhere(),
+          restrictions: { none: {
+            kind: 'SHADOW_BAN', revokedAt: null,
+            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+          } },
+        },
+      };
+      if (q.category && q.category !== 'Tous') where.category = q.category;
+      if (q.region) where.region = q.region;
+      if (q.city) where.city = { contains: q.city, mode: 'insensitive' };
+      if (q.deal) where.deal = q.deal;
+      if (q.furnished) where.furnished = q.furnished === 'true';
+      if (q.rooms !== undefined) where.rooms = { gte: q.rooms };
+      if (q.min !== undefined || q.max !== undefined) {
+        where.priceFcfa = {};
+        if (q.min !== undefined) where.priceFcfa.gte = q.min;
+        if (q.max !== undefined) where.priceFcfa.lte = q.max;
+      }
+      if (q.query) {
+        where.OR = [
+          { title: { contains: q.query, mode: 'insensitive' } },
+          { city: { contains: q.query, mode: 'insensitive' } },
+          { neighborhood: { contains: q.query, mode: 'insensitive' } },
+          { category: { contains: q.query, mode: 'insensitive' } },
+        ];
+      }
 
-    // Hide the listings of shadow-banned owners from public search. They stay
-    // visible to their owner, who sees a normal-looking annonce and therefore
-    // has no signal to go and register a fresh account.
-    const shadowBanned = await prisma.userRestriction.findMany({
-      where: {
-        kind: 'SHADOW_BAN',
-        revokedAt: null,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-      },
-      select: { userId: true },
+      const [items, total] = await Promise.all([
+        prisma.listing.findMany({
+          where,
+          include: ownerSelect,
+          // Editorially pinned annonces first, then newest. `nulls: 'last'` is
+          // required — without it Postgres sorts NULLs first on a DESC order and
+          // every unpinned listing would outrank the pinned ones.
+          orderBy: [{ pinnedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+          skip: q.offset,
+          take: q.limit,
+        }),
+        prisma.listing.count({ where }),
+      ]);
+
+      // Ensure boosted really come first regardless of enum ordering.
+      items.sort((a, b) => (a.status === 'BOOSTED' ? -1 : 0) - (b.status === 'BOOSTED' ? -1 : 0));
+
+      return { total, items: items.map(serializeListing) };
     });
-    if (shadowBanned.length) {
-      where.ownerId = { notIn: shadowBanned.map((r) => r.userId) };
-    }
-
-    const [items, total] = await Promise.all([
-      prisma.listing.findMany({
-        where,
-        include: ownerSelect,
-        // Editorially pinned annonces first, then newest. `nulls: 'last'` is
-        // required — without it Postgres sorts NULLs first on a DESC order and
-        // every unpinned listing would outrank the pinned ones.
-        orderBy: [{ pinnedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
-        skip: q.offset,
-        take: q.limit,
-      }),
-      prisma.listing.count({ where }),
-    ]);
-
-    // Ensure boosted really come first regardless of enum ordering.
-    items.sort((a, b) => (a.status === 'BOOSTED' ? -1 : 0) - (b.status === 'BOOSTED' ? -1 : 0));
-
-    const payload = { total, items: items.map(serializeListing) };
-    cacheSet(cacheKey, payload, LIST_TTL_MS);
     res.set('X-Cache', 'MISS');
     res.json(payload);
   })

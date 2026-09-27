@@ -165,7 +165,8 @@ extension ListingDTO {
             reviewCount: reviewCount,
             deals: deals,
             lat: lat,
-            lng: lng
+            lng: lng,
+            priceUnitRaw: priceUnit
         )
     }
 }

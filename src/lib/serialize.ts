@@ -40,6 +40,10 @@ export function serializeListing(
     location: [l.neighborhood, l.city].filter(Boolean).join(', '),
     priceFcfa: l.priceFcfa,
     price: formatFcfa(l.priceFcfa),
+    // PER_MONTH / PER_DAY / TOTAL. Without this the app had no way to know the
+    // unit and inferred it from the display tags, so every nightly listing —
+    // the whole imported Airbnb set is PER_DAY — was shown "/mois".
+    priceUnit: l.priceUnit,
     furnished: l.furnished,
     rooms: l.rooms,
     subtitle: l.furnished ? `Meublé · ${l.rooms} ch` : `${l.rooms} ch`,

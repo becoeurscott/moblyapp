@@ -56,9 +56,25 @@ struct Listing: Identifiable, Hashable {
     var lat: Double? = nil
     var lng: Double? = nil
 
-    /// Suffix shown after the price: "/jour" for court séjour, "/mois" for
-    /// long-term rentals, empty for sales.
+    /// The server's `PriceUnit` — PER_MONTH / PER_DAY / TOTAL — carried through
+    /// verbatim. Nil only for listings built locally or restored from a cache
+    /// written before this was plumbed through.
+    var priceUnitRaw: String? = nil
+
+    /// Suffix shown after the price: "/jour", "/mois", or empty for a sale.
+    ///
+    /// Prefers the stored value, because it is what the owner actually chose.
+    /// The `deals` check below is a fallback only: it infers the unit from a
+    /// display tag, so a nightly listing whose tags never included
+    /// "Court séjour" was priced "/mois" everywhere despite being PER_DAY in
+    /// the database.
     var priceUnit: String {
+        switch priceUnitRaw {
+        case "PER_DAY":   return "/jour"
+        case "PER_MONTH": return "/mois"
+        case "TOTAL":     return ""
+        default: break
+        }
         if deals.contains("Acheter") { return "" }
         return deals.contains("Court séjour") ? "/jour" : "/mois"
     }

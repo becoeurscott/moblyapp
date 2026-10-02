@@ -35,6 +35,11 @@ struct LocationPinPicker: View {
     @State private var isGeocoding = false
     @State private var didFirstReveal = false
     @State private var veilSpin = false
+    /// "Be on site for a precise pin" tip, shown every time the picker opens
+    /// once the loading veil clears. Owners often place the pin from home,
+    /// miles from the property — standing at the building and tapping
+    /// "Ma position" is the only way to get it exact.
+    @State private var showOnSiteTip = false
 
     init(initial: CLLocationCoordinate2D,
          existing: CLLocationCoordinate2D? = nil,
@@ -86,6 +91,11 @@ struct LocationPinPicker: View {
                 loadingVeil
                     .transition(.opacity)
             }
+
+            if showOnSiteTip {
+                onSiteTip
+                    .transition(.opacity)
+            }
         }
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
@@ -99,7 +109,72 @@ struct LocationPinPicker: View {
             // pointing the camera at the right thing" moment, not a hard
             // requirement to have a resolved pin.
             withAnimation(Motion.standard) { didFirstReveal = true }
+            withAnimation(Motion.standard) { showOnSiteTip = true }
         }
+    }
+
+    private var onSiteTip: some View {
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
+                .onTapGesture { dismissTip() }
+
+            VStack(spacing: 16) {
+                Image(systemName: "figure.walk.circle.fill")
+                    .font(.system(size: 44, weight: .semibold))
+                    .foregroundStyle(Color.moblyAccent)
+
+                VStack(spacing: 8) {
+                    Text("Pour plus de précision")
+                        .font(.moblyHeading(17))
+                        .foregroundStyle(.white)
+                    Text("Placez-vous sur le lieu où se trouve le bien, puis touchez « Ma position » : la punaise se posera exactement sur le logement.")
+                        .font(.moblyBody(13.5))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(spacing: 10) {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        if let c = here.coordinate {
+                            pin = c
+                            recentreTick += 1
+                        } else {
+                            here.request()
+                        }
+                        dismissTip()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "location.fill").font(.system(size: 13, weight: .bold))
+                            Text("Je suis sur place").font(.moblyHeading(15))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).frame(height: 50)
+                        .background(Capsule().fill(Color.moblyAccent))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        dismissTip()
+                    } label: {
+                        Text("Placer la punaise moi-même")
+                            .font(.moblyBody(14, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .frame(maxWidth: .infinity).frame(height: 44)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(22)
+            .background(RoundedRectangle(cornerRadius: 22).fill(Color(white: 0.12)))
+            .overlay(RoundedRectangle(cornerRadius: 22).stroke(.white.opacity(0.08)))
+            .padding(.horizontal, 28)
+        }
+    }
+
+    private func dismissTip() {
+        withAnimation(Motion.standard) { showOnSiteTip = false }
     }
 
     private var loadingVeil: some View {

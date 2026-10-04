@@ -846,6 +846,10 @@ final class MoblyAPI {
         let photos: [String]
         let lat: Double?
         let lng: Double?
+        /// Douches / salle de bain. Nil leaves the stored value untouched.
+        var bathrooms: Int? = nil
+        /// The wizard's Disposition counts. Nil leaves them untouched.
+        var features: [String: String]? = nil
     }
 
     // MARK: - Owner stats
@@ -1524,6 +1528,9 @@ struct ListingDTO: Codable, Identifiable {
     /// Optional: nullable in the schema, and absent from payloads served by a
     /// backend older than the facts row.
     let bathrooms: Int?
+    /// Category-specific counts ("Cuisines": "1", "Vitrine": "Oui"…) — the
+    /// detail page's Disposition. Absent from older backends.
+    let features: [String: String]?
     let subtitle: String
     let about: String
     let rating: Double?

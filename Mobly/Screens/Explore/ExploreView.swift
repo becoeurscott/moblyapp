@@ -1112,7 +1112,7 @@ struct ExploreView: View {
         // let the map show through and the text lost its contrast.
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.regularMaterial)
+                .fill(AnyShapeStyle.frosted(.regularMaterial))
                 .overlay(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .fill(Color.white.opacity(0.72))

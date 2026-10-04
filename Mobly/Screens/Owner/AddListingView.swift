@@ -44,6 +44,15 @@ struct AddListingView: View {
         _furnished = State(initialValue: l?.deals.contains("Meublé") ?? true)
         _priceValue = State(initialValue: (l?.price ?? "").filter(\.isNumber))
         _amenities  = State(initialValue: Set(l?.tags ?? []))
+        // Editing must reload the Disposition counts, or re-saving would
+        // quietly reset them to the defaults.
+        let feats = l?.features ?? [:]
+        func count(_ keys: String...) -> Int? {
+            keys.lazy.compactMap { feats[$0].flatMap { Int($0) } }.first
+        }
+        _livingRooms = State(initialValue: count("Salon") ?? 1)
+        _kitchens    = State(initialValue: count("Cuisines") ?? 1)
+        _bathrooms   = State(initialValue: count("Salle de bain", "Douches") ?? l?.bathrooms ?? 1)
         _cover      = State(initialValue: l?.customImageData == nil ? (l?.imageName ?? "") : "")
         // Debug hook: preload a few bundled sample photos so the drag/drop
         // grid can be inspected without going through the picker first.
@@ -167,8 +176,10 @@ struct AddListingView: View {
         return furnished ? meubleAmenities : nonMeubleAmenities
     }
 
-    /// Only multi-room dwellings ask for a bedroom count (a chambre has none).
-    private var needsRooms: Bool { category == "Appartements" || category == "Villas" }
+    /// A single room: its count is implicit (1), but the owner still says
+    /// whether it comes with a kitchen and how many showers — so it never has
+    /// to be spelled out in the description.
+    private var isSingleRoom: Bool { category == "Chambres" || category == "Studios" }
     private var isBureau: Bool { category == "Bureaux" }
     private var isBoutique: Bool { category == "Boutiques" }
     private var isCommercial: Bool { category == "Commercial" }
@@ -456,7 +467,8 @@ struct AddListingView: View {
         .buttonStyle(.plain)
     }
 
-    private var isApartment: Bool { category == "Appartements" }
+    /// Multi-room dwellings: chambres, salon, cuisines, salle de bain.
+    private var isApartment: Bool { category == "Appartements" || category == "Villas" }
 
     // MARK: Step 6 — features (conditional: rooms, amenities set, min duration)
     private var featuresStep: some View {
@@ -494,12 +506,18 @@ struct AddListingView: View {
                     }.buttonStyle(.plain)
                 }
                 Divider().padding(.vertical, 2)
-            } else if needsRooms {
+            } else if isSingleRoom {
                 HStack {
-                    Text("Chambres").font(.moblyHeading(15)).foregroundStyle(Color.moblyTextPrimary)
+                    Text("Cuisine").font(.moblyHeading(15)).foregroundStyle(Color.moblyTextPrimary)
                     Spacer()
-                    stepper($rooms, range: 1...12)
+                    stepper($kitchens, range: 0...2)
                 }
+                HStack {
+                    Text("Douche").font(.moblyHeading(15)).foregroundStyle(Color.moblyTextPrimary)
+                    Spacer()
+                    stepper($bathrooms, range: 1...4)
+                }
+                Divider().padding(.vertical, 2)
             } else if isBureau {
                 HStack {
                     Text("Bureaux").font(.moblyHeading(15)).foregroundStyle(Color.moblyTextPrimary)
@@ -850,8 +868,9 @@ struct AddListingView: View {
                     reviewRow("Cuisines", "\(kitchens)")
                     reviewRow("Salle de bain", "\(bathrooms)")
                     reviewRow("Terrasse", hasTerrace ? "Oui" : "Non")
-                } else if needsRooms {
-                    reviewRow("Chambres", "\(rooms)")
+                } else if isSingleRoom {
+                    reviewRow("Cuisine", "\(kitchens)")
+                    reviewRow("Douche", "\(bathrooms)")
                 } else if isBureau {
                     reviewRow("Bureaux", "\(offices)")
                     reviewRow("Salle de réunion", "\(meetingRooms)")
@@ -1099,8 +1118,8 @@ struct AddListingView: View {
         if isApartment {
             subParts.append("\(rooms) ch · \(livingRooms) salon · \(bathrooms) sdb")
             if hasTerrace { subParts.append("Terrasse") }
-        } else if needsRooms {
-            subParts.append("\(rooms) ch")
+        } else if isSingleRoom {
+            subParts.append("\(bathrooms) douche\(bathrooms > 1 ? "s" : "")")
         } else if isBureau {
             subParts.append("\(offices) bureau\(offices > 1 ? "x" : "") · \(meetingRooms) réunion · \(toilets) wc")
         } else if isBoutique {
@@ -1120,8 +1139,9 @@ struct AddListingView: View {
             feats["Cuisines"] = "\(kitchens)"
             feats["Salle de bain"] = "\(bathrooms)"
             feats["Terrasse"] = hasTerrace ? "Oui" : "Non"
-        } else if needsRooms {
-            feats["Chambres"] = "\(rooms)"
+        } else if isSingleRoom {
+            feats["Cuisines"] = "\(kitchens)"
+            feats["Douches"] = "\(bathrooms)"
         } else if isBureau {
             feats["Bureaux"] = "\(offices)"
             feats["Salle de réunion"] = "\(meetingRooms)"
@@ -1265,7 +1285,9 @@ struct AddListingView: View {
                 imageName: nil,
                 photos: photos,
                 lat: l.lat,
-                lng: l.lng
+                lng: l.lng,
+                bathrooms: l.disposedBathrooms,
+                features: l.features.isEmpty ? nil : l.features
             )
         }
 
@@ -1341,7 +1363,9 @@ struct AddListingView: View {
             imageName: nil,
             photos: remotePhotos,
             lat: l.lat,
-            lng: l.lng
+            lng: l.lng,
+            bathrooms: l.disposedBathrooms,
+            features: l.features.isEmpty ? nil : l.features
         )
         do {
             let dto: ListingDTO

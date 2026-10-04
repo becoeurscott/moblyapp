@@ -374,49 +374,108 @@ struct ListingDetailView: View {
             .first?.windows.first?.safeAreaInsets.bottom) ?? 34
     }
 
-    // MARK: Composition row
+    // MARK: Disposition
 
-    /// What the space is made of — "2 chambres · 1 salon · 1 cuisine ·
-    /// 1 douche" — as icon chips under the description. Each count only
-    /// appears when the listing knows it: imported annonces carry rooms and
-    /// bathrooms but no salon/kitchen, owner-published ones add those through
-    /// `features`.
+    /// What the space is made of — "1 chambre · 1 cuisine · 1 douche" for a
+    /// chambre, bureaux / salle de réunion / toilettes for an office… — laid
+    /// out like Équipements, right under the description, so an owner never
+    /// has to spell it out in the text.
     ///
-    /// `sizeSqm` is deliberately absent: the column is null on every listing we
-    /// have, so a "— m²" slot would be a permanently empty promise.
+    /// Built from the publish wizard's `features` (category-specific counts)
+    /// plus the `rooms` / `bathrooms` columns, which imported annonces carry
+    /// without any features. Zero counts and "Non" answers are left out.
     @ViewBuilder
-    private var compositionRow: some View {
-        let salons = Int(listing.features["Salon"] ?? "") ?? 0
-        let kitchens = Int(listing.features["Cuisines"] ?? "") ?? 0
-        let showers = listing.bathrooms ?? 0
-        if listing.rooms > 0 || salons > 0 || kitchens > 0 || showers > 0 {
-            WrapLayout(spacing: 8, lineSpacing: 8) {
-                if listing.rooms > 0 {
-                    fact("bed.double.fill", count(listing.rooms, "chambre", "chambres"))
+    private var dispositionSection: some View {
+        let items = disposition
+        if !items.isEmpty {
+            divider
+            Text("Disposition")
+                .font(.moblyHeading(17))
+                .foregroundStyle(Color.moblyTextPrimary)
+                .padding(.bottom, 14)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
+                                GridItem(.flexible(), spacing: 10)],
+                      spacing: 10) {
+                ForEach(items, id: \.1) { icon, label in
+                    HStack(spacing: 10) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color(hex: 0xEEF0FE))
+                            Image(systemName: icon)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.moblyPrimary)
+                        }
+                        .frame(width: 42, height: 42)
+                        Text(label)
+                            .font(.moblyBody(13, weight: .medium))
+                            .foregroundStyle(Color.moblyTextPrimary)
+                            .lineLimit(2)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color(hex: 0xF8F8FA)))
                 }
-                if salons > 0 { fact("sofa.fill", count(salons, "salon", "salons")) }
-                if kitchens > 0 { fact("fork.knife", count(kitchens, "cuisine", "cuisines")) }
-                if showers > 0 { fact("shower.fill", count(showers, "douche", "douches")) }
             }
-            .padding(.top, 14)
         }
+    }
+
+    /// Feature key → icon and French singular/plural. Order here is display order.
+    private static let dispositionSpec: [(keys: [String], icon: String, one: String, many: String)] = [
+        (["Chambres"], "bed.double.fill", "chambre", "chambres"),
+        (["Pièces"], "square.split.2x2.fill", "pièce", "pièces"),
+        (["Bureaux"], "desktopcomputer", "bureau", "bureaux"),
+        (["Postes de travail"], "laptopcomputer", "poste de travail", "postes de travail"),
+        (["Salon"], "sofa.fill", "salon", "salons"),
+        (["Cuisines", "Cuisine"], "fork.knife", "cuisine", "cuisines"),
+        (["Salle de réunion", "Salles de réunion"], "person.3.fill", "salle de réunion", "salles de réunion"),
+        (["Salle de bain"], "shower.fill", "salle de bain", "salles de bain"),
+        (["Douches", "Douche"], "shower.fill", "douche", "douches"),
+        (["Toilettes"], "toilet.fill", "toilette", "toilettes"),
+        (["Terrasse"], "sun.max.fill", "Terrasse", "Terrasse"),
+        (["Vitrine"], "storefront.fill", "Vitrine", "Vitrine"),
+        (["Réserve"], "shippingbox.fill", "Réserve", "Réserve"),
+    ]
+
+    private var disposition: [(String, String)] {
+        let f = listing.features
+        var out: [(String, String)] = []
+        var used = Set<String>()
+
+        for spec in Self.dispositionSpec {
+            guard let key = spec.keys.first(where: { f[$0] != nil }), let raw = f[key] else { continue }
+            used.formUnion(spec.keys)
+            if raw == "Oui" { out.append((spec.icon, LT(spec.one))); continue }
+            guard let n = Int(raw), n > 0 else { continue }
+            out.append((spec.icon, count(n, spec.one, spec.many)))
+        }
+
+        // Columns fill the gaps: imported annonces have no features at all,
+        // and a chambre is one room even when the wizard didn't record it.
+        let roomsShown = used.contains("Chambres") || used.contains("Pièces")
+            || used.contains("Bureaux") || used.contains("Postes de travail")
+        let isDwelling = ["Chambres", "Studios", "Appartements", "Villas"].contains(listing.category)
+        if !roomsShown && isDwelling && listing.rooms > 0 {
+            let label = listing.category == "Studios"
+                ? count(listing.rooms, "pièce", "pièces")
+                : count(listing.rooms, "chambre", "chambres")
+            out.insert((listing.category == "Studios" ? "square.split.2x2.fill" : "bed.double.fill", label), at: 0)
+        }
+        let showersShown = used.contains("Salle de bain") || used.contains("Douches") || used.contains("Douche")
+        if !showersShown, let b = listing.bathrooms, b > 0 {
+            out.append(("shower.fill", count(b, "douche", "douches")))
+        }
+
+        // Anything the wizard adds later that isn't mapped yet still shows.
+        for (key, raw) in f.sorted(by: { $0.key < $1.key }) where !used.contains(key) {
+            if raw == "Oui" { out.append(("checkmark.circle.fill", key)) }
+            else if let n = Int(raw), n > 0 { out.append(("square.grid.2x2.fill", "\(n) \(key.lowercased())")) }
+        }
+        return out
     }
 
     private func count(_ n: Int, _ one: String, _ many: String) -> String {
         "\(n) \(n > 1 ? LT(many) : LT(one))"
-    }
-
-    private func fact(_ icon: String, _ label: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.moblyPrimary)
-            Text(label)
-                .font(.moblyBody(12, weight: .semibold))
-                .foregroundStyle(Color.moblyTextPrimary)
-        }
-        .padding(.horizontal, 11).padding(.vertical, 6)
-        .background(Capsule().fill(Color(hex: 0xF1F2F5)))
     }
 
     private var heroGallery: some View {
@@ -588,37 +647,11 @@ struct ListingDetailView: View {
                 .padding(.top, 4)
             }
 
-            compositionRow
+            dispositionSection
 
             // Photo gallery strip
             photoStrip
                 .padding(.top, 16)
-
-            if !listing.features.isEmpty {
-                divider
-                Text("Caractéristiques")
-                    .font(.moblyHeading(17))
-                    .foregroundStyle(Color.moblyTextPrimary)
-                    .padding(.bottom, 14)
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
-                                    GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                    let sorted = listing.features.sorted(by: { $0.key < $1.key })
-                    ForEach(sorted, id: \.key) { key, value in
-                        VStack(spacing: 6) {
-                            Text(LT(value))
-                                .font(.moblyHeading(18))
-                                .foregroundStyle(Color.moblyTextPrimary)
-                            Text(key)
-                                .font(.moblyBody(12.5))
-                                .foregroundStyle(Color(hex: 0x9A9DAC))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color(hex: 0xF8F8FA)))
-                    }
-                }
-            }
 
             divider
 
@@ -1096,7 +1129,7 @@ struct ListingDetailView: View {
         // Content clears the home indicator...
         .padding(.bottom, 2 + safeAreaBottom)
         .background(
-            Rectangle().fill(.ultraThinMaterial)
+            Rectangle().fill(AnyShapeStyle.frosted(.ultraThinMaterial))
                 .shadow(color: Color(hex: 0x14152A).opacity(0.08), radius: 16, y: -4)
                 // ...and the material is drawn past the bottom of its own frame
                 // to cover the inset. `ignoresSafeArea` does not work here:

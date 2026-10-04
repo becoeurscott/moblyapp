@@ -269,18 +269,33 @@ struct MainTabView: View {
                 // band touches the screen edge on every device.
                 VStack(spacing: 0) {
                     Spacer(minLength: 0)
-                    Rectangle()
-                        .fill(.ultraThinMaterial)
-                        .mask(
+                    Group {
+                        if DeviceTier.reducedEffects {
+                            // Same fade, no live blur: a masked material is
+                            // re-rendered on every scroll frame.
                             LinearGradient(
                                 stops: [
-                                    .init(color: .clear, location: 0),
-                                    .init(color: .black, location: 0.55),
-                                    .init(color: .black, location: 1),
+                                    .init(color: Color.white.opacity(0), location: 0),
+                                    .init(color: Color.white.opacity(0.94), location: 0.55),
+                                    .init(color: Color.white.opacity(0.97), location: 1),
                                 ],
                                 startPoint: .top, endPoint: .bottom
                             )
-                        )
+                        } else {
+                            Rectangle()
+                                .fill(.ultraThinMaterial)
+                                .mask(
+                                    LinearGradient(
+                                        stops: [
+                                            .init(color: .clear, location: 0),
+                                            .init(color: .black, location: 0.55),
+                                            .init(color: .black, location: 1),
+                                        ],
+                                        startPoint: .top, endPoint: .bottom
+                                    )
+                                )
+                        }
+                    }
                         // Short enough that the fade happens *behind* the bar
                         // (whose top sits ~104pt above the edge): no white haze
                         // above the nav, frost only beneath it.
@@ -436,13 +451,17 @@ struct MoblyTabBar: View {
         // upper edge is pushed down past the blur radius, so nothing spills
         // above the bar as a white haze.
         .background {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .fill(Color.white)
-                .padding(.horizontal, -12)
-                .padding(.bottom, -12)
-                .padding(.top, 18)
-                .blur(radius: 16)
-                .allowsHitTesting(false)
+            // The blurred glow is an offscreen pass every frame; older chips
+            // skip it (the band below already fades content into white).
+            if !DeviceTier.reducedEffects {
+                RoundedRectangle(cornerRadius: 30, style: .continuous)
+                    .fill(Color.white)
+                    .padding(.horizontal, -12)
+                    .padding(.bottom, -12)
+                    .padding(.top, 18)
+                    .blur(radius: 16)
+                    .allowsHitTesting(false)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 6)
@@ -456,7 +475,14 @@ private struct LiquidGlassBar: ViewModifier {
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        if #available(iOS 26.0, *) {
+        if DeviceTier.reducedEffects {
+            // Near-opaque instead of glass: reads the same at a glance, costs
+            // nothing per frame.
+            content
+                .background(shape.fill(Color.white.opacity(0.97)))
+                .overlay(shape.stroke(Color(hex: 0xE6E8EF), lineWidth: 1))
+                .clipShape(shape)
+        } else if #available(iOS 26.0, *) {
             content.glassEffect(.regular.interactive(), in: shape)
         } else {
             content

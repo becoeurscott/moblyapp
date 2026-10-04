@@ -49,6 +49,10 @@ export function serializeListing(
     // The detail page shows these as a facts row. `sizeSqm` stays out until
     // something populates it — it is null on every row today.
     bathrooms: l.bathrooms,
+    // Category-specific counts from the publish wizard (Cuisines, Salon,
+    // Vitrine…). Only string values go out: the column is JSON and older rows
+    // may hold anything.
+    features: stringRecord(l.features),
     subtitle: l.furnished ? `Meublé · ${l.rooms} ch` : `${l.rooms} ch`,
     about: l.about ?? '',
     rating: l.rating,
@@ -171,4 +175,13 @@ export function serializeMessage(m: {
     readAt: m.readAt,
     createdAt: m.createdAt,
   };
+}
+
+function stringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === 'string' || typeof v === 'number') out[k] = String(v);
+  }
+  return out;
 }

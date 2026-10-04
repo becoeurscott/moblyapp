@@ -54,6 +54,13 @@ struct Listing: Identifiable, Hashable {
     var deals: [String] = ["À louer", "Meublé"]
     /// Category-specific room/feature details shown on the detail page.
     var features: [String: String] = [:]
+
+    /// Showers/bathrooms as the wizard recorded them ("Salle de bain" for
+    /// dwellings, "Douches" for a chambre or studio), for the `bathrooms`
+    /// column. Nil when the category has no such count.
+    var disposedBathrooms: Int? {
+        (features["Salle de bain"] ?? features["Douches"]).flatMap { Int($0) }
+    }
     /// Precise map position. Set by the location-pin picker in the publish
     /// wizard; nil when the owner never pinned one (older listings, or ones
     /// imported from the Airbnb dataset where we discarded coordinates).

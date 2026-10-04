@@ -172,6 +172,14 @@ const listingBody = z.object({
   priceFcfa: z.number().int().positive(),
   furnished: z.boolean().default(true),
   rooms: z.number().int().min(0).default(1),
+  bathrooms: z.number().int().min(0).max(20).optional(),
+  // The wizard's category-specific counts ("Cuisines": "1", "Vitrine": "Oui"…)
+  // that the detail page shows as Disposition. Bounded: it is free-form JSON
+  // straight into a column and back out to every viewer.
+  features: z
+    .record(z.string().trim().min(1).max(40), z.string().trim().max(40))
+    .refine((f) => Object.keys(f).length <= 16, 'Trop de caractéristiques')
+    .optional(),
   about: z.string().optional(),
   tags: z.array(z.string()).default([]),
   coverUrl: z.string().url().optional(),

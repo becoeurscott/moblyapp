@@ -166,6 +166,7 @@ extension ListingDTO {
             tags: tags.filter { !Self.internalTags.contains($0) },
             reviewCount: reviewCount,
             deals: deals,
+            features: features ?? [:],
             lat: lat,
             lng: lng,
             priceUnitRaw: priceUnit

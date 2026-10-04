@@ -16,6 +16,7 @@ enum AppRoute: Hashable {
     case chatThread
     case call
     case profileScreen
+    case notificationsDemo
     case ownerDashboard
     case addListing
     case ownerStats
@@ -83,6 +84,9 @@ struct RootView: View {
         }
         if ProcessInfo.processInfo.environment["START_AT"] == "profilescreen" {
             return .profileScreen
+        }
+        if ProcessInfo.processInfo.environment["START_AT"] == "notifications" {
+            return .notificationsDemo
         }
         if ProcessInfo.processInfo.environment["START_AT"] == "owner" {
             return .ownerDashboard
@@ -288,6 +292,10 @@ struct RootView: View {
                 }
                 .transition(.opacity)
 
+            case .notificationsDemo:
+                NotificationsView()
+                    .transition(.opacity)
+
             case .ownerDashboard:
                 NavigationStack { OwnerDashboardView() }
                     .transition(.opacity)
@@ -442,6 +450,11 @@ struct RootView: View {
             subtitle: "Meublé · 1 ch",
             about: "Studio moderne au cœur d'Akwa. Toutes les photos ci-dessous sont des photos que le propriétaire a téléversées."
         )
+        // A chambre's Disposition, as the publish wizard records it.
+        if ProcessInfo.processInfo.environment["DEBUG_CHAMBRE"] == "1" {
+            listing.category = "Chambres"
+            listing.features = ["Cuisines": "1", "Douches": "1"]
+        }
         listing.customPhotos = datas
         listing.customImageData = datas.first
         let urls = OwnerPhotoStore.save(datas, id: listing.id)

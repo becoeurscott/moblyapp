@@ -10,6 +10,7 @@ import { createOtp, verifyOtp, otpLength } from '../services/otp';
 import { issueRefreshToken } from '../services/refresh';
 import { checkPassword, PASSWORD_RULE_MESSAGES } from '../lib/password';
 import { serializeUser } from '../lib/serialize';
+import { sendWelcomeNotification } from '../services/welcome';
 import {
   authLimiter,
   smsSendLimiter,
@@ -213,6 +214,7 @@ signupRouter.post(
         verifiedAt: new Date(),
       },
     });
+    sendWelcomeNotification(user.id, user.fullName);
 
     const { token, refresh } = await issueSession(user.id, user.phone, req);
     res.status(201).json({
@@ -469,6 +471,7 @@ signupRouter.post(
         verifiedAt: new Date(),
       },
     });
+    sendWelcomeNotification(user.id, user.fullName);
 
     const { token, refresh } = await issueSession(user.id, user.phone, req);
     res.status(201).json({

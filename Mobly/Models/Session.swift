@@ -382,7 +382,9 @@ final class OwnerListings: ObservableObject {
             imageName: nil,
             photos: listing.photos.filter { $0.hasPrefix("http") },
             lat: listing.lat,
-            lng: listing.lng
+            lng: listing.lng,
+            bathrooms: listing.disposedBathrooms,
+            features: listing.features.isEmpty ? nil : listing.features
         )
         do {
             let dto = try await MoblyAPI.shared.updateListing(id: listing.id, body: body)

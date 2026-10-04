@@ -1125,10 +1125,11 @@ struct ListingDetailView: View {
                 }
             }
             // Lifted off the frosted bar so the price reads first.
-            .padding(.horizontal, 12)
+            // Capsule, like the Visiter and Message buttons beside it.
+            .padding(.horizontal, 16)
             .frame(height: 48)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                Capsule()
                     .fill(.white)
                     .shadow(color: Color(hex: 0x14152A).opacity(0.06), radius: 6, y: 2)
             )

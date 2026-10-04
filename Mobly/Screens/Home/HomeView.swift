@@ -15,6 +15,12 @@ struct HomeView: View {
     var onOpenCategory: (String?) -> Void = { _ in }
     var onOpenCity: (String) -> Void = { _ in }
     var onOpenCityMap: (String) -> Void = { _ in }
+    /// Entrée in the search bar: free text for Explorer to resolve with the
+    /// same rules as its own bar. Falls back to `onOpenCityMap` when unset.
+    var onSearchQuery: ((String) -> Void)? = nil
+    /// A space picked from the search suggestions — shown on the Explorer
+    /// map, as it is when picked from the Explorer bar.
+    var onPickSpace: ((Listing) -> Void)? = nil
     var onOpenExplore: () -> Void = {}
 
     @ObservedObject private var store = ListingStore.shared
@@ -47,39 +53,6 @@ struct HomeView: View {
     private let carouselRotation = Timer.publish(every: 25, on: .main, in: .common).autoconnect()
 
     private var searching: Bool { searchActive || !searchText.isEmpty }
-
-    private var suggestions: [(name: String, region: String)] {
-        let q = searchText.trimmingCharacters(in: .whitespaces)
-            .folding(options: .diacriticInsensitive, locale: .current).lowercased()
-        guard !q.isEmpty else { return [] }
-        return MoblyData.searchableLocations.filter {
-            let name = $0.name.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-            let region = $0.region.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-            return name.contains(q) || q.contains(name)
-                || region.contains(q)
-                || Self.commonPrefixLen(name, q) >= 4
-        }
-    }
-
-    /// Quartiers and cities Mobly knows, matching what's typed from the first
-    /// letters, accent- and case-insensitive ("akw" → Akwa, Douala).
-    private func localPlaces(_ query: String) -> [(name: String, region: String)] {
-        func fold(_ s: String) -> String {
-            s.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-        }
-        let q = fold(query.trimmingCharacters(in: .whitespaces))
-        guard !q.isEmpty else { return [] }
-        var out: [(name: String, region: String)] = []
-        for (city, list) in CameroonGeo.quartiers.sorted(by: { $0.key < $1.key }) {
-            if fold(city).hasPrefix(q) { out.append((city, "Cameroun")) }
-            for qt in list where fold(qt).hasPrefix(q) { out.append((qt, city)) }
-        }
-        return Array(out.prefix(6))
-    }
-
-    private static func commonPrefixLen(_ a: String, _ b: String) -> Int {
-        zip(a, b).prefix(while: { $0 == $1 }).count
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -356,21 +329,35 @@ struct HomeView: View {
                     }
                 }
             } else {
-                // Mobly's own quartiers and cities first — the places annonces
-                // are actually in — then Apple's wider place search below.
-                let local = localPlaces(panelText)
+                // Same results, same order as the Explorer bar (SpaceSearch):
+                // spaces by name, then Mobly's places, then Apple's wider
+                // place search below.
+                let spaces = SpaceSearch.spaces(panelText)
+                if !spaces.isEmpty {
+                    sectionLabel("Espaces")
+                    ForEach(spaces) { l in
+                        suggestionRow(l.title, "\(l.location) · \(l.price)", icon: "house.fill", action: {
+                            dismissSearch()
+                            rememberSearch(l.title)
+                            (onPickSpace ?? onOpenListing)(l)
+                        })
+                    }
+                }
+                let local = SpaceSearch.places(panelText)
+                if !local.isEmpty && !spaces.isEmpty { sectionLabel("Lieux") }
                 ForEach(local, id: \.name) { p in
                     suggestionRow(p.name, p.region, action: {
                         dismissSearch()
+                        rememberSearch(p.name)
                         onOpenCityMap(p.region == "Cameroun" ? p.name : "\(p.name), \(p.region)")
                     })
                 }
                 let localNames = Set(local.map { $0.name.lowercased() })
-                if local.isEmpty && placeCompleter.suggestions.isEmpty && !placeCompleter.isSearching {
+                if spaces.isEmpty && local.isEmpty && placeCompleter.suggestions.isEmpty && !placeCompleter.isSearching {
                 HStack(spacing: 10) {
-                    Image(systemName: "mappin.slash")
+                    Image(systemName: "magnifyingglass")
                         .foregroundStyle(Color(hex: 0xC4C7D2))
-                    Text("Aucun lieu trouvé")
+                    Text("Aucun résultat pour \"\(panelText)\"")
                         .font(.moblyBody(13))
                         .foregroundStyle(Color(hex: 0x9A9DAC))
                 }
@@ -402,7 +389,15 @@ struct HomeView: View {
         .onChange(of: panelText) { _, q in placeCompleter.update(query: q) }
     }
 
+    private func sectionLabel(_ text: String) -> some View {
+        Text(LT(text))
+            .font(.moblyBody(11, weight: .semibold))
+            .foregroundStyle(Color(hex: 0x9A9DAC))
+            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 2)
+    }
+
     private func suggestionRow(_ name: String, _ region: String,
+                               icon: String = "mappin.and.ellipse",
                                action: (() -> Void)? = nil) -> some View {
         Button {
             if let action { action() } else {
@@ -413,7 +408,7 @@ struct HomeView: View {
             HStack(spacing: 12) {
                 ZStack {
                     Circle().fill(Color.moblySurfaceTint).frame(width: 32, height: 32)
-                    Image(systemName: "mappin.and.ellipse")
+                    Image(systemName: icon)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Color.moblyPrimary)
                 }
@@ -477,7 +472,7 @@ struct HomeView: View {
                         .frame(width: 42, height: 42)
                     // Dot only when there IS at least one unread notification.
                     if userData.unreadNotifications > 0 {
-                        Circle().fill(Color.moblyAccent)
+                        Circle().fill(Color.moblyAlert)
                             .frame(width: 9, height: 9)
                             .overlay(Circle().stroke(.white, lineWidth: 1.5))
                             .offset(x: -10, y: 9)
@@ -505,9 +500,13 @@ struct HomeView: View {
                     .onSubmit {
                         let q = searchText.trimmingCharacters(in: .whitespaces)
                         if !q.isEmpty {
-                            rememberSearch(q)
                             dismissSearch()
-                            onOpenCityMap(q)
+                            if let onSearchQuery {
+                                onSearchQuery(q)   // Explorer records the search
+                            } else {
+                                rememberSearch(q)
+                                onOpenCityMap(q)
+                            }
                         }
                     }
                 if searching {
@@ -680,36 +679,69 @@ struct HomeView: View {
 
     private var promoBanner: some View {
         ZStack {
-            Image("OwnerBanner")
-                .resizable()
-                .aspectRatio(contentMode: .fill)
+            // The photo fills whatever size the card is given instead of
+            // sizing the card: a bare `.fill` image is as wide as its height
+            // demands, which pushed the whole Accueil page past the screen.
+            Color.clear
+                .overlay(
+                    Image("OwnerBanner")
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                )
+                .clipped()
+
+            // Keeps the copy legible over the photo without darkening the
+            // person on the right.
+            LinearGradient(colors: [Color(hex: 0x1F2BB8).opacity(0.55), .clear],
+                           startPoint: .leading, endPoint: .center)
 
             HStack {
-                VStack(alignment: .leading, spacing: 8) {
-                    // An existing owner has nothing to "become" — the banner
-                    // becomes a shortcut back to their dashboard instead.
-                    Text(session.isOwner ? L("Gérer mes\nannonces") : L("Devenir propriétaire\navec Mobly"))
-                        .font(.moblyHeading(19))
+                // Three levels, read in order: what this is (label), why it
+                // matters (headline), what you get (supporting line) — then
+                // the one action. An existing owner has nothing to "become",
+                // so the banner turns into a shortcut to their dashboard.
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 9, weight: .bold))
+                        Text(L("ESPACE PROPRIÉTAIRE"))
+                            .font(.moblyBody(9.5, weight: .bold))
+                            .tracking(1.1)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(Capsule().fill(.white.opacity(0.18)))
+                    .padding(.bottom, 10)
+
+                    Text(session.isOwner ? L("Vos annonces,\nen un coup d'œil") : L("Louez plus vite,\nsans intermédiaire"))
+                        .font(.moblyHeading(21))
                         .foregroundStyle(.white)
+                        .lineSpacing(1)
                         .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 6)
                     Text(session.isOwner
-                         ? L("Suivez vos espaces et vos\ndemandes de visite")
-                         : L("Publiez votre espace, touchez\ndes milliers de locataires"))
-                        .font(.moblyBody(12.5))
-                        .foregroundStyle(.white.opacity(0.85))
+                         ? L("Vues, messages et visites\nen temps réel")
+                         : L("Des milliers de locataires\nvous cherchent déjà"))
+                        .font(.moblyBody(12))
+                        .foregroundStyle(.white.opacity(0.82))
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 12)
                     HStack(spacing: 10) {
                         Button(action: {
                             if session.isOwner { showOwnerDashboard = true }
                             else { showBecomeOwner = true }
                         }) {
                             if session.isOwner {
-                                Text(L("Mon espace"))
-                                    .font(.moblyBody(12.5, weight: .semibold))
-                                    .foregroundStyle(Color.moblyPrimary)
-                                    .padding(.horizontal, 16).padding(.vertical, 9)
-                                    .background(Capsule().fill(.white))
+                                HStack(spacing: 6) {
+                                    Text(L("Mon espace"))
+                                        .font(.moblyBody(12.5, weight: .semibold))
+                                    Image(systemName: "arrow.right")
+                                        .font(.system(size: 12, weight: .bold))
+                                }
+                                .foregroundStyle(Color.moblyPrimary)
+                                .padding(.horizontal, 16).padding(.vertical, 9)
+                                .background(Capsule().fill(.white))
                             } else {
                                 // One white button carrying the offer itself.
                                 HStack(spacing: 6) {
@@ -728,13 +760,12 @@ struct HomeView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(.top, 2)
                 }
                 Spacer(minLength: 8)
             }
             .padding(20)
         }
-        .frame(height: 184)
+        .frame(height: 212)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         // The whole card is the target, not only the arrow.
         .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -839,14 +870,18 @@ struct HomeView: View {
     }
 
     private var recommendedRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 14) {
-                if filteredRecommended.isEmpty {
+        // Filtered once per render (it sorts and accent-folds the whole feed),
+        // and built lazily: an eager HStack created every card — and started
+        // every photo download — at launch, off-screen ones included.
+        let items = filteredRecommended
+        return ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 14) {
+                if items.isEmpty {
                     Text("Aucun résultat pour ce filtre")
                         .font(.moblyBody(13)).foregroundStyle(Color(hex: 0x9A9DAC))
                         .padding(.horizontal, 22).padding(.vertical, 30)
                 } else {
-                    ForEach(filteredRecommended) { l in
+                    ForEach(items) { l in
                         RecommendedCard(listing: l) { (onOpenRecommended ?? onOpenListing)(l) }
                     }
                 }

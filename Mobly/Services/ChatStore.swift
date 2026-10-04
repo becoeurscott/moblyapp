@@ -92,6 +92,60 @@ final class ChatStore: ObservableObject {
     @Published private(set) var loadingMessagesFor: Set<String> = []
     @Published private(set) var isOffline = false
 
+    /// Photos that have been sent but whose upload is still running.
+    ///
+    /// This used to be `@State` inside ChatThreadView, which meant the only
+    /// record of an in-flight photo died with the view: leaving the
+    /// conversation mid-upload made the bubble vanish, and coming back showed
+    /// nothing until the upload happened to finish. Holding it here — keyed by
+    /// thread — lets the bubble survive navigation, and `localURL` points at a
+    /// file written to ChatMediaStore BEFORE the upload starts, so the image
+    /// renders from disk immediately instead of waiting on the network.
+    @Published private(set) var pendingUploads: [String: [PendingUpload]] = [:]
+
+    struct PendingUpload: Identifiable, Equatable {
+        let id: String
+        let localURL: URL
+        var progress: Double          // 0…1, real bytes-sent from URLSession
+        var failed: Bool = false
+    }
+
+    /// Record a photo on disk and show it as pending. Returns its id so the
+    /// uploader can report progress and clear it when the server confirms.
+    @discardableResult
+    func beginUpload(threadId: String, jpeg: Data) -> PendingUpload? {
+        let id = UUID().uuidString
+        let url = ChatMediaStore.fileURL(id: "pending-\(id)", ext: "jpg")
+        guard ChatMediaStore.store(jpeg, at: url) else { return nil }
+        let item = PendingUpload(id: id, localURL: url, progress: 0)
+        pendingUploads[threadId, default: []].append(item)
+        return item
+    }
+
+    func updateUploadProgress(threadId: String, id: String, progress: Double) {
+        guard var list = pendingUploads[threadId],
+              let i = list.firstIndex(where: { $0.id == id }) else { return }
+        list[i].progress = progress
+        pendingUploads[threadId] = list
+    }
+
+    func failUpload(threadId: String, id: String) {
+        guard var list = pendingUploads[threadId],
+              let i = list.firstIndex(where: { $0.id == id }) else { return }
+        list[i].failed = true
+        pendingUploads[threadId] = list
+    }
+
+    /// Upload finished (or was abandoned): drop the placeholder and its file.
+    func finishUpload(threadId: String, id: String) {
+        guard var list = pendingUploads[threadId] else { return }
+        if let i = list.firstIndex(where: { $0.id == id }) {
+            try? FileManager.default.removeItem(at: list[i].localURL)
+            list.remove(at: i)
+        }
+        if list.isEmpty { pendingUploads[threadId] = nil } else { pendingUploads[threadId] = list }
+    }
+
     /// Id of the last message the user acknowledged as read, per thread.
     /// `loadThreads()` uses this to force unread=0 for a thread the user
     /// JUST opened whose server-side mark-read POST is still in flight —
@@ -169,8 +223,19 @@ final class ChatStore: ObservableObject {
     /// after `loadThreads` at start and after `bootstrap` on cold launches.
     /// Silently no-ops for threads whose cache is already fresh, so a warm
     /// relaunch does not hammer the server.
+    /// How many conversations are worth fetching ahead of being asked for.
+    ///
+    /// `threads` arrives newest-first, and the ones a user actually opens are
+    /// at the top of that list. Warming all of them meant an inbox of 105
+    /// conversations fired 105 requests on every cold launch — four at a time,
+    /// but still minutes of background traffic competing with whatever the user
+    /// was really doing, on connections where that bandwidth is scarce. Older
+    /// threads lose nothing: opening one fetches it on demand, and if it has
+    /// been read before it paints from the disk cache first.
+    private static let prewarmLimit = 12
+
     func prewarmAllThreads(force: Bool = false) async {
-        let ids = threads.map(\.id)
+        let ids = threads.prefix(Self.prewarmLimit).map(\.id)
         guard !ids.isEmpty else { return }
         let now = Date()
         await withTaskGroup(of: Void.self) { group in
@@ -466,12 +531,31 @@ final class ChatStore: ObservableObject {
     }
 
     func deleteMessage(threadId: String, messageId: String, forBoth: Bool) async {
-        messages[threadId]?.removeAll { $0.id == messageId }
+        await deleteMessages(threadId: threadId, messageIds: [messageId], forBoth: forBoth)
+    }
+
+    /// Delete several messages at once — a photo group is one message per
+    /// photo. The bubbles go in ONE local mutation (one redraw, one disk
+    /// write), then the server calls run side by side.
+    func deleteMessages(threadId: String, messageIds: [String], forBoth: Bool) async {
+        let ids = Set(messageIds)
+        guard !ids.isEmpty else { return }
+        messages[threadId]?.removeAll { ids.contains($0.id) }
         saveToDisk()
-        do {
-            try await api.deleteMessage(threadId: threadId, messageId: messageId,
-                                        mode: forBoth ? "forBoth" : "forMe")
-        } catch {
+        let api = self.api
+        let mode = forBoth ? "forBoth" : "forMe"
+        let failure: Error? = await withTaskGroup(of: Error?.self) { group in
+            for id in ids {
+                group.addTask {
+                    do { try await api.deleteMessage(threadId: threadId, messageId: id, mode: mode); return nil }
+                    catch { return error }
+                }
+            }
+            var first: Error?
+            for await e in group where first == nil { first = e }
+            return first
+        }
+        if let error = failure {
             isOffline = (error as? MoblyAPI.APIError)?.isOffline ?? false
         }
     }

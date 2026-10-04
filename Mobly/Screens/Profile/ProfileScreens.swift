@@ -3,7 +3,7 @@ import PhotosUI
 import UIKit
 
 enum ProfileRoute: Hashable {
-    case editProfile, identity, language, notifications, savedSearches
+    case editProfile, identity, email, language, notifications, savedSearches
     case help, privacy, about, becomeOwner, ownerDashboard
 }
 
@@ -84,11 +84,24 @@ struct EditProfileView: View {
     /// Post-save success state: shows a green check + "Enregistré" for
     /// ~0.6s before dismissing back to the Profile tab.
     @State private var savedSuccess = false
+    /// "Vérifier ou annuler" prompt, shown when Enregistrer meets a new e-mail.
+    @State private var showEmailChoice = false
+    /// Pushes EmailVerificationView with the address typed here.
+    @State private var goToEmailVerification = false
     @Environment(\.dismiss) private var dismiss
 
     /// Read-only: the phone is the account identifier and is changed through
     /// an OTP flow, not by typing a new one into a form.
     private var phone: String { auth.user?.phone ?? "" }
+
+    private var typedEmail: String { email.trimmingCharacters(in: .whitespaces).lowercased() }
+    private var currentEmail: String { (auth.user?.email ?? "").lowercased() }
+    /// A new address never goes out with the rest of the form — the server
+    /// refuses it. It has to be confirmed by code first.
+    private var emailChanged: Bool { !typedEmail.isEmpty && typedEmail != currentEmail }
+    /// The field was emptied on an account that has an address. Removal isn't
+    /// supported (it's the password-reset channel), so the save ignores it.
+    private var emailCleared: Bool { typedEmail.isEmpty && !currentEmail.isEmpty }
 
     private var initials: String {
         let parts = name.split(separator: " ")
@@ -181,8 +194,16 @@ struct EditProfileView: View {
 
                 MoblyTextField(label: "Nom complet", placeholder: "Votre nom",
                                systemIcon: "person", text: $name, autocapitalization: .words)
-                MoblyTextField(label: "Adresse e-mail", placeholder: "votre@email.com",
-                               systemIcon: "envelope", text: $email, keyboard: .emailAddress)
+                VStack(alignment: .leading, spacing: 6) {
+                    MoblyTextField(label: "Adresse e-mail", placeholder: "votre@email.com",
+                                   systemIcon: "envelope", text: $email, keyboard: .emailAddress)
+                    if emailCleared {
+                        Text("L’adresse e-mail peut être remplacée, mais pas supprimée.")
+                            .font(.moblyBody(12))
+                            .foregroundStyle(Color(hex: 0x9A9DAC))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
 
                 // Phone shown but not editable here — it's the account
                 // identifier, and changing it has to re-verify by SMS.
@@ -255,7 +276,11 @@ struct EditProfileView: View {
 
                 PillButton(title: isSaving ? "Enregistrement…" : "Enregistrer",
                            style: .primaryBlue, trailingIcon: nil) {
-                    Task { await save() }
+                    if emailChanged {
+                        showEmailChoice = true
+                    } else {
+                        Task { await save() }
+                    }
                 }
                 .opacity(canSave && !isSaving ? 1 : 0.5)
                 .disabled(!canSave || isSaving)
@@ -309,6 +334,21 @@ struct EditProfileView: View {
         }
         .animation(Motion.quick, value: isSaving)
         .animation(Motion.panel, value: savedSuccess)
+        // Both choices still save the other fields — only the e-mail waits.
+        .alert("Confirmer la nouvelle adresse", isPresented: $showEmailChoice) {
+            Button("Vérifier le nouvel e-mail") {
+                Task { await save(thenVerifyEmail: true) }
+            }
+            Button("Annuler la modification", role: .cancel) {
+                email = auth.user?.email ?? ""
+                Task { await save() }
+            }
+        } message: {
+            Text("Pour utiliser \(typedEmail), confirmez-la avec le code que nous allons y envoyer. Votre adresse actuelle reste active d’ici là.")
+        }
+        .navigationDestination(isPresented: $goToEmailVerification) {
+            EmailVerificationView(pendingEmail: typedEmail)
+        }
     }
 
     /// Row of preset colour bubbles. Tap to select — the change is committed
@@ -360,7 +400,7 @@ struct EditProfileView: View {
 
     private var canSave: Bool {
         name.trimmingCharacters(in: .whitespaces).count >= 2
-            && (email.isEmpty || (email.contains("@") && email.contains(".")))
+            && (!emailChanged || IdentifierDetector.isValidEmail(typedEmail))
     }
 
     /// Turn the PhotosPicker selection into JPEG data, POST it to
@@ -424,16 +464,25 @@ struct EditProfileView: View {
         return out?.jpegData(compressionQuality: 0.85)
     }
 
-    private func save() async {
+    /// Saves everything but the e-mail, which only changes through its code.
+    /// `thenVerifyEmail` opens the code screen for the typed address instead
+    /// of the success card.
+    private func save(thenVerifyEmail: Bool = false) async {
         isSaving = true
         saveError = nil
         do {
             _ = try await MoblyAPI.shared.updateMe(
                 fullName: name.trimmingCharacters(in: .whitespaces),
-                email: email.isEmpty ? nil : email.trimmingCharacters(in: .whitespaces).lowercased(),
                 avatarColor: avatarColor != auth.user?.avatarColor ? avatarColor : nil
             )
             await auth.bootstrap()   // refresh the cached user
+            if thenVerifyEmail {
+                await MainActor.run {
+                    isSaving = false
+                    goToEmailVerification = true
+                }
+                return
+            }
             await MainActor.run {
                 isSaving = false
                 savedSuccess = true
@@ -449,9 +498,7 @@ struct EditProfileView: View {
         } catch let e as MoblyAPI.APIError {
             await MainActor.run {
                 isSaving = false
-                saveError = e.code == .alreadyExists
-                    ? "Cet e-mail est déjà utilisé par un autre compte."
-                    : e.message
+                saveError = e.message
             }
         } catch {
             await MainActor.run {
@@ -1434,6 +1481,10 @@ struct BecomeOwnerView: View {
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .fullScreenCover(isPresented: $showCelebration) {
+            // No swipe-to-dismiss wrapper: its hosting controller pins the
+            // content inside the safe area, so the welcome gradient stopped
+            // short of the top and bottom edges. The screen moves on through
+            // its own button, so the gesture added nothing.
             CelebrationView(onDone: {
                 Session.shared.upgradeToOwner()
                 showCelebration = false
@@ -1441,7 +1492,6 @@ struct BecomeOwnerView: View {
                     showAddListing = true
                 }
             })
-            .swipeToDismiss(onDismiss: { showCelebration = false })
         }
         // AddListing presents on top of BecomeOwnerView. Whether the user
         // publishes, skips, or hits ✕, we dismiss both covers and let Profile

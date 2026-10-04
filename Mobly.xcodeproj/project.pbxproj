@@ -275,7 +275,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				MOBLY_API_BASE_URL = "https://moblyapp.onrender.com/api/v1";
+				MOBLY_API_BASE_URL = "https://mobly-api-69f1fffd-4d52-4859-b9c0-0e143539eb9f.fly.dev/api/v1";
 				PRODUCT_BUNDLE_IDENTIFIER = cm.mobly.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -308,7 +308,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				MOBLY_API_BASE_URL = "https://moblyapp.onrender.com/api/v1";
+				MOBLY_API_BASE_URL = "https://mobly-api-69f1fffd-4d52-4859-b9c0-0e143539eb9f.fly.dev/api/v1";
 				PRODUCT_BUNDLE_IDENTIFIER = cm.mobly.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

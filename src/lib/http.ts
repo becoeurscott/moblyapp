@@ -28,6 +28,8 @@ export type ErrorCode =
   | 'OTP_INVALID'
   | 'OTP_EXPIRED'
   | 'OTP_LOCKED'
+  | 'EMAIL_NOT_VERIFIED' // password reset by e-mail asked for an unconfirmed address
+  | 'EMAIL_VERIFICATION_REQUIRED' // profile edit tried to change the e-mail without its code
   | 'OWNER_REQUIRED'
   | 'OWNER_INACTIVE'
   | 'IDENTITY_REQUIRED'

@@ -34,6 +34,10 @@ struct Listing: Identifiable, Hashable {
     /// upload pipeline to Cloudinary happens later.
     var customPhotos: [Data] = []
     var category: String       // "Chambres" | "Appartements" | "Bureaux" | "Boutiques"
+    /// Room counts behind the detail page's facts row. `bathrooms` is nil when
+    /// the owner never filled it in; `rooms` always has a value (defaults to 1).
+    var rooms: Int = 1
+    var bathrooms: Int? = nil
     var subtitle: String = ""  // e.g. "Meublé · 2 chambres"
     var about: String = ""     // owner's free-text description of the space
     var verified: Bool = true
@@ -121,6 +125,7 @@ enum MoblyData {
         Neighborhood(name: "Buéa",      region: "Cameroun", imageName: "CityBuea"),
         Neighborhood(name: "Bamenda",   region: "Cameroun", imageName: "CityBamenda"),
         Neighborhood(name: "Kribi",     region: "Cameroun", imageName: "CityKribi"),
+        Neighborhood(name: "Limbé",     region: "Cameroun", imageName: "CityLimbe"),
         Neighborhood(name: "Garoua",    region: "Cameroun", imageName: "CityGaroua"),
         Neighborhood(name: "Bafoussam", region: "Cameroun", imageName: "CityBafoussam"),
     ]

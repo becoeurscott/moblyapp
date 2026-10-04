@@ -4,6 +4,8 @@ import PhotosUI
 enum AuthMode { case signin, signup }
 private enum AuthPhase {
     case form, code, loading, welcome, resetCode, resetPassword
+    /// Right after a form signup: confirm the e-mail with a mailed code.
+    case emailCode
     /// Provider signup: the phone number a Google/Apple user still owes us,
     /// and the code confirming it. No account exists until `oauthCode` passes.
     case oauthPhone, oauthCode
@@ -54,6 +56,7 @@ struct ConnexionView: View {
     @State private var uploadingAvatar = false
     @State private var avatarError: String?
     @State private var newPassword = ""
+    @State private var emailOtp = ""
 
     init(initialMode: AuthMode = .signin,
          onExit: @escaping () -> Void = {},
@@ -78,6 +81,7 @@ struct ConnexionView: View {
             case .welcome: welcomeView.transition(.opacity)
             case .resetCode:     resetCodeView.transition(.opacity)
             case .resetPassword: resetPasswordView.transition(.opacity)
+            case .emailCode:     emailCodeView.transition(.opacity)
             case .oauthPhone:    oauthPhoneView.transition(.opacity)
             case .oauthCode:     oauthCodeView.transition(.opacity)
             case .chooseName:    chooseNameView.transition(.opacity)
@@ -450,14 +454,14 @@ struct ConnexionView: View {
                 .font(.moblyHeading(24))
                 .foregroundStyle(Color.moblyTextPrimary)
                 .padding(.bottom, 6)
-            Text("Code à \(auth.codeLength) chiffres envoyé au \(auth.resetPhone ?? "votre numéro").")
+            Text("Code à \(auth.codeLength) chiffres envoyé \(resetDestination).")
                 .font(.moblyBody(13.5))
                 .foregroundStyle(Color(hex: 0x9A9DAC))
                 .padding(.bottom, 26)
 
             SignupOTPStep(
                 otp: $otp,
-                destination: auth.resetPhone.map { "au \($0)" } ?? "",
+                destination: resetDestination,
                 devCode: auth.devCode,
                 isBusy: auth.isBusy,
                 error: auth.errorMessage,
@@ -472,14 +476,116 @@ struct ConnexionView: View {
                     withAnimation { phase = .resetPassword }
                 },
                 onResend: {
-                    Task { _ = await auth.forgotPassword(identifier: identifierForAuth) }
+                    Task { _ = await auth.forgotPassword(identifier: identifierForAuth,
+                                                         channel: auth.resetChannel) }
                 }
             )
+
+            // Let the user pick the other channel: an SMS that never arrives
+            // (or an inbox they can't reach) shouldn't strand them.
+            if auth.resetChannel == "email" || auth.resetEmailAvailable {
+                let toEmail = auth.resetChannel != "email"
+                Button {
+                    otp = ""
+                    Task { _ = await auth.forgotPassword(identifier: identifierForAuth,
+                                                         channel: toEmail ? "email" : "sms") }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: toEmail ? "envelope" : "message")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text(toEmail ? "Recevoir le code par e-mail" : "Recevoir le code par SMS")
+                            .font(.moblyBody(13.5, weight: .semibold))
+                    }
+                    .foregroundStyle(Color.moblyPrimary)
+                }
+                .buttonStyle(.plain)
+                .disabled(auth.isBusy)
+                .padding(.top, 18)
+            }
             Spacer()
         }
         .padding(.horizontal, 26)
         .padding(.top, 56)
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    /// "au +237 6•• •• •• 66" or "à sc•••••@gmail.com".
+    private var resetDestination: String {
+        guard let dest = auth.resetPhone else {
+            return auth.resetChannel == "email" ? "par e-mail" : "par SMS"
+        }
+        return auth.resetChannel == "email" ? "à \(dest)" : "au \(dest)"
+    }
+
+    // MARK: Signup — confirm the e-mail
+
+    private var emailCodeView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Image(systemName: "envelope.badge")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Color.moblyPrimary)
+                .frame(width: 48, height: 48)
+                .background(RoundedRectangle(cornerRadius: 15).fill(Color.moblySurfaceTint))
+                .padding(.bottom, 20)
+
+            Text("Confirmez votre e-mail")
+                .font(.moblyHeading(24))
+                .foregroundStyle(Color.moblyTextPrimary)
+                .padding(.bottom, 6)
+            Text(auth.emailCodeDestination.map {
+                "Code à \(auth.emailCodeLength) chiffres envoyé à \($0). Il sert aussi à récupérer votre compte si vous oubliez votre mot de passe."
+            } ?? "Nous envoyons un code à \(email).")
+                .font(.moblyBody(13.5))
+                .foregroundStyle(Color(hex: 0x9A9DAC))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 26)
+
+            SignupOTPStep(
+                otp: $emailOtp,
+                destination: auth.emailCodeDestination.map { "à \($0)" } ?? "",
+                devCode: auth.devCode,
+                isBusy: auth.isBusy,
+                error: auth.errorMessage,
+                resendCooldown: auth.resendCooldown,
+                length: auth.emailCodeLength,
+                onVerify: { code in
+                    guard code.count == auth.emailCodeLength, !auth.isBusy else { return }
+                    Task {
+                        if await auth.verifyEmailCode(code) {
+                            withAnimation { phase = .chooseAvatar }
+                        }
+                    }
+                },
+                onResend: { Task { _ = await auth.sendEmailCode() } }
+            )
+
+            Button {
+                // Skippable: a slow inbox must never block a finished signup.
+                // The profile offers "Vérifier mon e-mail" later.
+                auth.errorMessage = nil
+                withAnimation { phase = .chooseAvatar }
+            } label: {
+                Text("Plus tard")
+                    .font(.moblyBody(14, weight: .semibold))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 14)
+
+            Spacer()
+        }
+        .padding(.horizontal, 26)
+        .padding(.top, 56)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .task {
+            // Send once on arrival; resends go through the step's button.
+            if auth.emailCodeDestination == nil && !auth.isEmailVerified {
+                emailOtp = ""
+                _ = await auth.sendEmailCode()
+            }
+        }
     }
 
     // MARK: Reset — step 2, choose the new password
@@ -1032,9 +1138,10 @@ struct ConnexionView: View {
             ok = await auth.verifyCode(phone: phoneForAuth, code: code)
         }
         guard ok else { return }   // stay on the code screen; error shows inline
-        // A form signup already gave us a name, so it skips the name step and
-        // goes straight to the optional photo. Signing in goes home as before.
-        withAnimation { phase = mode == .signup ? .chooseAvatar : .welcome }
+        // A form signup already gave us a name, so it skips the name step; it
+        // confirms the e-mail, then offers the optional photo. Signing in goes
+        // home as before.
+        withAnimation { phase = mode == .signup ? .emailCode : .welcome }
     }
 }
 

@@ -15,8 +15,15 @@ struct OwnerOverallStatsView: View {
 
     @State private var overview: MoblyAPI.OwnerOverview?
     @State private var loading = false
+    @State private var loadingVisible = false
+    @State private var loadingToken = UUID()
     @State private var pollTimer: Timer?
     @State private var statsAnnonce: OwnerAnnonce?
+
+    init(initial: MoblyAPI.OwnerOverview? = nil) {
+        self.initial = initial
+        _overview = State(initialValue: initial ?? MoblyAPI.OwnerStatsCache.shared.overview())
+    }
 
     private var data: MoblyAPI.OwnerOverview? { overview ?? initial }
     private var totals: MoblyAPI.OwnerOverview.Totals? { data?.totals }
@@ -25,6 +32,7 @@ struct OwnerOverallStatsView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 header
+                if loadingVisible { refreshingPill }
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 16) {
                         heroCard
@@ -38,24 +46,26 @@ struct OwnerOverallStatsView: View {
                     }
                     .padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 40)
                 }
-                .refreshable { await refresh() }
+                .refreshable { await refresh(showIndicator: false) }
             }
             .background(Color.moblySurface)
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(item: $statsAnnonce) { OwnerStatsView(annonce: $0) }
         }
-        .task { await refresh() }
-        .onAppear { startPolling() }
+        .onAppear {
+            startPolling()
+            Task { await refresh(showIndicator: data == nil) }
+        }
         .onDisappear { stopPolling() }
         .onReceive(NotificationCenter.default.publisher(for: OwnerListings.statsChanged)) { _ in
-            Task { await refresh() }
+            Task { await refresh(showIndicator: false) }
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.didEnterBackgroundNotification)) { _ in stopPolling() }
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.didBecomeActiveNotification)) { _ in
             startPolling()
-            Task { await refresh() }
+            Task { await refresh(showIndicator: false) }
         }
     }
 
@@ -64,7 +74,7 @@ struct OwnerOverallStatsView: View {
     private func startPolling() {
         stopPolling()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in
-            Task { await refresh() }
+            Task { await refresh(showIndicator: false) }
         }
     }
 
@@ -72,16 +82,51 @@ struct OwnerOverallStatsView: View {
         pollTimer?.invalidate(); pollTimer = nil
     }
 
-    private func refresh() async {
+    @MainActor
+    private func refresh(showIndicator: Bool = false) async {
         guard !loading else { return }
         loading = true
         defer { loading = false }
+        if showIndicator { startLoadingCapIfNeeded() }
+
         // Keep the last figures on screen when the call fails.
-        guard let fresh = try? await MoblyAPI.shared.ownerOverview() else { return }
+        guard let fresh = try? await MoblyAPI.shared.ownerOverview() else {
+            loadingToken = UUID()
+            loadingVisible = false
+            return
+        }
+        MoblyAPI.OwnerStatsCache.shared.save(fresh)
+        loadingToken = UUID()
+        loadingVisible = false
         withAnimation(Motion.content) { overview = fresh }
     }
 
+    @MainActor
+    private func startLoadingCapIfNeeded() {
+        guard data == nil else { return }
+        let token = UUID()
+        loadingToken = token
+        loadingVisible = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if loadingToken == token { loadingVisible = false }
+        }
+    }
+
     // MARK: Header
+
+    private var refreshingPill: some View {
+        HStack(spacing: 8) {
+            ProgressView().tint(Color.moblyPrimary).scaleEffect(0.82)
+            Text("Mise à jour des statistiques…")
+                .font(.moblyBody(12, weight: .medium))
+                .foregroundStyle(Color.moblyTextSecondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
 
     private var header: some View {
         HStack {

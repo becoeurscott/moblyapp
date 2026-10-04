@@ -75,7 +75,8 @@ reviewsRouter.get(
   '/:id/reviews',
   asyncHandler(async (req, res) => {
     const items = await prisma.review.findMany({
-      where: { listingId: req.params.id },
+      // Moderator-hidden avis stay in the table for the audit trail only.
+      where: { listingId: req.params.id, hiddenAt: null },
       include: { user: { select: { id: true, fullName: true, avatarUrl: true, avatarColor: true } } },
       orderBy: { createdAt: 'desc' },
     });

@@ -158,23 +158,34 @@ export async function readPendingSignupToken(token: string): Promise<PendingSign
 const RESET_PURPOSE = 'password_reset';
 const RESET_TTL = '15m';
 
-export async function issueResetToken(userId: string, phone: string): Promise<string> {
+/** Where the reset code went: the account's phone, or its confirmed e-mail. */
+export type ResetChannel = 'sms' | 'email';
+
+export async function issueResetToken(
+  userId: string,
+  phone: string,
+  channel: ResetChannel = 'sms'
+): Promise<string> {
   const secret = new TextEncoder().encode(env.jwtSecret);
-  return new SignJWT({ purpose: RESET_PURPOSE, sub: userId, phone })
+  return new SignJWT({ purpose: RESET_PURPOSE, sub: userId, phone, channel })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(RESET_TTL)
     .sign(secret);
 }
 
-export async function readResetToken(token: string): Promise<{ userId: string; phone: string }> {
+export async function readResetToken(
+  token: string
+): Promise<{ userId: string; phone: string; channel: ResetChannel }> {
   try {
     const secret = new TextEncoder().encode(env.jwtSecret);
     const { payload } = await verifyLocal(token, secret);
     if (payload.purpose !== RESET_PURPOSE) {
       throw new ApiError(401, 'Session de réinitialisation invalide', 'UNAUTHENTICATED');
     }
-    return { userId: String(payload.sub), phone: String(payload.phone) };
+    // Tokens minted before e-mail reset existed carry no channel: they were SMS.
+    const channel: ResetChannel = payload.channel === 'email' ? 'email' : 'sms';
+    return { userId: String(payload.sub), phone: String(payload.phone), channel };
   } catch (err) {
     if (err instanceof ApiError) throw err;
     throw new ApiError(

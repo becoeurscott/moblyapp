@@ -200,7 +200,7 @@ struct MessagesView: View {
                 onClose: { showVisits = false },
                 onOpenListing: { id in
                     showVisits = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    DispatchQueue.main.async {
                         pendingListingId = id
                     }
                 }

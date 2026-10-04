@@ -16,7 +16,14 @@ import {
   revokeAllForUser,
 } from '../services/refresh';
 import { checkPassword, PASSWORD_RULE_MESSAGES } from '../lib/password';
-import { issueResetToken, readResetToken, maskPhone } from '../services/oauth';
+import { issueResetToken, readResetToken, maskPhone, type ResetChannel } from '../services/oauth';
+import { maskEmail } from '../services/email';
+import {
+  sendEmailCode,
+  checkEmailCode,
+  emailCodeError,
+  EMAIL_CODE_LENGTH,
+} from '../services/emailCode';
 import { requireAuth, optionalAuth } from '../middleware/auth';
 import {
   authLimiter,
@@ -114,6 +121,8 @@ authRouter.post(
         data: {
           fullName: body.fullName ?? user.fullName,
           email: body.email ?? user.email,
+          // A different address hasn't been confirmed yet.
+          ...(body.email && body.email !== user.email ? { emailVerifiedAt: null } : {}),
           isOwner: body.isOwner ?? user.isOwner,
         },
       });
@@ -319,7 +328,9 @@ authRouter.patch(
     const body = z
       .object({
         fullName: z.string().min(1).optional(),
-        email: z.string().email().optional(),
+        // Accepted only so older builds — which echo the current address back
+        // on every save — keep working. It is never written here; see below.
+        email: z.string().trim().email().optional(),
         isOwner: z.boolean().optional(),
         avatarUrl: z.string().url().optional(),
         /// Hex like "#3A4FF0". Validated so a client can't stuff arbitrary
@@ -358,6 +369,27 @@ authRouter.patch(
 
     if (body.fullName) assertNotBlocked(body.fullName);
 
+    // The e-mail is the password-reset channel, so it only ever changes
+    // through the code flow in email.routes.ts (POST /auth/email/send with the
+    // new address, then /verify). Writing it here let any client swap in an
+    // unconfirmed address that still showed as confirmed. The same address
+    // sent back is a no-op; a different one is refused with a code the app
+    // turns into the verification screen. Clearing it isn't offered at all —
+    // an account without an address loses e-mail reset.
+    if (body.email) {
+      const current = await prisma.user.findUnique({
+        where: { id: req.userId! },
+        select: { email: true },
+      });
+      if (body.email.toLowerCase() !== (current?.email ?? '').toLowerCase()) {
+        throw new ApiError(
+          403,
+          'Confirmez la nouvelle adresse e-mail avec le code envoyé à cette adresse.',
+          'EMAIL_VERIFICATION_REQUIRED'
+        );
+      }
+    }
+
     // First time becoming an owner starts the 7-day free trial. `ownerPaid`
     // stays false until they pay the one-time inscription fee.
     const startingOwnerTrial = body.isOwner === true && !req.user?.isOwner;
@@ -366,7 +398,6 @@ authRouter.patch(
       where: { id: req.userId! },
       data: {
         fullName: body.fullName,
-        email: body.email,
         isOwner: body.isOwner,
         avatarUrl: body.avatarUrl,
         avatarColor: body.avatarColor,
@@ -382,26 +413,33 @@ authRouter.patch(
 
 /**
  * Password reset, in two calls:
- *   1. POST /auth/password/forgot — resolve the account, text a code
+ *   1. POST /auth/password/forgot — resolve the account, send a code by SMS or
+ *                                    e-mail (`channel`)
  *   2. POST /auth/password/reset  — check the code, set the new password
  *
- * The code goes to the phone on the account, never to whatever number was
- * typed — otherwise anyone could point a reset at a number they control.
- * There is no e-mail reset: no mail provider is wired, and the phone is
- * already the verified identifier.
+ * The code goes to the phone or e-mail on the account, never to whatever was
+ * typed — otherwise anyone could point a reset at an inbox they control. The
+ * e-mail channel is only offered once the address has been confirmed with a
+ * code (`emailVerifiedAt`): an unconfirmed or mistyped address belongs to
+ * whoever owns that inbox, and must not be able to take the account over.
  */
 authRouter.post(
   '/password/forgot',
   featureGate('password.reset'),
   smsSendLimiter,
   asyncHandler(async (req, res) => {
-    const { identifier } = z.object({ identifier: z.string().min(3) }).parse(req.body);
+    const { identifier, channel: requested } = z
+      .object({
+        identifier: z.string().min(3),
+        channel: z.enum(['sms', 'email']).optional(),
+      })
+      .parse(req.body);
 
     const isEmail = identifier.includes('@');
     const lookup = isEmail ? identifier.trim().toLowerCase() : normalizePhone(identifier);
     const user = await prisma.user.findFirst({
       where: isEmail ? { email: lookup } : { phone: lookup },
-      select: { id: true, phone: true },
+      select: { id: true, phone: true, email: true, emailVerifiedAt: true },
     });
 
     if (!user) {
@@ -417,6 +455,34 @@ authRouter.post(
         identifier: isEmail ? 'Aucun compte avec cet e-mail' : 'Aucun compte avec ce numéro',
       };
       throw err;
+    }
+
+    const emailAvailable = Boolean(user.email && user.emailVerifiedAt);
+    // Default: answer on the channel the user typed, when that's possible.
+    const channel: ResetChannel = requested ?? (isEmail && emailAvailable ? 'email' : 'sms');
+
+    if (channel === 'email') {
+      if (!emailAvailable) {
+        throw new ApiError(
+          409,
+          'Cet e-mail n’a pas encore été confirmé. Recevez le code par SMS.',
+          'EMAIL_NOT_VERIFIED'
+        );
+      }
+      const { devCode } = await sendEmailCode(user.id, user.email!, 'reset');
+      const masked = maskEmail(user.email!);
+      res.json({
+        sent: true,
+        channel,
+        maskedDestination: masked,
+        // Kept for builds that predate `maskedDestination`; display-only.
+        maskedPhone: masked,
+        emailAvailable,
+        resetToken: await issueResetToken(user.id, user.phone, 'email'),
+        codeLength: EMAIL_CODE_LENGTH,
+        devCode,
+      });
+      return;
     }
 
     const { code, cooldown, capped } = await createOtp(user.phone);
@@ -440,10 +506,14 @@ authRouter.post(
     // The real number stays inside the signed reset token; the client only
     // gets a masked form to display. Returning it plainly would let anyone
     // holding an e-mail address harvest the phone behind it.
+    const masked = maskPhone(user.phone);
     res.json({
       sent: true,
-      maskedPhone: maskPhone(user.phone),
-      resetToken: await issueResetToken(user.id, user.phone),
+      channel,
+      maskedDestination: masked,
+      maskedPhone: masked,
+      emailAvailable,
+      resetToken: await issueResetToken(user.id, user.phone, 'sms'),
       codeLength: otpLength(),
       devCode: code,
     });
@@ -455,11 +525,12 @@ authRouter.post(
   featureGate('password.reset'),
   otpVerifyLimiter,
   asyncHandler(async (req, res) => {
-    const codeLength = otpLength();
+    // SMS and e-mail codes differ in length; the channel inside the token
+    // decides which check applies, so only a loose bound is needed here.
     const { resetToken, code, password } = z
       .object({
         resetToken: z.string().min(20),
-        code: z.string().length(codeLength),
+        code: z.string().trim().min(4).max(8),
         password: z.string().min(1),
       })
       .parse(req.body);
@@ -467,7 +538,7 @@ authRouter.post(
     // The account comes from the signed token, not from the request body —
     // otherwise a caller could verify a code they own against someone else's
     // number and reset that account.
-    const { userId, phone } = await readResetToken(resetToken);
+    const { userId, phone, channel } = await readResetToken(resetToken);
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || user.phone !== phone) {
       throw new ApiError(401, 'Session de réinitialisation invalide', 'UNAUTHENTICATED');
@@ -484,15 +555,25 @@ authRouter.post(
       throw err;
     }
 
-    const result = await verifyOtp(phone, code);
-    if (result !== 'ok') {
-      const map = {
-        invalid: [401, 'Code incorrect', 'OTP_INVALID'],
-        expired: [401, 'Code expiré, demandez-en un nouveau', 'OTP_EXPIRED'],
-        locked: [429, 'Trop de tentatives. Demandez un nouveau code.', 'OTP_LOCKED'],
-      } as const;
-      const [status, message, errCode] = map[result];
-      throw new ApiError(status, message, errCode);
+    if (channel === 'email') {
+      const { result, email } = await checkEmailCode(user.id, 'reset', code);
+      if (result !== 'ok') throw emailCodeError(result);
+      // The address changed since the code was sent — it no longer speaks
+      // for this account.
+      if (email !== user.email) {
+        throw new ApiError(401, 'Session de réinitialisation invalide', 'UNAUTHENTICATED');
+      }
+    } else {
+      const result = await verifyOtp(phone, code);
+      if (result !== 'ok') {
+        const map = {
+          invalid: [401, 'Code incorrect', 'OTP_INVALID'],
+          expired: [401, 'Code expiré, demandez-en un nouveau', 'OTP_EXPIRED'],
+          locked: [429, 'Trop de tentatives. Demandez un nouveau code.', 'OTP_LOCKED'],
+        } as const;
+        const [status, message, errCode] = map[result];
+        throw new ApiError(status, message, errCode);
+      }
     }
 
     await prisma.user.update({

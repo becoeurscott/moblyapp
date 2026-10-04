@@ -43,3 +43,18 @@ backups/
 
 # Next.js build artifact (stray - admin lives in its own repo)
 .next/
+
+# InsForge & AI agent skills
+.insforge
+.agent
+.agents
+.augment
+.claude
+.cline
+.github/copilot*
+.kilocode
+.qoder
+.qwen
+.roo
+.trae
+.windsurf

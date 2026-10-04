@@ -23,8 +23,17 @@ struct ListingDetailView: View {
     @State private var showAllReviewsSheet = false
     @State private var reviews: [Review] = []
     @State private var hasPostedReview = false
+    /// The avis fetch has finished, successfully or not. Until then a listing
+    /// that claims reviews shows placeholders; after, never — an empty or
+    /// failed fetch used to leave grey cards on screen forever.
+    @State private var reviewsLoaded = false
+    /// The server answered the avis fetch. From then on the loaded list is the
+    /// truth: the `listing.rating`/`reviewCount` the page opened with can come
+    /// from a saved feed that predates a change (a reset score, a new avis).
+    @State private var reviewsConfirmed = false
+    @State private var didLoad = false
+    @State private var reviewPostError: String?
 
-    @ObservedObject private var chat = ChatStore.shared
     @ObservedObject private var auth = AuthStore.shared
     @ObservedObject private var config = RemoteConfigStore.shared
     /// Real conversation with this listing's owner, once opened. The owner is
@@ -105,7 +114,6 @@ struct ListingDetailView: View {
     }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private let autoSlide = Timer.publish(every: 3.5, on: .main, in: .common).autoconnect()
 
     /// Real coordinate for the listing's map card. Priority: DB lat/lng →
     /// city-name lookup (Douala, Yaoundé, Buéa…) → Douala centre as a last
@@ -198,6 +206,11 @@ struct ListingDetailView: View {
         }
         .swipeToDismiss(onDismiss: onClose, ignoreTopSafeArea: true)
         .onAppear {
+            // Once per open. `.onAppear` re-fires on every return from the
+            // photo viewer, the grid or a chat — re-fetching the page, the avis
+            // and counting another view for the owner each time.
+            guard !didLoad else { return }
+            didLoad = true
             SessionTracker.shared.log("listing.view", [
                 "listingId": listing.id,
                 "category": listing.category
@@ -223,12 +236,18 @@ struct ListingDetailView: View {
                 }
             }
             Task {
-                if let fetched = try? await MoblyAPI.shared.reviews(listingId: listing.id) {
-                    let mapped = fetched.map { $0.toReview() }
-                    await MainActor.run {
-                        // The avis land after the page is already up, so they
-                        // ease in rather than popping the layout.
-                        withAnimation(Motion.content) { reviews = mapped }
+                let fetched = try? await MoblyAPI.shared.reviews(listingId: listing.id)
+                await MainActor.run {
+                    // The avis land after the page is already up, so they
+                    // ease in rather than popping the layout.
+                    withAnimation(Motion.content) {
+                        if let fetched {
+                            reviews = fetched.map { $0.toReview() }
+                            reviewsConfirmed = true
+                        }
+                        reviewsLoaded = true
+                    }
+                    if let fetched {
                         hasPostedReview = fetched.contains { $0.userId == AuthStore.shared.user?.id }
                     }
                 }
@@ -355,49 +374,55 @@ struct ListingDetailView: View {
             .first?.windows.first?.safeAreaInsets.bottom) ?? 34
     }
 
+    // MARK: Composition row
+
+    /// What the space is made of — "2 chambres · 1 salon · 1 cuisine ·
+    /// 1 douche" — as icon chips under the description. Each count only
+    /// appears when the listing knows it: imported annonces carry rooms and
+    /// bathrooms but no salon/kitchen, owner-published ones add those through
+    /// `features`.
+    ///
+    /// `sizeSqm` is deliberately absent: the column is null on every listing we
+    /// have, so a "— m²" slot would be a permanently empty promise.
+    @ViewBuilder
+    private var compositionRow: some View {
+        let salons = Int(listing.features["Salon"] ?? "") ?? 0
+        let kitchens = Int(listing.features["Cuisines"] ?? "") ?? 0
+        let showers = listing.bathrooms ?? 0
+        if listing.rooms > 0 || salons > 0 || kitchens > 0 || showers > 0 {
+            WrapLayout(spacing: 8, lineSpacing: 8) {
+                if listing.rooms > 0 {
+                    fact("bed.double.fill", count(listing.rooms, "chambre", "chambres"))
+                }
+                if salons > 0 { fact("sofa.fill", count(salons, "salon", "salons")) }
+                if kitchens > 0 { fact("fork.knife", count(kitchens, "cuisine", "cuisines")) }
+                if showers > 0 { fact("shower.fill", count(showers, "douche", "douches")) }
+            }
+            .padding(.top, 14)
+        }
+    }
+
+    private func count(_ n: Int, _ one: String, _ many: String) -> String {
+        "\(n) \(n > 1 ? LT(many) : LT(one))"
+    }
+
+    private func fact(_ icon: String, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.moblyPrimary)
+            Text(label)
+                .font(.moblyBody(12, weight: .semibold))
+                .foregroundStyle(Color.moblyTextPrimary)
+        }
+        .padding(.horizontal, 11).padding(.vertical, 6)
+        .background(Capsule().fill(Color(hex: 0xF1F2F5)))
+    }
+
     private var heroGallery: some View {
-        GeometryReader { geo in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    ForEach(Array(gallery.enumerated()), id: \.offset) { i, name in
-                        RemoteImage(source: name, width: ImageSlot.hero, contentMode: .fill)
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .clipped()
-                            .id(i)
-                    }
-                }
-                .scrollTargetLayout()
-            }
-            .scrollTargetBehavior(.paging)
-            .scrollPosition(id: Binding(
-                get: { photoIndex },
-                set: { if let v = $0 { photoIndex = v } }
-            ))
-        }
-        .onReceive(autoSlide) { _ in
-            guard !reduceMotion, !showViewer else { return }
-            withAnimation(Motion.gentle) {
-                photoIndex = (photoIndex + 1) % gallery.count
-            }
-        }
-        .overlay(alignment: .bottom) {
-            HStack(spacing: 6) {
-                ForEach(gallery.indices, id: \.self) { i in
-                    Capsule()
-                        .fill(i == photoIndex ? .white : .white.opacity(0.5))
-                        .frame(width: i == photoIndex ? 16 : 6, height: 6)
-                        .animation(Motion.quick, value: photoIndex)
-                }
-            }
-            .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(Capsule().fill(.black.opacity(0.28)))
-            .padding(.bottom, 16)
-        }
-        .frame(height: heroHeight + safeAreaTop)
-        .clipped()
-        .clipShape(UnevenRoundedRectangle(
-            cornerRadii: .init(bottomLeading: 26, bottomTrailing: 26),
-            style: .continuous))
+        HeroGallery(images: gallery,
+                    height: heroHeight + safeAreaTop,
+                    paused: showViewer)
     }
 
     private var heroButtons: some View {
@@ -473,7 +498,7 @@ struct ListingDetailView: View {
                 // Avis section below it: show the average of the loaded reviews,
                 // not the static `listing.rating` the feed shipped with (which
                 // left the top saying "4.7" while the section averaged "4.5").
-                if reviews.isEmpty && listing.rating.isEmpty {
+                if reviews.isEmpty && (reviewsConfirmed || listing.rating.isEmpty) {
                     Text("Nouveau")
                         .font(.moblyBody(13, weight: .semibold))
                         .foregroundStyle(Color.moblyPrimary)
@@ -562,6 +587,8 @@ struct ListingDetailView: View {
                 }
                 .padding(.top, 4)
             }
+
+            compositionRow
 
             // Photo gallery strip
             photoStrip
@@ -755,7 +782,7 @@ struct ListingDetailView: View {
                 Text("Avis")
                     .font(.moblyHeading(17))
                     .foregroundStyle(Color.moblyTextPrimary)
-                if reviews.isEmpty && listing.reviewCount > 0 {
+                if reviews.isEmpty && listing.reviewCount > 0 && !reviewsConfirmed {
                     Image(systemName: "star.fill")
                         .font(.system(size: 12)).foregroundStyle(Color.moblyAccent)
                     Text(listing.rating)
@@ -803,7 +830,7 @@ struct ListingDetailView: View {
             }
             .padding(.bottom, 16)
 
-            if reviews.isEmpty && listing.reviewCount > 0 {
+            if reviews.isEmpty && listing.reviewCount > 0 && !reviewsLoaded {
                 // The listing says it has avis but they haven't landed yet.
                 // "Soyez le premier à laisser un avis" here would be a lie, so
                 // hold the space with cards instead of contradicting the 4.2
@@ -823,9 +850,13 @@ struct ListingDetailView: View {
                     Image(systemName: "star.bubble")
                         .font(.system(size: 32, weight: .medium))
                         .foregroundStyle(Color(hex: 0xD5D8E2))
+                    // Unconfirmed + a stored count means the fetch failed, not
+                    // that the listing has none — don't invite a "first" avis.
                     Text(isOwnListing
                          ? "Vos visiteurs pourront laisser un avis ici"
-                         : "Soyez le premier à laisser un avis")
+                         : !reviewsConfirmed && listing.reviewCount > 0
+                            ? "Avis indisponibles pour le moment"
+                            : "Soyez le premier à laisser un avis")
                         .font(.moblyBody(14, weight: .medium))
                         .foregroundStyle(Color(hex: 0x9A9DAC))
                         .multilineTextAlignment(.center)
@@ -868,13 +899,21 @@ struct ListingDetailView: View {
         .sheet(isPresented: $showReviewSheet) {
             LeaveReviewSheet { stars, text in
                 Task {
-                    if let dto = try? await MoblyAPI.shared.postReview(
-                        listingId: listing.id, rating: stars, text: text
-                    ) {
+                    do {
+                        let dto = try await MoblyAPI.shared.postReview(
+                            listingId: listing.id, rating: stars, text: text
+                        )
                         await MainActor.run {
                             withAnimation(Motion.pop) { reviews.insert(dto.toReview(), at: 0) }
                             hasPostedReview = true
                         }
+                    } catch {
+                        // This used to be `try?`: a rejected avis (already
+                        // posted, too short, rate limit, offline) closed the
+                        // sheet and simply never appeared.
+                        let message = (error as? MoblyAPI.APIError)?.message
+                            ?? "Votre avis n'a pas pu être publié. Réessayez."
+                        await MainActor.run { reviewPostError = message }
                     }
                 }
             }
@@ -882,6 +921,13 @@ struct ListingDetailView: View {
         }
         .sheet(isPresented: $showAllReviewsSheet) {
             AllReviewsView(reviews: reviews)
+        }
+        .alert("Avis non publié",
+               isPresented: Binding(get: { reviewPostError != nil },
+                                    set: { if !$0 { reviewPostError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(reviewPostError ?? "")
         }
     }
 
@@ -1076,6 +1122,14 @@ struct ListingDetailView: View {
                         .lineLimit(1)
                 }
             }
+            // Lifted off the frosted bar so the price reads first.
+            .padding(.horizontal, 12)
+            .frame(height: 48)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.white)
+                    .shadow(color: Color(hex: 0x14152A).opacity(0.06), radius: 6, y: 2)
+            )
             .layoutPriority(1)
             Spacer(minLength: 4)
             if config.isEnabled("visits.request") {
@@ -1088,13 +1142,20 @@ struct ListingDetailView: View {
                             ProgressView()
                                 .tint(Color.moblyPrimary)
                         } else {
-                            Image(systemName: "calendar")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(Color.moblyPrimary)
+                            HStack(spacing: 6) {
+                                Image(systemName: "calendar")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text("Visiter")
+                                    .font(.moblyHeading(14))
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                            .foregroundStyle(Color.moblyPrimary)
                         }
                     }
-                    .frame(width: 48, height: 48)
-                    .background(Circle().fill(Color(hex: 0xEEF0FE)))
+                    .padding(.horizontal, 14)
+                    .frame(height: 48)
+                    .background(Capsule().fill(Color(hex: 0xEEF0FE)))
                 }
                 .buttonStyle(.plain)
                 .disabled(!isAvailable || authActionDisabled)
@@ -1123,6 +1184,95 @@ struct ListingDetailView: View {
             .buttonStyle(.plain)
             }
         }
+    }
+}
+
+// MARK: - Hero gallery
+
+/// The detail page's swipeable header photos.
+///
+/// This is a view of its own, and that is the point. The page index used to be
+/// `@State` on `ListingDetailView`, written by `.scrollPosition` on every page
+/// the drag crossed — so each swipe re-evaluated the *whole* screen (host row,
+/// description, map, avis, Similaires, sticky bar) while the finger was still
+/// moving. The scroll could not be smooth no matter how the ScrollView was
+/// configured. Owning the index here confines that work to the photos.
+private struct HeroGallery: View {
+    let images: [String]
+    let height: CGFloat
+    /// True while the full-screen viewer is up: the auto-advance should not run
+    /// behind it.
+    let paused: Bool
+
+    @State private var index = 0
+    @State private var lastTouch: Date? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let autoSlide = Timer.publish(every: 3.5, on: .main, in: .common).autoconnect()
+    /// How long the auto-advance stays out of the way after a touch — long
+    /// enough to look at a photo you deliberately swiped to.
+    private let resumeDelay: TimeInterval = 8
+
+    var body: some View {
+        GeometryReader { geo in
+            ScrollView(.horizontal, showsIndicators: false) {
+                // Lazy: a plain HStack built and decoded every photo at full
+                // hero width the moment the page opened — a dozen 960px
+                // decodes at once, which is what made the first swipes hitch.
+                LazyHStack(spacing: 0) {
+                    ForEach(Array(images.enumerated()), id: \.offset) { i, name in
+                        RemoteImage(source: name, width: ImageSlot.hero, contentMode: .fill)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
+                            .id(i)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: Binding(
+                get: { index },
+                set: { if let v = $0 { index = v } }
+            ))
+        }
+        // Any touch parks the carousel. Otherwise the 3.5s timer kept firing
+        // mid-drag and yanked the photo out from under the gesture — the timer
+        // and the finger both driving the same scroll position.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in lastTouch = Date() }
+                .onEnded { _ in lastTouch = Date() }
+        )
+        .onReceive(autoSlide) { _ in
+            guard !reduceMotion, !paused, !images.isEmpty else { return }
+            if let t = lastTouch, Date().timeIntervalSince(t) < resumeDelay { return }
+            withAnimation(Motion.gentle) { index = (index + 1) % images.count }
+        }
+        .onAppear {
+            // Warm the first few so an early swipe lands on a decoded photo
+            // rather than a shimmer.
+            ImagePrefetch.warm(images, width: ImageSlot.hero)
+        }
+        .overlay(alignment: .bottom) { dots }
+        .frame(height: height)
+        .clipped()
+        .clipShape(UnevenRoundedRectangle(
+            cornerRadii: .init(bottomLeading: 26, bottomTrailing: 26),
+            style: .continuous))
+    }
+
+    private var dots: some View {
+        HStack(spacing: 6) {
+            ForEach(images.indices, id: \.self) { i in
+                Capsule()
+                    .fill(i == index ? .white : .white.opacity(0.5))
+                    .frame(width: i == index ? 16 : 6, height: 6)
+                    .animation(Motion.quick, value: index)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(Capsule().fill(.black.opacity(0.28)))
+        .padding(.bottom, 16)
     }
 }
 

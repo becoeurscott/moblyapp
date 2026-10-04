@@ -8,13 +8,22 @@ import SwiftUI
 ///    right between the photos of the group.
 /// 3. Swiping down (or tapping ✕) closes the full view and brings you back to
 ///    the vertical list; the list's own ✕ closes everything.
+/// 4. Long-pressing a photo in the list, or the bin in the full view, deletes
+///    just that photo (after the usual pour moi / pour tout le monde choice).
 struct PhotoGroupViewer: View {
     let urls: [URL]
     var startIndex: Int = 0
     var onClose: () -> Void
     var onReply: ((Int) -> Void)?
+    /// Only the sender may delete for both sides, same rule as a single message.
+    var canDeleteForBoth: Bool = false
+    /// Index of the photo and whether to delete it for both sides. The caller
+    /// drops it from `urls`; the viewer just follows.
+    var onDelete: ((Int, Bool) -> Void)?
 
     @State private var fullScreenIndex: Int?
+    /// Photo awaiting the delete confirmation.
+    @State private var pendingDelete: Int?
 
     var body: some View {
         ZStack {
@@ -28,6 +37,8 @@ struct PhotoGroupViewer: View {
                                 withAnimation(Motion.standard) { fullScreenIndex = i }
                             }, onReply: onReply != nil ? {
                                 onReply?(i)
+                            } : nil, onDelete: onDelete != nil ? {
+                                pendingDelete = i
                             } : nil)
                             .id(i)
                         }
@@ -47,10 +58,29 @@ struct PhotoGroupViewer: View {
             if let i = fullScreenIndex {
                 PagedPhotoViewer(urls: urls, startIndex: i,
                                  onClose: { withAnimation(Motion.standard) { fullScreenIndex = nil } },
-                                 onReply: onReply != nil ? { idx in onReply?(idx) } : nil)
+                                 onReply: onReply != nil ? { idx in onReply?(idx) } : nil,
+                                 onDelete: onDelete != nil ? { idx in pendingDelete = idx } : nil)
                     .transition(.opacity)
             }
         }
+        .confirmationDialog("Supprimer cette photo ?",
+                            isPresented: Binding(
+                                get: { pendingDelete != nil },
+                                set: { if !$0 { pendingDelete = nil } }),
+                            titleVisibility: .visible) {
+            Button("Supprimer pour moi", role: .destructive) { confirmDelete(forBoth: false) }
+            if canDeleteForBoth {
+                Button("Supprimer pour tout le monde", role: .destructive) { confirmDelete(forBoth: true) }
+            }
+            Button("Annuler", role: .cancel) { pendingDelete = nil }
+        }
+    }
+
+    private func confirmDelete(forBoth: Bool) {
+        guard let i = pendingDelete else { return }
+        pendingDelete = nil
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        onDelete?(i, forBoth)
     }
 
     private var header: some View {
@@ -83,6 +113,7 @@ private struct ReplyablePhoto: View {
     let index: Int
     let onTap: () -> Void
     let onReply: (() -> Void)?
+    var onDelete: (() -> Void)? = nil
 
     @State private var dragX: CGFloat = 0
     @State private var showHint = false
@@ -109,6 +140,16 @@ private struct ReplyablePhoto: View {
                 .offset(x: dragX)
                 .gesture(replyGesture)
                 .onTapGesture(perform: onTap)
+                .contextMenu {
+                    if let onReply {
+                        Button { onReply() } label: { Label("Répondre", systemImage: "arrowshape.turn.up.left") }
+                    }
+                    if let onDelete {
+                        Button(role: .destructive) { onDelete() } label: {
+                            Label("Supprimer cette photo", systemImage: "trash")
+                        }
+                    }
+                }
         }
     }
 
@@ -145,9 +186,14 @@ struct PagedPhotoViewer: View {
     var startIndex: Int = 0
     var onClose: () -> Void
     var onReply: ((Int) -> Void)?
+    /// Asks to delete the photo at this index; the parent confirms.
+    var onDelete: ((Int) -> Void)?
 
     @State private var index: Int?
     @State private var dragY: CGFloat = 0
+
+    /// Current page, kept in range while photos are being deleted under it.
+    private var current: Int { max(0, min(index ?? startIndex, urls.count - 1)) }
 
     var body: some View {
         ZStack {
@@ -186,7 +232,7 @@ struct PagedPhotoViewer: View {
 
             VStack {
                 HStack {
-                    Text("\((index ?? startIndex) + 1) / \(urls.count)")
+                    Text("\(urls.isEmpty ? 0 : current + 1) / \(urls.count)")
                         .font(.moblyBody(13, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -195,9 +241,18 @@ struct PagedPhotoViewer: View {
                     if onReply != nil {
                         Button {
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            onReply?(index ?? startIndex)
+                            onReply?(current)
                         } label: {
                             Image(systemName: "arrowshape.turn.up.left.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 38, height: 38)
+                                .background(Circle().fill(.white.opacity(0.18)))
+                        }
+                    }
+                    if onDelete != nil, !urls.isEmpty {
+                        Button { onDelete?(current) } label: {
+                            Image(systemName: "trash")
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(.white)
                                 .frame(width: 38, height: 38)
@@ -218,6 +273,11 @@ struct PagedPhotoViewer: View {
             .opacity(dragY == 0 ? 1 : 0)
         }
         .onAppear { index = startIndex }
+        // Deleting the last page leaves the position past the end: step back
+        // onto the new last photo. (Any other page slides the next one in.)
+        .onChange(of: urls.count) { _, n in
+            if let i = index, i >= n, n > 0 { index = n - 1 }
+        }
     }
 
     /// One photo. Pinch to zoom; it springs back to fit when released, so the

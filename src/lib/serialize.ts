@@ -46,6 +46,9 @@ export function serializeListing(
     priceUnit: l.priceUnit,
     furnished: l.furnished,
     rooms: l.rooms,
+    // The detail page shows these as a facts row. `sizeSqm` stays out until
+    // something populates it — it is null on every row today.
+    bathrooms: l.bathrooms,
     subtitle: l.furnished ? `Meublé · ${l.rooms} ch` : `${l.rooms} ch`,
     about: l.about ?? '',
     rating: l.rating,
@@ -101,6 +104,7 @@ export function serializeUser(u: User) {
     phone: u.phone,
     fullName: u.fullName,
     email: u.email,
+    emailVerified: Boolean(u.email && u.emailVerifiedAt),
     isOwner: u.isOwner,
     verified: u.verified,
     identityVerified: u.identityVerified,

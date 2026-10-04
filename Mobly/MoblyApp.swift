@@ -1,5 +1,10 @@
 import SwiftUI
 
+/// When the inbox was last synced on a foreground. `scenePhase` turns
+/// `.active` at launch and after every Control Center pull, Face ID prompt
+/// or permission alert; each used to fire ~15 requests.
+@MainActor private var lastForegroundSync: Date?
+
 @main
 struct MoblyApp: App {
     // APNs callbacks only reach a UIApplicationDelegate.
@@ -99,6 +104,8 @@ struct MoblyApp: App {
                         Task { await RemoteConfigStore.shared.refresh() }
                     }
                     if phase == .active, AuthStore.shared.isSignedIn {
+                        if let last = lastForegroundSync, Date().timeIntervalSince(last) < 60 { return }
+                        lastForegroundSync = Date()
                         Task {
                             await ChatStore.shared.loadThreads(silent: true)
                             await ChatStore.shared.prewarmAllThreads()

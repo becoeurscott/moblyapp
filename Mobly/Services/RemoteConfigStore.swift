@@ -187,6 +187,9 @@ final class RemoteConfigStore: ObservableObject {
         poller = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+                // The socket pushes `config` the moment it changes; polling
+                // alongside a live socket only spent the rate-limit budget.
+                if ChatStore.shared.socket.state == .connected { continue }
                 await self?.refresh()
             }
         }

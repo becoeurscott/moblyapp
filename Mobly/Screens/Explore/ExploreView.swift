@@ -10,6 +10,12 @@ struct ExploreView: View {
     /// Preloaded filter state (typically from a saved recherche the user
     /// tapped on Favoris). Nil means keep the current in-memory filters.
     var initialFilters: FilterState? = nil
+    /// Free text typed in the Accueil bar, run exactly as if it had been
+    /// typed here (space names, then places, then an address).
+    var initialQuery: String = ""
+    /// A space picked from the Accueil suggestions: select it on the map,
+    /// exactly like picking it from this bar's own suggestions.
+    var initialFocusId: String = ""
     var onLocationConsumed: () -> Void = {}
 
     private let center = CLLocationCoordinate2D(latitude: 4.0511, longitude: 9.7679)
@@ -184,46 +190,8 @@ struct ExploreView: View {
     @ObservedObject private var auth = AuthStore.shared
     @State private var needsSignIn = false
 
-    private var locationSuggestions: [(name: String, region: String)] {
-        let q = searchText.trimmingCharacters(in: .whitespaces)
-            .folding(options: .diacriticInsensitive, locale: .current).lowercased()
-        guard !q.isEmpty else { return Array(MoblyData.searchableLocations.prefix(6)) }
-        return MoblyData.searchableLocations.filter {
-            let name = $0.name.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-            let region = $0.region.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-            return name.contains(q) || q.contains(name)
-                || region.contains(q)
-                || Self.commonPrefixLen(name, q) >= 4
-        }
-    }
-
-    private static func commonPrefixLen(_ a: String, _ b: String) -> Int {
-        zip(a, b).prefix(while: { $0 == $1 }).count
-    }
-
     private static func fold(_ s: String) -> String {
         s.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-    }
-
-    /// Spaces whose name matches what is typed — accent- and case-insensitive,
-    /// and from the first letters: "kin" finds "Kinimo Résidence". A match on
-    /// the start of the title or of any word in it ranks above one buried in
-    /// the middle.
-    private func listingSuggestions(_ query: String, limit: Int = 5) -> [Listing] {
-        let q = Self.fold(query.trimmingCharacters(in: .whitespaces))
-        guard q.count >= 2 else { return [] }
-        func rank(_ l: Listing) -> Int? {
-            let t = Self.fold(l.title)
-            if t.hasPrefix(q) { return 0 }
-            if t.split(separator: " ").contains(where: { $0.hasPrefix(q) }) { return 1 }
-            if t.contains(q) { return 2 }
-            return nil
-        }
-        return MoblyData.all
-            .compactMap { l in rank(l).map { ($0, l) } }
-            .sorted { $0.0 < $1.0 }
-            .prefix(limit)
-            .map { $0.1 }
     }
 
     /// Open a space's detail, crediting the view to "search" when the user
@@ -235,6 +203,23 @@ struct ExploreView: View {
         } else {
             onOpenListing(l)
         }
+    }
+
+    /// Run a typed search — the same resolution the Accueil bar hands over.
+    private func runSearch(_ raw: String) {
+        let q = raw.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return }
+        switch SpaceSearch.resolve(q) {
+        case .spaces(let matches):
+            // "kina" with two Kina annonces shows both and lets the user pick.
+            showNameMatches(matches, query: q)   // records the search itself
+            return
+        case .place(let place):
+            goTo(place)
+        case .address(let text):
+            goTo(text)
+        }
+        SavedSearchStore.shared.add(label: q, query: q, filters: filters)
     }
 
     /// Keep only the spaces whose name matched, frame them on the map, and
@@ -252,6 +237,10 @@ struct ExploreView: View {
         DispatchQueue.main.async { fitAllListings() }
     }
 
+    private func focusListing(id: String) {
+        if let l = MoblyData.all.first(where: { $0.id == id }) { focusListing(l) }
+    }
+
     /// Put one space front and centre: clear any city filter (the space may
     /// be anywhere), select its pin and zoom the map onto it.
     private func focusListing(_ l: Listing) {
@@ -265,18 +254,10 @@ struct ExploreView: View {
         // pin index is looked up after that change.
         DispatchQueue.main.async {
             withAnimation(Motion.panel) { selected = l.id }
-            if let i = listings.firstIndex(where: { $0.id == l.id }) {
-                zoomTo(coord(i), span: MKCoordinateSpan(latitudeDelta: 0.012, longitudeDelta: 0.012))
+            let items = listings
+            if let i = items.firstIndex(where: { $0.id == l.id }) {
+                zoomTo(coord(items[i], i), span: MKCoordinateSpan(latitudeDelta: 0.012, longitudeDelta: 0.012))
             }
-        }
-    }
-
-    private func bestCityMatch(_ query: String) -> (name: String, region: String)? {
-        let q = query.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-        return MoblyData.searchableLocations.first {
-            let name = $0.name.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-            return name == q || name.contains(q) || q.contains(name)
-                || Self.commonPrefixLen(name, q) >= 4
         }
     }
 
@@ -412,8 +393,11 @@ struct ExploreView: View {
     /// city (never the currently-viewed one, so a Yaoundé annonce cannot
     /// appear over Douala) → a small spiral offset around that city so
     /// several listings sharing a city don't stack on the exact same point.
-    private func coord(_ i: Int) -> CLLocationCoordinate2D {
-        let l = listings[i]
+    ///
+    /// Takes the listing rather than re-reading `listings`: that property
+    /// filters and sorts the whole feed, and calling it once per pin made every
+    /// render and every map tap quadratic.
+    private func coord(_ l: Listing, _ i: Int) -> CLLocationCoordinate2D {
         if let lat = l.lat, let lng = l.lng, Self.isInCameroon(lat: lat, lng: lng) {
             return CLLocationCoordinate2D(latitude: lat, longitude: lng)
         }
@@ -437,7 +421,7 @@ struct ExploreView: View {
         let hitRadius: CGFloat = 34
         var best: (id: String, dist: CGFloat)?
         for (i, l) in listings.enumerated() {
-            guard let p = proxy.convert(coord(i), to: .local) else { continue }
+            guard let p = proxy.convert(coord(l, i), to: .local) else { continue }
             let d = hypot(p.x - pt.x, p.y - pt.y)
             if d <= hitRadius, d < (best?.dist ?? .greatestFiniteMagnitude) {
                 best = (l.id, d)
@@ -447,10 +431,15 @@ struct ExploreView: View {
     }
 
     var body: some View {
-        MapReader { proxy in
+        // Filtered once per render. `listings` filters (and may sort) the
+        // whole feed; it was evaluated five times per render plus a full-array
+        // compare for the animation, which is the hitch you felt coming back
+        // to this tab.
+        let items = listings
+        return MapReader { proxy in
         Map(position: $position) {
-            ForEach(Array(listings.enumerated()), id: \.element.id) { i, l in
-                Annotation("", coordinate: coord(i)) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { i, l in
+                Annotation("", coordinate: coord(l, i)) {
                     PricePin(price: shortPrice(l.price), selected: selected == l.id)
                         .allowsHitTesting(false)
                 }
@@ -502,13 +491,13 @@ struct ExploreView: View {
         .overlay(alignment: .bottom) {
             if !searchActive {
                 Group {
-                    if let sel = listings.first(where: { $0.id == selected }) {
+                    if let sel = items.first(where: { $0.id == selected }) {
                         selectedPreview(sel)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
-                    } else if listings.isEmpty {
+                    } else if items.isEmpty {
                         emptyFilterState
                     } else {
-                        carousel
+                        carousel(items)
                     }
                 }
                 .padding(.bottom, 112)
@@ -516,7 +505,9 @@ struct ExploreView: View {
         }
         // Filter changes and silently-refreshed listings restack the pins and
         // the carousel together instead of both cutting.
-        .animation(Motion.content, value: listings)
+        // Keyed on ids: comparing whole Listing values cost a deep compare of
+        // every field of every listing on each render.
+        .animation(Motion.content, value: items.map(\.id))
         .sheet(isPresented: $showFilters) {
             FilterPanelView(filters: $filters,
                             onApply: { showFilters = false },
@@ -528,7 +519,23 @@ struct ExploreView: View {
             if !initialLocation.isEmpty {
                 goTo(initialLocation)
                 onLocationConsumed()
+            } else if !initialQuery.isEmpty {
+                runSearch(initialQuery)
+                onLocationConsumed()
+            } else if !initialFocusId.isEmpty {
+                focusListing(id: initialFocusId)
+                onLocationConsumed()
             }
+        }
+        .onChange(of: initialFocusId) { _, id in
+            guard !id.isEmpty else { return }
+            focusListing(id: id)
+            onLocationConsumed()
+        }
+        .onChange(of: initialQuery) { _, q in
+            guard !q.isEmpty else { return }
+            runSearch(q)
+            onLocationConsumed()
         }
         .onChange(of: initialLocation) { _, loc in
             guard !loc.isEmpty else { return }
@@ -653,7 +660,7 @@ struct ExploreView: View {
     /// small cluster. This fits the actual bounding box of what is displayed,
     /// so cancelling a search lands on the annonces rather than on the country.
     private func fitAllListings() {
-        let coords = (0..<listings.count).map(coord)
+        let coords = listings.enumerated().map { coord($0.element, $0.offset) }
         guard !coords.isEmpty else { return fitCountry() }
 
         let lats = coords.map(\.latitude)
@@ -725,7 +732,7 @@ struct ExploreView: View {
                     }
                 }
             } else {
-                let spaces = listingSuggestions(panelText)
+                let spaces = SpaceSearch.spaces(panelText)
                 if !spaces.isEmpty {
                     Text("Espaces")
                         .font(.moblyBody(11, weight: .semibold))
@@ -738,7 +745,7 @@ struct ExploreView: View {
                                       action: { focusListing(l) })
                     }
                 }
-                let local = locationSuggestions
+                let local = SpaceSearch.places(panelText)
                 if !local.isEmpty {
                     if !spaces.isEmpty {
                         Text("Lieux")
@@ -748,7 +755,7 @@ struct ExploreView: View {
                     }
                     ForEach(local, id: \.name) { s in
                         suggestionRow(title: s.name,
-                                      subtitle: "\(s.region), Cameroun",
+                                      subtitle: s.region == "Cameroun" ? "Cameroun" : "\(s.region), Cameroun",
                                       action: { goTo("\(s.name), \(s.region)") })
                     }
                 }
@@ -905,30 +912,7 @@ struct ExploreView: View {
                             .focused($searchActive)
                             .autocorrectionDisabled()
                             .submitLabel(.search)
-                            .onSubmit {
-                                let q = searchText.trimmingCharacters(in: .whitespaces)
-                                guard !q.isEmpty else { return }
-                                let exactCity = MoblyData.searchableLocations.first {
-                                    Self.fold($0.name) == Self.fold(q)
-                                }
-                                if let city = exactCity {
-                                    goTo("\(city.name), \(city.region)")
-                                } else if case let spaces = listingSuggestions(q, limit: 50), !spaces.isEmpty {
-                                    // Name search without picking a suggestion:
-                                    // show every space whose name matched on
-                                    // the map and let the user choose — "kina"
-                                    // with two Kina annonces shows both.
-                                    showNameMatches(spaces, query: q)
-                                    return
-                                } else if let match = bestCityMatch(q) {
-                                    goTo("\(match.name), \(match.region)")
-                                } else {
-                                    goTo(q)
-                                }
-                                SavedSearchStore.shared.add(label: q,
-                                                            query: q,
-                                                            filters: filters)
-                            }
+                            .onSubmit { runSearch(searchText) }
                         if !searchText.isEmpty {
                             Button(action: clearSearchTextOnly) {
                                 Image(systemName: "xmark.circle.fill")
@@ -1038,13 +1022,20 @@ struct ExploreView: View {
                         .font(.moblyBody(11))
                         .foregroundStyle(Color(hex: 0x9A9DAC))
                         .lineLimit(1)
-                    HStack(spacing: 4) {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 9))
-                            .foregroundStyle(Color.moblyAccent)
-                        Text(l.rating)
+                    // Same rule as every other card: no avis, no star.
+                    if l.rating.isEmpty {
+                        Text("Nouveau")
                             .font(.moblyBody(11, weight: .semibold))
-                            .foregroundStyle(Color.moblyTextPrimary)
+                            .foregroundStyle(Color.moblyPrimary)
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color.moblyAccent)
+                            Text(l.rating)
+                                .font(.moblyBody(11, weight: .semibold))
+                                .foregroundStyle(Color.moblyTextPrimary)
+                        }
                     }
                 }
                 Spacer(minLength: 0)
@@ -1144,10 +1135,12 @@ struct ExploreView: View {
 
     // MARK: Bottom carousel
 
-    private var carousel: some View {
+    private func carousel(_ listings: [Listing]) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
+                // Lazy: one card (and one photo download) per listing on the
+                // map was built up front.
+                LazyHStack(spacing: 14) {
                     ForEach(listings) { l in
                         ExploreCard(listing: l, highlighted: selected == l.id) {
                             openListing(l)
@@ -1161,7 +1154,14 @@ struct ExploreView: View {
                     }
                 }
                 .padding(.horizontal, 18)
+                // Room for the cards' drop shadow, which the ScrollView clips.
+                .padding(.vertical, 14)
             }
+            // A ScrollView takes every point it is offered, so without this the
+            // strip filled the whole map and the cards floated in the middle of
+            // the screen instead of sitting above the tab bar. ExploreCard is a
+            // fixed 112 tall; the 28 is the shadow padding above.
+            .frame(height: 140)
             .onChange(of: selected) { _, new in
                 guard let new else { return }
                 withAnimation(Motion.panel) {

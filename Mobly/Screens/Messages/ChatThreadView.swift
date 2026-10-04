@@ -24,6 +24,8 @@ struct ChatThreadView: View {
 
     @State private var reactionTarget: ChatMessage?
     @State private var deleteTarget: ChatMessage?
+    /// Every photo of a long-pressed group, pending the delete confirmation.
+    @State private var deleteGroupTarget: [ChatMessage]?
     @State private var selectedListing: Listing?
     @State private var pendingProfileListing: Listing?
     @State private var fetchedThreadListing: Listing?
@@ -48,6 +50,8 @@ struct ChatThreadView: View {
         let id = UUID()
         let seconds: Int
         let samples: [CGFloat]
+        /// Real bytes-sent, 0…1 — drives the ring where the duration sits.
+        var progress: Double = 0
     }
     /// No camera on this device (simulator, or an iPad without one).
     @State private var cameraUnavailable = false
@@ -184,7 +188,7 @@ struct ChatThreadView: View {
         return dayFormatter.string(from: date)
     }
 
-    private var partnerTyping: Bool { chat.typingIn.contains(thread.id) }
+    private var partnerTyping: Bool { !thread.isPending && chat.typingIn.contains(thread.id) }
 
     /// Resolve by server identity only; titles can repeat across owners.
     private var resolvedListing: Listing? {
@@ -354,7 +358,7 @@ struct ChatThreadView: View {
                 // space. They used to vanish the moment you typed a character,
                 // which is why they seemed to have moved away from the bottom
                 // of the conversation.
-                if !recorder.isRecording { quickReplies }
+                if !recorder.isRecording && !thread.isPending { quickReplies }
                 composer
             }
             .background(Color(hex: 0xF4F5F8))
@@ -365,17 +369,19 @@ struct ChatThreadView: View {
             }
         }
         .swipeToDismiss(onDismiss: onBack)
-        .onAppear { recorder.requestPermissionIfNeeded() }
+        .onAppear {
+            if !thread.isPending { recorder.requestPermissionIfNeeded() }
+        }
         .task {
-            chat.activeThreadId = thread.id
             chat.ensureConnected()
+            guard !thread.isPending else { return }
+            chat.activeThreadId = thread.id
             ThreadPrefs.shared.clearManualUnread(thread.id)
-            async let msgs: () = chat.loadMessages(threadId: thread.id)
-            async let listing: () = refreshListingState()
-            _ = await (msgs, listing)
+            Task { await refreshListingState() }
+            await chat.loadMessages(threadId: thread.id)
             chat.markRead(threadId: thread.id)
         }
-        .onDisappear { if chat.activeThreadId == thread.id { chat.activeThreadId = nil } }
+        .onDisappear { if !thread.isPending && chat.activeThreadId == thread.id { chat.activeThreadId = nil } }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .attachments:
@@ -489,6 +495,26 @@ struct ChatThreadView: View {
                 }
             }
             Button("Annuler", role: .cancel) { deleteTarget = nil }
+        }
+        .confirmationDialog("Supprimer ces \(deleteGroupTarget?.count ?? 0) photos ?",
+                            isPresented: Binding(
+                                get: { deleteGroupTarget != nil },
+                                set: { if !$0 { deleteGroupTarget = nil } }),
+                            titleVisibility: .visible) {
+            Button("Supprimer pour moi", role: .destructive) {
+                guard let group = deleteGroupTarget else { return }
+                deleteGroupTarget = nil
+                Task { await chat.deleteMessages(threadId: thread.id, messageIds: group.map(\.id), forBoth: false) }
+            }
+            // A group is always one sender's run, so the first photo speaks for all.
+            if deleteGroupTarget?.first?.fromMe == true {
+                Button("Supprimer pour tout le monde", role: .destructive) {
+                    guard let group = deleteGroupTarget else { return }
+                    deleteGroupTarget = nil
+                    Task { await chat.deleteMessages(threadId: thread.id, messageIds: group.map(\.id), forBoth: true) }
+                }
+            }
+            Button("Annuler", role: .cancel) { deleteGroupTarget = nil }
         }
     }
 
@@ -669,7 +695,7 @@ struct ChatThreadView: View {
                     // First-load state: no cached history yet + a fetch in
                     // flight. Skeleton bubbles so the view doesn't sit
                     // visibly empty during the round-trip.
-                    if messages.isEmpty && chat.loadingMessagesFor.contains(thread.id) {
+                    if messages.isEmpty && (thread.isPending || chat.loadingMessagesFor.contains(thread.id)) {
                         ChatSkeleton()
                     }
                     ForEach(Array(messages.enumerated()), id: \.element.id) { i, m in
@@ -700,15 +726,22 @@ struct ChatThreadView: View {
                             if let group = photoGroups.groups[m.id] {
                                 // Several photos sent together render as one
                                 // stacked deck; the rest of the run is skipped.
-                                // Long-press / swipe act on the LAST photo.
+                                // Reply / react act on the LAST photo; delete
+                                // takes the whole group (one photo: viewer).
                                 let last = group[group.count - 1]
                                 PhotoStackBubble(
                                     messages: group,
                                     highlighted: highlightedId == m.id,
                                     onReply: { replyingTo = last },
                                     onReact: { reactionTarget = last },
+                                    onDelete: { deleteGroupTarget = group },
                                     onOpen: { start in
-                                        let validPhotos = group.filter { !$0.mediaExpired && $0.mediaUrl != nil }
+                                        // Same filter for URLs and messages so the
+                                        // two arrays stay index-aligned (reply and
+                                        // delete in the viewer go by index).
+                                        let validPhotos = group.filter {
+                                            !$0.mediaExpired && $0.mediaUrl.flatMap(URL.init(string:)) != nil
+                                        }
                                         let urls = validPhotos.compactMap { URL(string: $0.mediaUrl!) }
                                         guard !urls.isEmpty else { return }
                                         galleryStart = min(start, urls.count - 1)
@@ -736,10 +769,13 @@ struct ChatThreadView: View {
                         }
                     }
 
-                    if !uploadingPreviews.isEmpty {
+                    // From ChatStore, not local @State: an upload started here
+                    // must still be on screen if the user leaves and comes back
+                    // before it lands.
+                    if let pending = chat.pendingUploads[thread.id], !pending.isEmpty {
                         HStack {
                             Spacer(minLength: 50)
-                            uploadPreviewStack(uploadingPreviews)
+                            pendingUploadStack(pending)
                         }
                         .transition(.asymmetric(
                             insertion: .scale(scale: 0.6, anchor: .bottomTrailing)
@@ -774,7 +810,7 @@ struct ChatThreadView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .animation(Motion.panel, value: messages.count)
-                .animation(Motion.panel, value: uploadingPreviews.isEmpty)
+                .animation(Motion.panel, value: chat.pendingUploads[thread.id]?.count ?? 0)
                 .animation(Motion.panel, value: uploadingPreview == nil)
             }
             .scrollDismissesKeyboard(.interactively)
@@ -796,6 +832,17 @@ struct ChatThreadView: View {
                                  let msg = galleryMessages[min(index, galleryMessages.count - 1)]
                                  galleryURLs = []; galleryMessages = []
                                  replyingTo = msg
+                             },
+                             canDeleteForBoth: galleryMessages.first?.fromMe == true,
+                             onDelete: galleryMessages.isEmpty ? nil : { index, forBoth in
+                                 // Drop the photo from the open viewer right away;
+                                 // removing the last one empties the URLs, which
+                                 // closes the cover through its binding.
+                                 guard galleryMessages.indices.contains(index),
+                                       galleryURLs.indices.contains(index) else { return }
+                                 let msg = galleryMessages.remove(at: index)
+                                 galleryURLs.remove(at: index)
+                                 Task { await chat.deleteMessage(threadId: thread.id, messageId: msg.id, forBoth: forBoth) }
                              })
                 .ignoresSafeArea()
         }
@@ -903,9 +950,20 @@ struct ChatThreadView: View {
                      isPlaying: false, realSamples: sending.samples)
                 .frame(width: 130, height: 24)
 
-            Text(String(format: "%d:%02d", sending.seconds / 60, sending.seconds % 60))
-                .font(.system(size: 11, weight: .medium).monospacedDigit())
-                .foregroundStyle(Color.white.opacity(0.85))
+            // The indicator REPLACES the duration rather than covering the
+            // bubble. The old version dimmed the whole note behind a scrim with
+            // a spinner on top, which hid the waveform the user had just
+            // recorded and made a note that was sending fine look broken. The
+            // duration is the one element that is meaningless until the note
+            // lands, so it is the honest place to show progress — the waveform
+            // stays legible throughout.
+            ZStack {
+                VoiceUploadIndicator(progress: sending.progress)
+                Text(String(format: "%d:%02d", sending.seconds / 60, sending.seconds % 60))
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundStyle(Color.white.opacity(0.85))
+                    .opacity(0)          // reserves the width so nothing shifts on completion
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -915,18 +973,6 @@ struct ChatThreadView: View {
                 bottomTrailing: 5, topTrailing: 18))
                 .fill(Color.moblyPrimary)
         )
-        // The loading indicator sits IN FRONT of the note, over a soft scrim,
-        // so it reads as "sending…" rather than a playable bubble.
-        .overlay {
-            ZStack {
-                UnevenRoundedRectangle(cornerRadii: .init(
-                    topLeading: 18, bottomLeading: 18,
-                    bottomTrailing: 5, topTrailing: 18))
-                    .fill(Color.black.opacity(0.18))
-                ProgressView()
-                    .tint(.white)
-            }
-        }
     }
 
     // MARK: Reply preview above composer
@@ -1032,25 +1078,30 @@ struct ChatThreadView: View {
     }
 
     private var normalComposer: some View {
-        let canSend = !draft.trimmingCharacters(in: .whitespaces).isEmpty
+        let ready = !thread.isPending
+        let canSend = ready && !draft.trimmingCharacters(in: .whitespaces).isEmpty
         return HStack(spacing: 10) {
-            Button { activeSheet = .attachments } label: {
+            Button { if ready { activeSheet = .attachments } } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
                     .frame(width: 42, height: 42)
                     .background(Circle().fill(Color(hex: 0xF4F5F8)))
+                    .opacity(ready ? 1 : 0.45)
             }
+            .disabled(!ready)
 
             HStack(spacing: 10) {
-                TextField("Message…", text: $draft, axis: .vertical)
+                TextField(ready ? "Message…" : "Connexion…", text: $draft, axis: .vertical)
                     .font(.moblyBody(13.5)).foregroundStyle(Color.moblyTextPrimary)
                     .focused($inputFocused).lineLimit(1...4)
+                    .disabled(!ready)
             }
             .padding(.horizontal, 16).frame(minHeight: 44)
             .background(RoundedRectangle(cornerRadius: 22).fill(Color(hex: 0xF4F5F8)))
 
             Button {
+                guard ready else { return }
                 if canSend {
                     send()
                 } else {
@@ -1071,10 +1122,12 @@ struct ChatThreadView: View {
                 }
             } label: {
                 sendCircle(canSend ? "paperplane.fill" : "mic.fill")
+                    .opacity(ready ? 1 : 0.45)
             }
+            .disabled(!ready)
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.2).onEnded { _ in
-                    guard !canSend, config.can("chat.voice") else { return }
+                    guard ready, !canSend, config.can("chat.voice") else { return }
                     withAnimation(Motion.instant) { showMicHint = false }
                     let permission = AVAudioSession.sharedInstance().recordPermission
                     guard permission == .granted else {
@@ -1130,7 +1183,7 @@ struct ChatThreadView: View {
                                 GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
                 attachItem("photo.fill", "Galerie", 0x3A4FF0, enabled: config.isEnabled("chat.media")) {
                     activeSheet = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    DispatchQueue.main.async {
                         activeSheet = .galerie
                     }
                 }
@@ -1144,7 +1197,7 @@ struct ChatThreadView: View {
                         return
                     }
                     activeSheet = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    DispatchQueue.main.async {
                         activeSheet = .camera
                     }
                 }
@@ -1155,7 +1208,7 @@ struct ChatThreadView: View {
                 if iAmTheOwner && config.isEnabled("visits.invite") {
                     attachItem("calendar.badge.plus", "Visite", 0x1F8A5B) {
                         activeSheet = nil
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        DispatchQueue.main.async {
                             showProposeVisit = true
                         }
                     }
@@ -1210,7 +1263,7 @@ struct ChatThreadView: View {
     /// it, and the socket carries it to the other person.
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty, let me = auth.user?.id else { return }
+        guard !thread.isPending, !text.isEmpty, let me = auth.user?.id else { return }
         // Capture before clearing — the reply target was previously dropped
         // here, so a quoted reply was sent as an ordinary message.
         let replyId = replyingTo?.id
@@ -1233,8 +1286,43 @@ struct ChatThreadView: View {
         uploadAndSendCameraImages([image])
     }
 
+    /// In-flight photos, drawn from the file written before upload began.
+    /// The ring reflects real bytes sent; at 100% it disappears and the
+    /// confirmed bubble takes over.
+    @ViewBuilder
+    private func pendingUploadStack(_ items: [ChatStore.PendingUpload]) -> some View {
+        let w: CGFloat = items.count > 1 ? 160 : ChatImageSize.width
+        ZStack {
+            ForEach(Array(items.prefix(3).enumerated().reversed()), id: \.element.id) { i, item in
+                ZStack {
+                    if let img = UIImage(contentsOfFile: item.localURL.path) {
+                        Image(uiImage: img)
+                            .resizable().scaledToFill()
+                            .frame(width: w, height: w * 16 / 9)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    if item.failed {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(10)
+                            .background(Circle().fill(Color.black.opacity(0.45)))
+                    } else {
+                        UploadProgressRing(progress: item.progress)
+                    }
+                }
+                .rotationEffect(.degrees(items.count > 1 ? [-5.0, 3.0, -1.0][i] : 0))
+                .offset(x: items.count > 1 ? [0.0, 12.0, -10.0][i] : 0,
+                        y: items.count > 1 ? [8.0, -4.0, 0.0][i] : 0)
+            }
+        }
+        .frame(width: items.count > 1 ? w + 60 : w,
+               height: w * 16 / 9 + (items.count > 1 ? 30 : 0))
+    }
+
     private func uploadAndSendCameraImages(_ images: [UIImage]) {
-        guard let me = auth.user?.id else { return }
+        guard !thread.isPending, let me = auth.user?.id else { return }
         let jpegs = images.compactMap { $0.jpegData(compressionQuality: 0.8) }
         guard !jpegs.isEmpty else { return }
         withAnimation(Motion.quick) {
@@ -1252,7 +1340,23 @@ struct ChatThreadView: View {
             do {
                 var urls: [String] = []
                 for jpeg in jpegs {
-                    urls.append(try await MoblyAPI.shared.uploadChatImage(jpeg))
+                    // On disk BEFORE the network is touched: the bubble can then
+                    // render from the file, and it survives the user leaving the
+                    // conversation mid-upload.
+                    let pending = chat.beginUpload(threadId: thread.id, jpeg: jpeg)
+                    do {
+                        let url = try await MoblyAPI.shared.uploadChatImage(jpeg) { fraction in
+                            if let pending {
+                                chat.updateUploadProgress(threadId: thread.id,
+                                                          id: pending.id, progress: fraction)
+                            }
+                        }
+                        urls.append(url)
+                        if let pending { chat.finishUpload(threadId: thread.id, id: pending.id) }
+                    } catch {
+                        if let pending { chat.failUpload(threadId: thread.id, id: pending.id) }
+                        throw error
+                    }
                 }
                 handOffToOptimisticBubble()
                 if urls.count > 1 {
@@ -1289,7 +1393,7 @@ struct ChatThreadView: View {
 
     private func sendLocation() {
         activeSheet = nil
-        guard let me = auth.user?.id else { return }
+        guard !thread.isPending, let me = auth.user?.id else { return }
         Task {
             guard let coord = await LocationService.shared.requestOneShotCoordinate() else {
                 await chat.send(threadId: thread.id,
@@ -1307,7 +1411,22 @@ struct ChatThreadView: View {
     }
 
     private func sendVoice() {
-        guard let me = auth.user?.id else { recorder.cancelRecording(); return }
+        // These used to `return` silently, so holding the mic, speaking, and
+        // releasing produced nothing at all — no bubble, no error, no hint that
+        // the recording had been thrown away. `auth.user` is nil whenever
+        // /auth/me has not landed (a cold backend, a dropped session), which is
+        // common rather than exotic, so the most likely cause of "voice does
+        // not send" was a guard that said nothing.
+        guard !thread.isPending else {
+            recorder.cancelRecording()
+            voiceSendError = "Cette conversation n'est pas encore prête. Réessayez dans un instant."
+            return
+        }
+        guard let me = auth.user?.id else {
+            recorder.cancelRecording()
+            voiceSendError = "Votre session n'est pas encore chargée. Réessayez dans un instant."
+            return
+        }
 
         // This used to send a plain TEXT message and keep the recording in a
         // local in-memory map: the sender could replay it, and the recipient
@@ -1316,7 +1435,10 @@ struct ChatThreadView: View {
         Task {
             // Awaits AVAudioRecorder finishing the file, so the bytes we read
             // are a complete, playable note rather than a truncated container.
-            guard let result = await recorder.stopRecording() else { return }
+            guard let result = await recorder.stopRecording() else {
+                voiceSendError = "L'enregistrement n'a pas pu être finalisé. Réessayez."
+                return
+            }
             let seconds = Int(result.duration)
             let label = timeString(seconds)
             let voiceText = "🎤 Note vocale (\(label))"
@@ -1338,7 +1460,9 @@ struct ChatThreadView: View {
                 return
             }
             do {
-                let uploaded = try await MoblyAPI.shared.uploadVoiceNote(data)
+                let uploaded = try await MoblyAPI.shared.uploadVoiceNote(data) { fraction in
+                    if sendingVoice != nil { sendingVoice?.progress = fraction }
+                }
                 // Upload done: hand off from our spinner bubble to `chat.send`'s
                 // own optimistic bubble, which it inserts synchronously before it
                 // awaits — so there is no gap and no duplicate on screen.
@@ -2582,6 +2706,8 @@ struct PhotoStackBubble: View {
     var highlighted: Bool = false
     var onReply: () -> Void = {}
     var onReact: () -> Void = {}
+    /// Delete every photo of the run (the caller confirms first).
+    var onDelete: () -> Void = {}
     /// Index (among the run's viewable photos) to open the gallery at.
     var onOpen: (Int) -> Void = { _ in }
 
@@ -2622,6 +2748,9 @@ struct PhotoStackBubble: View {
                 .contextMenu {
                     Button { onReply() } label: { Label("Répondre", systemImage: "arrowshape.turn.up.left") }
                     Button { onReact() } label: { Label("Réagir", systemImage: "face.smiling") }
+                    Button(role: .destructive) { onDelete() } label: {
+                        Label("Supprimer le groupe", systemImage: "trash")
+                    }
                 }
             if !fromMe { Spacer(minLength: 30) }
         }

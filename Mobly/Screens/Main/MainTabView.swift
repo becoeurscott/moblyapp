@@ -74,11 +74,22 @@ struct MainTabView: View {
     @State private var searchQuery: String = ""
     @State private var showExplore = false
     @State private var exploreLocation = ""
+    /// Free text typed in the Accueil bar, for Explorer to resolve.
+    @State private var exploreQuery = ""
+    /// A space picked from the Accueil suggestions, for Explorer to select.
+    @State private var exploreFocusId = ""
     /// FilterState to apply the next time Explore renders. Set when the
     /// user taps a saved recherche in Favoris.
     @State private var explorePresetFilters: FilterState? = nil
     @ObservedObject private var push = PushService.shared
-    @ObservedObject private var callService = CallService.shared
+    /// Tabs the user has opened at least once. Explore, Favoris and Profil are
+    /// built on first visit instead of at launch: mounted-but-hidden they ran
+    /// their own loads (and re-rendered on every store change) behind the
+    /// screen the user was actually touching. Home and Messages stay eager —
+    /// Messages owns the push deep-link path into a conversation.
+    @State private var visitedTabs: Set<MoblyTab> = []
+
+    private func mounted(_ t: MoblyTab) -> Bool { tab == t || visitedTabs.contains(t) }
 
     /// Where the open came from, reported with the view so the owner's
     /// "Origine des vues" can tell Home, Explore, a boost, a shared link… apart.
@@ -157,28 +168,57 @@ struct MainTabView: View {
                         exploreLocation = city
                         tab = .explore
                     },
+                    onSearchQuery: { q in
+                        guard config.isEnabled("maps") else {
+                            searchCategory = nil
+                            searchQuery = q
+                            showSearch = true
+                            return
+                        }
+                        exploreQuery = q
+                        tab = .explore
+                    },
+                    onPickSpace: { l in
+                        guard config.isEnabled("maps") else {
+                            openListing(l, from: "search")
+                            return
+                        }
+                        exploreFocusId = l.id
+                        tab = .explore
+                    },
                     onOpenExplore: { showExplore = true }
                 )
                 .opacity(tab == .home ? 1 : 0)
                 .allowsHitTesting(tab == .home)
 
+                if mounted(.explore) {
                 ExploreView(
                     onOpenListing: { openListing($0, from: "explore") },
                     onOpenListingFromSearch: { openListing($0, from: "search") },
                     initialLocation: exploreLocation,
                     initialFilters: explorePresetFilters,
+                    initialQuery: exploreQuery,
+                    initialFocusId: exploreFocusId,
                     onLocationConsumed: {
                         exploreLocation = ""
+                        exploreQuery = ""
+                        exploreFocusId = ""
                         explorePresetFilters = nil
                     }
                 )
                 .opacity(tab == .explore ? 1 : 0)
+                // No cross-fade for the map: fading a live Map with its pins
+                // forces it to be composited offscreen for every frame of the
+                // fade — the stutter on returning to Explorer. It cuts in.
+                .animation(nil, value: tab)
                 .allowsHitTesting(tab == .explore)
+                }
 
                 MessagesView(openVisits: $showVisitsFromRoute)
                     .opacity(tab == .messages ? 1 : 0)
                     .allowsHitTesting(tab == .messages)
 
+                if mounted(.favorites) {
                 FavoritesView(
                     onOpenListing: { openListing($0, from: "favorites") },
                     onOpenSearch: { search in
@@ -205,18 +245,22 @@ struct MainTabView: View {
                 )
                 .opacity(tab == .favorites ? 1 : 0)
                 .allowsHitTesting(tab == .favorites)
+                }
 
+                if mounted(.profile) {
                 ProfileView(
                     onOpenFavorites: { tab = .favorites },
                     onLogout: onLogout
                 )
                 .opacity(tab == .profile ? 1 : 0)
                 .allowsHitTesting(tab == .profile)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Tabs cross-fade rather than cutting. Short enough that it still
             // reads as instant, long enough that the eye isn't jolted.
             .animation(Motion.instant, value: tab)
+            .onChange(of: tab, initial: true) { _, t in visitedTabs.insert(t) }
 
             if !chrome.hideTabBar {
                 // Frosted band under the floating bar, running to the physical

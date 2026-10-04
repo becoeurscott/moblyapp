@@ -48,7 +48,14 @@ struct ProfileView: View {
                  iconColor: identityVerified ? 0x1F8A5B : 0xE5950C,
                  value: identityVerified ? "Vérifié" : "Non vérifié",
                  route: .identity),
+        MenuItem(label: "Adresse e-mail",
+                 icon: emailVerified ? "envelope.badge.shield.half.filled" : "envelope",
+                 iconBg: emailVerified ? 0xE9F9EF : 0xFFF4E5,
+                 iconColor: emailVerified ? 0x1F8A5B : 0xE5950C,
+                 value: emailVerified ? "Vérifiée" : "À confirmer",
+                 route: .email),
     ].compactMap { $0 } }
+    private var emailVerified: Bool { auth.user?.emailVerified ?? false }
     /// Computed so the Langue row can show the language the user is actually
     /// on — and so it can be hidden entirely while `selectionEnabled` is off.
     /// The row is gated rather than deleted: the String Catalog and the
@@ -80,6 +87,7 @@ struct ProfileView: View {
                         switch route {
                         case .editProfile:  EditProfileView()
                         case .identity:     IdentityVerificationView()
+                        case .email:        EmailVerificationView()
                         case .language:     LanguageView()
                         case .notifications: NotificationsSettingsView()
                         case .savedSearches: SavedSearchesView()

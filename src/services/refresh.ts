@@ -72,6 +72,9 @@ export async function issueRefreshToken(
  * Spend a refresh token and return its replacement.
  * Throws if it's unknown, expired, or already spent.
  */
+/** How long a just-rotated refresh token still counts as a concurrent retry. */
+const CONCURRENT_REFRESH_GRACE_MS = 30_000;
+
 export async function rotateRefreshToken(
   token: string
 ): Promise<{ userId: string; refresh: IssuedRefresh }> {
@@ -85,9 +88,16 @@ export async function rotateRefreshToken(
   // Already spent or explicitly revoked → possible theft. We can't distinguish
   // a stolen token from a client replaying, so assume the worst and kill the
   // family; the legitimate user re-authenticates, the attacker gains nothing.
+  //
+  // Except within a few seconds of the rotation: that is the same device
+  // firing two refreshes at once (requests that 401 together), not a thief.
+  // Killing the family there signed real users out mid-session. A replay that
+  // late in the window still only gets a sibling token, never the old one.
   if (existing.revokedAt) {
-    await revokeFamily(existing.familyId);
-    throw new ApiError(401, 'Session expirée, reconnectez-vous', 'UNAUTHENTICATED');
+    if (Date.now() - existing.revokedAt.getTime() > CONCURRENT_REFRESH_GRACE_MS) {
+      await revokeFamily(existing.familyId);
+      throw new ApiError(401, 'Session expirée, reconnectez-vous', 'UNAUTHENTICATED');
+    }
   }
 
   if (existing.expiresAt <= new Date()) {
@@ -113,7 +123,9 @@ export async function rotateRefreshToken(
   await prisma.$transaction([
     prisma.refreshToken.update({
       where: { id: existing.id },
-      data: { revokedAt: new Date() },
+      // Keep the first revocation time on a concurrent retry, so the grace
+      // window can't be stretched by replaying the token again and again.
+      data: { revokedAt: existing.revokedAt ?? new Date() },
     }),
     prisma.refreshToken.create({
       data: {

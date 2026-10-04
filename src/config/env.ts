@@ -152,6 +152,21 @@ export const env = {
     },
   },
 
+  /**
+   * InsForge mail service (POST /api/email/send-raw) — e-mail confirmation and
+   * password-reset codes. `INSFORGE_API_KEY` is the project admin key (`ik_…`,
+   * `npx @insforge/cli secrets get API_KEY`): full access, server-only. Mail
+   * goes out from noreply@<appkey>.send.insforge.dev; only the display name
+   * is ours to set.
+   */
+  insforge: {
+    url: (process.env.INSFORGE_URL ?? 'https://fe6jdhqj.eu-central.insforge.app').replace(/\/$/, ''),
+    apiKey: process.env.INSFORGE_API_KEY ?? '',
+    get emailConfigured(): boolean {
+      return Boolean(this.url && this.apiKey);
+    },
+  },
+
   /** How long a chat image / voice note lives before the retention job deletes
    *  it from Cloudinary. Listing photos and avatars are permanent. */
   chatMediaRetentionDays: Number(process.env.CHAT_MEDIA_RETENTION_DAYS ?? 90),

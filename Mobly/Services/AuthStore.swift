@@ -123,7 +123,9 @@ final class AuthStore: ObservableObject {
             apply(u)
         } catch let e as MoblyAPI.APIError {
             // Offline at launch isn't a sign-out — keep the token and retry later.
-            if !e.isOffline {
+            // Neither is a rate limit or a server fault: only the server
+            // refusing the token (4xx) ends the session.
+            if !e.isOffline && !e.isRetryable && !e.isCancelled {
                 api.clearSession()
                 // RootView routes straight to the tab bar when a token exists,
                 // without waiting for this call. `clearSession()` only drops the
@@ -322,14 +324,19 @@ final class AuthStore: ObservableObject {
 
     // MARK: - Password reset
 
-    /// Masked destination for display only, e.g. "+237 6•• •• •• 66".
+    /// Masked destination for display only, e.g. "+237 6•• •• •• 66" or
+    /// "sc•••••@gmail.com" — whichever `resetChannel` used.
     @Published private(set) var resetPhone: String?
+    /// "sms" or "email": where the current reset code went.
+    @Published private(set) var resetChannel: String = "sms"
+    /// The account has a confirmed e-mail, so the reset can switch channel.
+    @Published private(set) var resetEmailAvailable = false
     /// Signed token identifying the account being reset. The real phone never
     /// reaches the client.
     private var resetToken: String?
 
-    /// Step 1: ask for a reset code.
-    func forgotPassword(identifier: String) async -> Bool {
+    /// Step 1: ask for a reset code. `channel` nil lets the server choose.
+    func forgotPassword(identifier: String, channel: String? = nil) async -> Bool {
         isBusy = true
         errorMessage = nil
         lastErrorCode = nil
@@ -337,8 +344,10 @@ final class AuthStore: ObservableObject {
         defer { isBusy = false }
 
         do {
-            let res = try await api.forgotPassword(identifier: identifier)
-            resetPhone = res.maskedPhone
+            let res = try await api.forgotPassword(identifier: identifier, channel: channel)
+            resetPhone = res.maskedDestination ?? res.maskedPhone
+            resetChannel = res.channel ?? "sms"
+            resetEmailAvailable = res.emailAvailable ?? false
             resetToken = res.resetToken
             devCode = res.devCode
             codeLength = res.codeLength
@@ -386,6 +395,71 @@ final class AuthStore: ObservableObject {
             return false
         }
     }
+
+    // MARK: - E-mail confirmation
+
+    /// Masked address the last confirmation code went to.
+    @Published private(set) var emailCodeDestination: String?
+    /// The address that code went to — becomes the account e-mail once confirmed.
+    @Published private(set) var emailCodeTarget: String?
+    @Published private(set) var emailCodeLength: Int = 6
+
+    /// Mail a confirmation code. `email` nil = the account's current address.
+    /// Returns false on failure (message in `errorMessage`); true when sent, or
+    /// when the address turned out to be already confirmed (`user` updated).
+    func sendEmailCode(email: String? = nil) async -> Bool {
+        isBusy = true
+        errorMessage = nil
+        lastErrorCode = nil
+        fieldErrors = [:]
+        defer { isBusy = false }
+
+        do {
+            let res = try await api.sendEmailCode(email: email)
+            if let u = res.user { user = u }
+            emailCodeTarget = res.email
+            emailCodeDestination = res.maskedEmail ?? res.email
+            if let len = res.codeLength { emailCodeLength = len }
+            devCode = res.devCode
+            if res.sent { startCooldown(60) }
+            return true
+        } catch let e as MoblyAPI.APIError {
+            lastErrorCode = e.code
+            fieldErrors = e.fields
+            if e.code == .otpRateLimited, let secs = Self.secondsIn(e.message) {
+                startCooldown(secs)
+            }
+            errorMessage = message(for: e)
+            return false
+        } catch {
+            errorMessage = "Impossible d'envoyer l'e-mail. Réessayez."
+            return false
+        }
+    }
+
+    func verifyEmailCode(_ code: String) async -> Bool {
+        isBusy = true
+        errorMessage = nil
+        lastErrorCode = nil
+        defer { isBusy = false }
+
+        do {
+            user = try await api.verifyEmailCode(code)
+            devCode = nil
+            emailCodeDestination = nil
+            emailCodeTarget = nil
+            return true
+        } catch let e as MoblyAPI.APIError {
+            lastErrorCode = e.code
+            errorMessage = message(for: e)
+            return false
+        } catch {
+            errorMessage = "Vérification impossible. Réessayez."
+            return false
+        }
+    }
+
+    var isEmailVerified: Bool { user?.emailVerified ?? false }
 
     // MARK: - Password
 

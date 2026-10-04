@@ -156,6 +156,8 @@ extension ListingDTO {
             ownerAvatarColor: owner?.avatarColor,
             ownerContactActive: owner?.active ?? true,
             category: category,
+            rooms: rooms,
+            bathrooms: bathrooms,
             subtitle: subtitle,
             about: about,
             verified: verified,

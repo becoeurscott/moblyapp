@@ -1,7 +1,8 @@
-import rateLimit, { type Options } from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator, type Options } from 'express-rate-limit';
 import type { Request, Response, NextFunction } from 'express';
 import { randomUUID } from 'node:crypto';
 import { env } from '../config/env';
+import { verifyToken } from '../lib/jwt';
 import { configSnapshot } from '../services/config';
 import { RATE_LIMIT_WINDOW_MS, type AppConfigDoc } from '../config/appConfigSchema';
 
@@ -50,18 +51,52 @@ const common: Partial<Options> = {
   },
 };
 
+/**
+ * Budget key: the signed-in account when the request carries a valid access
+ * token, the IP otherwise. Cameroonian carriers put whole neighbourhoods
+ * behind one carrier-NAT address, so a per-IP ceiling let one busy user
+ * exhaust everyone else's budget on that network.
+ */
+function userOrIpKey(req: Request): string {
+  const header = req.headers.authorization;
+  if (header?.startsWith('Bearer ')) {
+    try {
+      return `u:${verifyToken(header.slice(7)).sub}`;
+    } catch {
+      // Expired or forged — count it against the address like any anonymous call.
+    }
+  }
+  return ipKeyGenerator(req.ip ?? '');
+}
+
+/** Sign-in routes, which `authLimiter` and the OTP limiters already guard. */
+const AUTH_PATH = /^\/api(?:\/v\d+)?\/auth\//;
+
 /** Broad ceiling on the whole API. */
 export const globalLimiter = rateLimit({
   ...common,
   ...fromConfig('global'),
-  // Health checks shouldn't burn budget.
-  skip: (req) => req.path === '/health',
+  keyGenerator: userOrIpKey,
+  // Health checks shouldn't burn budget, and sign-in must never be refused
+  // because the same phone browsed a lot beforehand: that is what told users
+  // "Trop de tentatives" on their first Google tap.
+  skip: (req) => req.path === '/health' || req.path.endsWith('/health') || AUTH_PATH.test(req.path),
 });
 
-/** Anything that creates a session. */
+/**
+ * Anything that creates a session.
+ *
+ * Only failures count. This limiter exists to stop password guessing, and a
+ * guess that worked is no longer a guess — while counting successes meant a
+ * couple of app relaunches (each spends a refresh token), an availability
+ * check per signup-form edit and a Google sign-in all drew from the same 20,
+ * so a user could be told "Trop de tentatives" on their very first Google
+ * tap. Carrier NAT makes it worse: everyone behind one IP shares the budget.
+ */
 export const authLimiter = rateLimit({
   ...common,
   ...fromConfig('auth'),
+  skipSuccessfulRequests: true,
 });
 
 /** Sending an SMS costs money — keep this tight per IP. */

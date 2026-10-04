@@ -705,6 +705,9 @@
         }
       }
     },
+    "Adresse confirmée" : {
+
+    },
     "Adresse e-mail" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -721,6 +724,9 @@
           }
         }
       }
+    },
+    "Adresse non confirmée" : {
+
     },
     "Ajouter d'autres photos" : {
 
@@ -1637,6 +1643,12 @@
         }
       }
     },
+    "Avis indisponibles pour le moment" : {
+
+    },
+    "Avis non publié" : {
+
+    },
     "Avis reçus" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2531,12 +2543,22 @@
         }
       }
     },
-    "Code à %lld chiffres envoyé au %@." : {
+    "Code à %lld chiffres envoyé à %@. Il sert aussi à récupérer votre compte si vous oubliez votre mot de passe." : {
       "localizations" : {
         "fr" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Code à %1$lld chiffres envoyé au %2$@."
+            "value" : "Code à %1$lld chiffres envoyé à %2$@. Il sert aussi à récupérer votre compte si vous oubliez votre mot de passe."
+          }
+        }
+      }
+    },
+    "Code à %lld chiffres envoyé à %@. Pensez à vérifier vos spams." : {
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Code à %1$lld chiffres envoyé à %2$@. Pensez à vérifier vos spams."
           }
         }
       }
@@ -2827,6 +2849,9 @@
           }
         }
       }
+    },
+    "Confirmez votre e-mail" : {
+
     },
     "Connectez-vous" : {
 
@@ -3786,6 +3811,9 @@
           }
         }
       }
+    },
+    "E-mail confirmé" : {
+
     },
     "Échangez et planifiez sans quitter l'app" : {
       "extractionState" : "manual",
@@ -5237,6 +5265,9 @@
         }
       }
     },
+    "Je suis sur place" : {
+
+    },
     "Je vous envoie plus de photos." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5987,6 +6018,9 @@
     "Mis à jour le %@" : {
 
     },
+    "Mise à jour des statistiques…" : {
+
+    },
     "Mise à jour requise" : {
 
     },
@@ -6103,6 +6137,9 @@
           }
         }
       }
+    },
+    "Modifier l’adresse" : {
+
     },
     "Modifier l'annonce" : {
       "extractionState" : "manual",
@@ -6481,6 +6518,9 @@
           }
         }
       }
+    },
+    "Nous envoyons un code à %@." : {
+
     },
     "Nous l'utilisons pour confirmer votre compte et vous mettre en relation avec les propriétaires." : {
 
@@ -7188,6 +7228,9 @@
         }
       }
     },
+    "Placer la punaise moi-même" : {
+
+    },
     "Placer sur la carte" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7221,6 +7264,9 @@
           }
         }
       }
+    },
+    "Placez-vous sur le lieu où se trouve le bien, puis touchez « Ma position » : la punaise se posera exactement sur le logement." : {
+
     },
     "Planifiez une visite avant de vous engager." : {
       "extractionState" : "manual",
@@ -7399,6 +7445,9 @@
       }
     },
     "Pour la sécurité de tous, vérifiez\nvotre identité avant de publier." : {
+
+    },
+    "Pour plus de précision" : {
 
     },
     "Pour publier un espace sur Mobly, votre pièce d'identité doit d'abord être vérifiée. Cela protège les visiteurs et rassure vos futurs locataires." : {
@@ -8135,6 +8184,12 @@
           }
         }
       }
+    },
+    "Recevoir le code par e-mail" : {
+
+    },
+    "Recevoir le code par SMS" : {
+
     },
     "Recherche" : {
       "extractionState" : "manual",
@@ -10137,6 +10192,9 @@
           }
         }
       }
+    },
+    "Une adresse confirmée vous permet de réinitialiser votre mot de passe par e-mail si vous n’avez plus accès à votre numéro." : {
+
     },
     "Une majuscule" : {
       "extractionState" : "manual",

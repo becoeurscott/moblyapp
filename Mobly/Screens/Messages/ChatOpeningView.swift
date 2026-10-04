@@ -3,9 +3,9 @@ import SwiftUI
 /// Bridging view shown the instant a user taps "Message l'hôte" on a listing.
 ///
 /// If a cached thread for this listing already exists (from a prior session or
-/// disk cache), we skip the skeleton entirely and show ChatThreadView with
-/// cached messages while `POST /threads` refreshes in the background.
-/// Otherwise we show a skeleton until the server responds.
+/// disk cache), we show it immediately while `POST /threads` refreshes in the
+/// background. Otherwise we still open a real chat shell immediately from the
+/// listing data, then swap in the server thread id as soon as InsForge answers.
 struct ChatOpeningView: View {
     let listing: Listing
     var onBack: () -> Void = {}
@@ -27,7 +27,7 @@ struct ChatOpeningView: View {
                 ChatThreadView(thread: t, onBack: onBack)
                     .transition(.opacity)
             } else {
-                ChatSkeletonScreen(listing: listing, onBack: onBack)
+                ChatThreadView(thread: .pending(for: listing), onBack: onBack)
                     .transition(.opacity)
             }
         }

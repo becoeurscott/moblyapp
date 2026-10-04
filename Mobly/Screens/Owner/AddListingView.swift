@@ -115,6 +115,11 @@ struct AddListingView: View {
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var uploadedPhotos: [Data]
     @State private var coverIndex = 0
+    /// Explains the cover rule once, as the owner arrives on the photos step —
+    /// never mid-picking, so adding photos is never interrupted.
+    @State private var showCoverNotice = false
+    @State private var coverNoticeShown = false
+    @State private var showPhotoPicker = false
     /// Index of the thumbnail currently being dragged, or nil. Drives the
     /// scale/opacity feedback on the source cell + the accent outline on
     /// hovered drop targets.
@@ -610,6 +615,7 @@ struct AddListingView: View {
             fieldBox {
                 HStack {
                     TextField("0", text: $priceValue).keyboardType(.numberPad).font(.moblyHeading(20))
+                        .foregroundStyle(Color.moblyTextPrimary)
                     Text("FCFA / \(priceUnit)").font(.moblyHeading(15)).foregroundStyle(Color(hex: 0x9A9DAC))
                 }
             }
@@ -632,7 +638,12 @@ struct AddListingView: View {
                        ? "Ajoutez des photos de votre espace. La première sera la couverture — vous pourrez la changer ensuite."
                        : "Touchez ou faites glisser une photo pour la définir comme couverture.")
 
-            PhotosPicker(selection: $pickerItems, matching: .images) {
+            // A plain button driving `.photosPicker(isPresented:)`, not an
+            // inline `PhotosPicker`: once thumbnails (with their drag-to-
+            // reorder interactions) were on screen, the inline picker's
+            // button stopped presenting — "Ajouter d'autres photos" did
+            // nothing after the first batch.
+            Button { showPhotoPicker = true } label: {
                 HStack(spacing: 10) {
                     Image(systemName: loadingPhotos ? "arrow.triangle.2.circlepath" : "photo.badge.plus")
                         .font(.system(size: 18, weight: .semibold))
@@ -643,18 +654,34 @@ struct AddListingView: View {
                 .frame(maxWidth: .infinity).frame(height: 54)
                 .background(RoundedRectangle(cornerRadius: 16).fill(Color(hex: 0xEEF0FE)))
             }
-            .onChange(of: pickerItems) { _, items in loadPhotos(items) }
+            .buttonStyle(.plain)
+            .alert("Photo de couverture", isPresented: $showCoverNotice) {
+                Button("Compris", role: .cancel) {}
+            } message: {
+                Text("La première photo que vous sélectionnez sera la photo de couverture de votre espace. Vous pouvez ajouter autant de photos que vous voulez, et changer la couverture en touchant une autre photo.")
+            }
+            .onAppear {
+                guard !coverNoticeShown else { return }
+                coverNoticeShown = true
+                // Let the step transition finish before the alert slides in.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showCoverNotice = true }
+            }
 
             if !uploadedPhotos.isEmpty {
                 // Cover preview — big, obvious, tells the user which photo is
                 // going to represent their space in every list.
                 if let coverUI = coverUIImage {
                     ZStack(alignment: .topLeading) {
+                        // `.clipped()` hides the overflow of a filled image but
+                        // not its touch area, which spilled over "Ajouter
+                        // d'autres photos" and swallowed every tap on it once
+                        // photos were added. The preview is display-only.
                         Image(uiImage: coverUI)
                             .resizable().aspectRatio(contentMode: .fill)
                             .frame(maxWidth: .infinity).frame(height: 200)
                             .clipped()
                             .clipShape(RoundedRectangle(cornerRadius: 18))
+                            .allowsHitTesting(false)
                         HStack(spacing: 5) {
                             Image(systemName: "star.fill").font(.system(size: 10, weight: .bold))
                             Text("Couverture").font(.moblyBody(11, weight: .bold))
@@ -686,6 +713,11 @@ struct AddListingView: View {
                 .animation(Motion.quick, value: coverIndex)
             }
         }
+        // On the container, not the button: sharing one view with the cover
+        // alert, the picker presentation never fired.
+        .photosPicker(isPresented: $showPhotoPicker, selection: $pickerItems,
+                      matching: .images)
+        .onChange(of: pickerItems) { _, items in loadPhotos(items) }
     }
 
     private var coverUIImage: UIImage? {
@@ -700,12 +732,16 @@ struct AddListingView: View {
     @ViewBuilder
     private func photoThumb(ui: UIImage, index i: Int) -> some View {
         ZStack(alignment: .topLeading) {
+            // Same trap as the cover preview: the filled image's touch area
+            // outgrows its clip. Taps and drags go through the thumb's own
+            // `contentShape` below instead.
             Image(uiImage: ui)
                 .resizable().aspectRatio(1, contentMode: .fill)
                 .frame(maxWidth: .infinity)
                 .aspectRatio(1, contentMode: .fit)
                 .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 12))
+                .allowsHitTesting(false)
                 .overlay(RoundedRectangle(cornerRadius: 12)
                     .stroke(coverIndex == i ? Color.moblyPrimary : (i == draggingIndex ? Color.moblyAccent : .clear),
                             lineWidth: 3))
@@ -936,7 +972,9 @@ struct AddListingView: View {
         }.buttonStyle(.plain)
     }
     private func fieldBox<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content().padding(.horizontal, 16).padding(.vertical, 15)
+        // The box is always white, so its text must not follow dark mode.
+        content().foregroundStyle(Color.moblyTextPrimary)
+            .padding(.horizontal, 16).padding(.vertical, 15)
             .background(RoundedRectangle(cornerRadius: 14).fill(.white))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: 0xE2E4EC), lineWidth: 1.5))
     }
@@ -949,8 +987,10 @@ struct AddListingView: View {
                 Image(systemName: "minus").font(.system(size: 15, weight: .bold)).frame(width: 34, height: 34)
                     .background(Circle().fill(Color(hex: 0xEEF0FE))).foregroundStyle(Color.moblyPrimary)
             }
+            // Explicit colour: left to the system, the count followed dark
+            // mode and turned white on this always-white form.
             Text(suffix == nil ? "\(value.wrappedValue)" : "\(value.wrappedValue) \(suffix!)")
-                .font(.moblyHeading(16)).frame(minWidth: 22)
+                .font(.moblyHeading(16)).foregroundStyle(Color.moblyTextPrimary).frame(minWidth: 22)
             Button { if value.wrappedValue < range.upperBound { value.wrappedValue += 1 } } label: {
                 Image(systemName: "plus").font(.system(size: 15, weight: .bold)).frame(width: 34, height: 34)
                     .background(Circle().fill(Color(hex: 0xEEF0FE))).foregroundStyle(Color.moblyPrimary)

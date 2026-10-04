@@ -92,10 +92,11 @@ final class MoblyAPI {
 
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.default
-        // Render free-tier cold-starts can take 30-50s, so the per-request
-        // timeout must be generous enough for the first hit after a spin-down.
-        cfg.timeoutIntervalForRequest = 45
-        cfg.timeoutIntervalForResource = 90
+        // InsForge compute is always-on for the API, so normal JSON calls should
+        // fail fast instead of keeping the UI blocked for old Render cold-starts.
+        // Upload endpoints still set their own longer per-request timeout below.
+        cfg.timeoutIntervalForRequest = 12
+        cfg.timeoutIntervalForResource = 30
         cfg.waitsForConnectivity = false   // fail fast so the UI can say "hors ligne"
 
         // NEVER let HTTP caching touch the API.
@@ -155,6 +156,12 @@ final class MoblyAPI {
         case otpInvalid       = "OTP_INVALID"
         case otpExpired       = "OTP_EXPIRED"
         case otpLocked        = "OTP_LOCKED"
+        /// Password reset by e-mail asked for an address that was never
+        /// confirmed — fall back to SMS.
+        case emailNotVerified = "EMAIL_NOT_VERIFIED"
+        /// `PATCH /auth/me` carried a different e-mail. A new address only
+        /// lands through its code (`EmailVerificationView`).
+        case emailVerificationRequired = "EMAIL_VERIFICATION_REQUIRED"
         case ownerRequired    = "OWNER_REQUIRED"
         case identityRequired = "IDENTITY_REQUIRED"
         case conflict         = "CONFLICT"
@@ -205,8 +212,10 @@ final class MoblyAPI {
         var isOffline: Bool { code == .offline }
         /// Nothing went wrong — the caller walked away. Never show this.
         var isCancelled: Bool { code == .cancelled }
-        /// Transient conditions where retrying is reasonable.
-        var isRetryable: Bool { code == .offline || status >= 500 }
+        /// Transient conditions where retrying is reasonable. A 429 is the
+        /// server asking us to slow down, not refusing the session — treating
+        /// it as a refusal signed users out of a valid 30-day session.
+        var isRetryable: Bool { code == .offline || status == 429 || status >= 500 }
         /// The user needs to sign in before this will work.
         var needsSignIn: Bool { code == .unauthenticated || code == .tokenExpired }
     }
@@ -434,6 +443,11 @@ final class MoblyAPI {
     // MARK: - Refresh (single-flight)
 
     private var refreshTask: Task<Bool, Never>?
+    /// `MoblyAPI` is called from many threads at once, so the check-then-set
+    /// on `refreshTask` needs a lock: without it two requests that 401 together
+    /// both saw `nil` and both spent the refresh token (seen in production —
+    /// pairs of rotations 4 ms apart), and the loser signed the user out.
+    private let refreshLock = NSLock()
 
     /// Exchange the refresh token for a new pair.
     ///
@@ -442,7 +456,11 @@ final class MoblyAPI {
     /// to the server — which revokes the whole family and signs the user out.
     /// So concurrent callers await one shared attempt.
     private func refreshSession() async -> Bool {
-        if let existing = refreshTask { return await existing.value }
+        refreshLock.lock()
+        if let existing = refreshTask {
+            refreshLock.unlock()
+            return await existing.value
+        }
 
         // Snapshot the generation this refresh belongs to. If the user signs
         // out while the POST is in flight, `clearSession()` bumps the counter
@@ -451,7 +469,11 @@ final class MoblyAPI {
 
         let task = Task<Bool, Never> { [weak self] in
             guard let self, let rt = self.refreshToken else { return false }
-            defer { self.refreshTask = nil }
+            defer {
+                self.refreshLock.lock()
+                self.refreshTask = nil
+                self.refreshLock.unlock()
+            }
             do {
                 struct Body: Encodable { let refreshToken: String }
                 // retries: 0 — a refresh failure must never recurse into itself.
@@ -467,6 +489,9 @@ final class MoblyAPI {
             } catch {
                 // Don't wipe a session that has already been replaced.
                 guard generation == self.sessionGeneration else { return false }
+                // Another refresh already replaced the token this one spent:
+                // the session is alive, this attempt just lost the race.
+                guard self.refreshToken == rt else { return true }
 
                 // Only the SERVER may end a session. This used to treat every
                 // failure as a refusal, so a refresh that never reached the
@@ -494,6 +519,7 @@ final class MoblyAPI {
             }
         }
         refreshTask = task
+        refreshLock.unlock()
         return await task.value
     }
 
@@ -650,16 +676,55 @@ final class MoblyAPI {
         /// Display-only, e.g. "+237 6•• •• •• 66". The real number stays on the
         /// server so an e-mail can't be traded for a phone number.
         let maskedPhone: String
+        /// "sms" or "email" — where this code went. Nil from older servers (SMS).
+        let channel: String?
+        /// Masked phone or e-mail, whichever `channel` used.
+        let maskedDestination: String?
+        /// The account has a confirmed e-mail, so the user may switch to it.
+        let emailAvailable: Bool?
         /// Opaque, signed, 15-minute token identifying the account being reset.
         let resetToken: String
         let codeLength: Int
         let devCode: String?
     }
 
-    func forgotPassword(identifier: String) async throws -> ForgotResponse {
-        struct Body: Encodable { let identifier: String }
+    /// `channel` nil lets the server pick: e-mail when an e-mail was typed and
+    /// it's confirmed, SMS otherwise.
+    func forgotPassword(identifier: String, channel: String? = nil) async throws -> ForgotResponse {
+        struct Body: Encodable { let identifier: String; let channel: String? }
         return try await request("auth/password/forgot", method: "POST",
-                                 body: Body(identifier: identifier))
+                                 body: Body(identifier: identifier, channel: channel))
+    }
+
+    // MARK: - E-mail confirmation
+
+    struct EmailCodeResponse: Decodable {
+        let sent: Bool
+        /// True when the address is already confirmed — nothing was sent.
+        let alreadyVerified: Bool?
+        let email: String
+        let maskedEmail: String?
+        let codeLength: Int?
+        let devCode: String?
+        let user: UserDTO?
+    }
+
+    struct UserEnvelope: Decodable { let user: UserDTO }
+
+    /// Mail a confirmation code to the account address, or to `email` when the
+    /// user is switching addresses. The account keeps its current address
+    /// until the code is confirmed.
+    func sendEmailCode(email: String? = nil) async throws -> EmailCodeResponse {
+        struct Body: Encodable { let email: String? }
+        return try await request("auth/email/send", method: "POST",
+                                 body: Body(email: email), authorized: true, retries: 0)
+    }
+
+    func verifyEmailCode(_ code: String) async throws -> UserDTO {
+        struct Body: Encodable { let code: String }
+        let res: UserEnvelope = try await request("auth/email/verify", method: "POST",
+                                                  body: Body(code: code), authorized: true, retries: 0)
+        return res.user
     }
 
     func resetPassword(resetToken: String, code: String,
@@ -701,16 +766,18 @@ final class MoblyAPI {
         return w.user
     }
 
-    func updateMe(fullName: String? = nil, email: String? = nil,
+    /// No `email` here on purpose: a new address only lands through its code
+    /// (`sendEmailCode` / `verifyEmailCode`), and the server refuses it on this route.
+    func updateMe(fullName: String? = nil,
                   isOwner: Bool? = nil, avatarColor: String? = nil) async throws -> UserDTO {
         struct Body: Encodable {
-            let fullName: String?; let email: String?; let isOwner: Bool?
+            let fullName: String?; let isOwner: Bool?
             let avatarColor: String?
         }
         struct Wrap: Decodable { let user: UserDTO }
         let w: Wrap = try await request(
             "auth/me", method: "PATCH",
-            body: Body(fullName: fullName, email: email, isOwner: isOwner, avatarColor: avatarColor),
+            body: Body(fullName: fullName, isOwner: isOwner, avatarColor: avatarColor),
             authorized: true
         )
         return w.user
@@ -783,8 +850,8 @@ final class MoblyAPI {
 
     // MARK: - Owner stats
 
-    struct OwnerListingStats: Decodable {
-        struct Metrics: Decodable {
+    struct OwnerListingStats: Codable {
+        struct Metrics: Codable {
             let views: Int
             let contacts: Int
             let favorites: Int
@@ -794,18 +861,18 @@ final class MoblyAPI {
             /// Optional: the server returns null when the previous period had
             /// too little traffic for a percentage to mean anything. The UI
             /// hides the badge rather than printing a nonsense "+6100%".
-            struct Deltas: Decodable {
+            struct Deltas: Codable {
                 let views: Int?
                 let contacts: Int?
                 let favorites: Int?
             }
         }
-        struct DailyPoint: Decodable {
+        struct DailyPoint: Codable {
             let date: String
             let label: String
             let views: Int
         }
-        struct SourceBucket: Decodable {
+        struct SourceBucket: Codable {
             let source: String
             let count: Int
             let percent: Int
@@ -824,9 +891,9 @@ final class MoblyAPI {
     /// Aggregate dashboard figures. `deltas30d` values are optional on purpose:
     /// nil means there is no prior 30-day period to compare against, and the
     /// UI hides the trend badge rather than inventing one.
-    struct OwnerOverview: Decodable {
-        struct Window: Decodable { let views: Int; let contacts: Int; let favorites: Int }
-        struct Deltas: Decodable { let views: Int?; let contacts: Int?; let favorites: Int? }
+    struct OwnerOverview: Codable {
+        struct Window: Codable { let views: Int; let contacts: Int; let favorites: Int }
+        struct Deltas: Codable { let views: Int?; let contacts: Int?; let favorites: Int? }
         let listings: Int
         let boosted: Int
         let views: Int
@@ -840,13 +907,13 @@ final class MoblyAPI {
         let sources30d: [Source]?
         let topListings: [Ranked]?
 
-        struct Totals: Decodable {
+        struct Totals: Codable {
             let views: Int; let contacts: Int; let favorites: Int
             let visits: Int; let contactRate: Double
         }
-        struct Day: Decodable { let date: String; let views: Int; let contacts: Int }
-        struct Source: Decodable { let source: String; let count: Int; let percent: Int }
-        struct Ranked: Decodable, Identifiable {
+        struct Day: Codable { let date: String; let views: Int; let contacts: Int }
+        struct Source: Codable { let source: String; let count: Int; let percent: Int }
+        struct Ranked: Codable, Identifiable {
             let id: String; let title: String; let coverUrl: String?
             let available: Bool; let views: Int; let views30d: Int
             let contacts: Int; let favorites: Int
@@ -861,6 +928,71 @@ final class MoblyAPI {
 
     func ownerOverview() async throws -> OwnerOverview {
         try await request("owner/overview", authorized: true)
+    }
+
+    /// Small owner-scoped cache for statistics. It lets the dashboard draw the
+    /// last known numbers immediately, then refresh from the server without
+    /// blocking the page. Files are separated by signed-in user id so a shared
+    /// phone never shows one owner's figures to the next account.
+    final class OwnerStatsCache {
+        static let shared = OwnerStatsCache()
+
+        private let fileManager = FileManager.default
+        private let encoder: JSONEncoder = {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            return encoder
+        }()
+        private let decoder: JSONDecoder = {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return decoder
+        }()
+
+        private init() {}
+
+        private var directory: URL? {
+            guard let uid = Session.shared.userId else { return nil }
+            let dir = fileManager.urls(for: .applicationSupportDirectory,
+                                       in: .userDomainMask)[0]
+                .appendingPathComponent("owner-stats-\(uid)", isDirectory: true)
+            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+            return dir
+        }
+
+        func overview() -> OwnerOverview? {
+            load("overview.json", as: OwnerOverview.self)
+        }
+
+        func save(_ overview: OwnerOverview) {
+            save(overview, named: "overview.json")
+        }
+
+        func listingStats(for listingId: String) -> OwnerListingStats? {
+            load("listing-\(safeName(listingId)).json", as: OwnerListingStats.self)
+        }
+
+        func save(_ stats: OwnerListingStats, for listingId: String) {
+            save(stats, named: "listing-\(safeName(listingId)).json")
+        }
+
+        private func load<T: Decodable>(_ name: String, as type: T.Type) -> T? {
+            guard let url = directory?.appendingPathComponent(name),
+                  let data = try? Data(contentsOf: url) else { return nil }
+            return try? decoder.decode(type, from: data)
+        }
+
+        private func save<T: Encodable>(_ value: T, named name: String) {
+            guard let url = directory?.appendingPathComponent(name),
+                  let data = try? encoder.encode(value) else { return }
+            try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
+
+        private func safeName(_ raw: String) -> String {
+            raw.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" ? $0 : "-" }
+                .map(String.init)
+                .joined()
+        }
     }
 
     /// Public profile of any user (chat header taps → PeerProfileView).
@@ -1097,7 +1229,29 @@ final class MoblyAPI {
     /// which is owner-only — a visitor got a 403 and the photo never left the
     /// phone. This endpoint is open to any signed-in user, so both sides of a
     /// conversation can actually send photos.
-    func uploadChatImage(_ jpeg: Data) async throws -> String {
+    /// Reports upload progress 0…1 on the main actor.
+    ///
+    /// `session.upload(for:from:)` returns only when the whole body has gone,
+    /// so a bubble built on it can show a spinner but never how far along the
+    /// photo is. The chat ring needs real bytes-sent, which only a
+    /// URLSessionTaskDelegate reports — hence this type rather than a timer
+    /// pretending to make progress.
+    final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate {
+        private let onProgress: @MainActor (Double) -> Void
+        init(onProgress: @escaping @MainActor (Double) -> Void) { self.onProgress = onProgress }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask,
+                        didSendBodyData bytesSent: Int64,
+                        totalBytesSent: Int64,
+                        totalBytesExpectedToSend: Int64) {
+            guard totalBytesExpectedToSend > 0 else { return }
+            let fraction = min(1, Double(totalBytesSent) / Double(totalBytesExpectedToSend))
+            Task { @MainActor in self.onProgress(fraction) }
+        }
+    }
+
+    func uploadChatImage(_ jpeg: Data,
+                         onProgress: (@MainActor (Double) -> Void)? = nil) async throws -> String {
         let boundary = "Mobly-\(UUID().uuidString)"
         var body = Data()
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -1113,7 +1267,8 @@ final class MoblyAPI {
         if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         req.timeoutInterval = 90
 
-        let (data, resp) = try await session.upload(for: req, from: body)
+        let delegate = onProgress.map { UploadProgressDelegate(onProgress: $0) }
+        let (data, resp) = try await session.upload(for: req, from: body, delegate: delegate)
         guard let http = resp as? HTTPURLResponse else {
             throw APIError(status: 0, code: .unknown, message: "Envoi de la photo impossible",
                            requestId: nil, fields: [:])
@@ -1135,7 +1290,8 @@ final class MoblyAPI {
     /// Without this a voice note never left the phone: the app sent a text
     /// message reading "🎤 Note vocale (0:05)" and kept the audio locally, so
     /// only the sender could ever play it back.
-    func uploadVoiceNote(_ audio: Data, filename: String = "voice.m4a")
+    func uploadVoiceNote(_ audio: Data, filename: String = "voice.m4a",
+                         onProgress: (@MainActor (Double) -> Void)? = nil)
         async throws -> (url: String, durationSec: Int?)
     {
         let boundary = "Mobly-\(UUID().uuidString)"
@@ -1154,7 +1310,8 @@ final class MoblyAPI {
         if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         req.timeoutInterval = 60
 
-        let (data, resp) = try await session.upload(for: req, from: body)
+        let voiceDelegate = onProgress.map { UploadProgressDelegate(onProgress: $0) }
+        let (data, resp) = try await session.upload(for: req, from: body, delegate: voiceDelegate)
         guard let http = resp as? HTTPURLResponse else {
             throw APIError(status: 0, code: .unknown, message: "Envoi audio impossible",
                            requestId: nil, fields: [:])
@@ -1293,6 +1450,9 @@ struct UserDTO: Decodable, Identifiable {
     let phone: String
     let fullName: String
     let email: String?
+    /// The address was confirmed with an e-mailed code. Optional so payloads
+    /// from servers predating e-mail confirmation still decode.
+    let emailVerified: Bool?
     let isOwner: Bool
     let verified: Bool
     /// Pièce d'identité contrôlée par Didit — distinct from `verified`, which
@@ -1361,6 +1521,9 @@ struct ListingDTO: Codable, Identifiable {
     let priceUnit: String?
     let furnished: Bool
     let rooms: Int
+    /// Optional: nullable in the schema, and absent from payloads served by a
+    /// backend older than the facts row.
+    let bathrooms: Int?
     let subtitle: String
     let about: String
     let rating: Double?

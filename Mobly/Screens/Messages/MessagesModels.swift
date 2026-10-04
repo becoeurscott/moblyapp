@@ -42,6 +42,10 @@ struct ChatThread: Identifiable, Hashable {
     /// Peer's uploaded photo and stored colour, rendered through `UserAvatar`.
     var avatarUrl: String? = nil
     var avatarColor: String? = nil
+
+    /// Local shell shown while the server creates/returns the real thread id.
+    /// It must never be used for API calls.
+    var isPending: Bool { id.hasPrefix("pending-") }
 }
 
 extension ChatThread {
@@ -81,6 +85,39 @@ extension ChatThread {
             listingOwnerId: dto.listing?.ownerId,
             avatarUrl: peer?.avatarUrl,
             avatarColor: peer?.avatarColor
+        )
+    }
+
+
+    /// Build an instant local shell from the listing the user is already viewing.
+    /// This lets the chat screen appear immediately while `POST /threads` runs.
+    static func pending(for listing: Listing) -> ChatThread {
+        let name = listing.ownerName ?? "Propriétaire"
+        let priceSuffix = listing.priceUnit.isEmpty ? "" : " " + listing.priceUnit
+        let price = listing.price + priceSuffix
+        return ChatThread(
+            id: "pending-\(listing.id)",
+            initial: String(name.prefix(1)).uppercased(),
+            color: AvatarPalette.color(for: listing.ownerId ?? listing.id, stored: listing.ownerAvatarColor),
+            name: name,
+            verified: listing.ownerVerified,
+            online: false,
+            time: "",
+            listing: [listing.title, price].filter { !$0.isEmpty }.joined(separator: " · "),
+            listingTitle: listing.title,
+            listingPrice: price,
+            listingImage: listing.imageName,
+            isSupport: false,
+            hasListing: true,
+            listingCoverUrl: listing.coverUrl,
+            preview: "",
+            unread: 0,
+            fromMe: false,
+            peerId: listing.ownerId,
+            listingId: listing.id,
+            listingOwnerId: listing.ownerId,
+            avatarUrl: listing.ownerAvatarUrl,
+            avatarColor: listing.ownerAvatarColor
         )
     }
 

@@ -163,7 +163,10 @@ model User {
   verified         Boolean   @default(true) // compte actif / téléphone vérifié
   identityVerified Boolean   @default(false) // pièce d'identité contrôlée
   verifiedAt       DateTime?
-  moblyScore       Float? // note agrégée de l'utilisateur
+  /// Set when the user typed back a code sent to `email`. Cleared whenever the
+  /// address changes. Only a confirmed address can receive password resets.
+  emailVerifiedAt  DateTime?
+  moblyScore      Float? // note agrégée de l'utilisateur
   moblyScoreCount  Int       @default(0)
   rating           Float?
   responseRate     Float? // 0..1
@@ -211,6 +214,7 @@ model User {
   notifications    Notification[]
   threads          ThreadParticipant[]
   refreshTokens    RefreshToken[]
+  emailCodes       EmailCode[]
   devices          Device[]
   savedSearches    SavedSearch[]
   contactsMade     ContactEvent[]
@@ -246,6 +250,26 @@ model Otp {
   createdAt DateTime @default(now())
 
   @@index([phone])
+}
+
+/// A code e-mailed to a user (sent through InsForge's mail service).
+/// `purpose` is "verify" (confirm/change the account address) or "reset"
+/// (password reset). `email` is the address the code went to — for "verify"
+/// that becomes `User.email` once the code checks out.
+model EmailCode {
+  id        String   @id @default(cuid())
+  userId    String
+  email     String
+  purpose   String
+  code      String   // HMAC, never the plain code
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, createdAt])
 }
 
 /// Rotating refresh tokens. `familyId` groups a login lineage so a replayed
@@ -423,6 +447,7 @@ model Favorite {
 
   @@unique([userId, listingId])
   @@index([userId])
+  @@index([listingId, createdAt])
 }
 
 /// A stored filter set — powers "Recherches" in the Favoris tab and, later,
@@ -472,6 +497,7 @@ model ContactEvent {
   visitor User    @relation(fields: [visitorId], references: [id], onDelete: Cascade)
 
   @@index([listingId])
+  @@index([listingId, createdAt])
   @@index([visitorId])
 }
 

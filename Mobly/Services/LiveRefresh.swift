@@ -25,9 +25,17 @@ import UIKit
 final class LiveRefresh: ObservableObject {
     static let shared = LiveRefresh()
 
-    /// 45s: a marketplace where listings change hourly does not need faster,
-    /// and a Cameroon data plan should not pay for faster.
-    private let interval: TimeInterval = 45
+    /// 2 min: a marketplace where listings change hourly does not need
+    /// faster, and a Cameroon data plan should not pay for faster. At 45s this
+    /// poll alone spent ~40% of the server's 300-requests-per-15-minutes
+    /// budget while the user did nothing.
+    private let interval: TimeInterval = 120
+
+    /// `didBecomeActive` also fires after Control Center, Notification Center,
+    /// a permission alert or Face ID — none of which left the app long enough
+    /// for anything to go stale.
+    private let foregroundMinGap: TimeInterval = 60
+    private var lastRefresh: Date?
 
     private var ticker: Task<Void, Never>?
     private var inFlight = false
@@ -44,8 +52,15 @@ final class LiveRefresh: ObservableObject {
             forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.refreshNow()
-                self?.startTicking()
+                guard let self else { return }
+                if let last = self.lastRefresh,
+                   Date().timeIntervalSince(last) < self.foregroundMinGap {
+                    // Fresh enough — but the poll stopped on background.
+                    if self.ticker == nil { self.startTicking() }
+                    return
+                }
+                self.refreshNow()
+                self.startTicking()
             }
         })
 
@@ -98,6 +113,7 @@ final class LiveRefresh: ObservableObject {
         guard !inFlight else { return }
         inFlight = true
         defer { inFlight = false }
+        lastRefresh = Date()
 
         await ListingStore.shared.fetch(silent: true)
 

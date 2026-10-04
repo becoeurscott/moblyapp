@@ -7,7 +7,14 @@ struct OwnerStatsView: View {
 
     @State private var stats: MoblyAPI.OwnerListingStats?
     @State private var loading = false
+    @State private var loadingVisible = false
+    @State private var loadingToken = UUID()
     @State private var pollTimer: Timer?
+
+    init(annonce: OwnerAnnonce) {
+        self.annonce = annonce
+        _stats = State(initialValue: MoblyAPI.OwnerStatsCache.shared.listingStats(for: annonce.listing.id))
+    }
 
     /// Live counts if the server responded, otherwise the local snapshot from
     /// `OwnerListings` so the screen has something the moment it opens.
@@ -30,6 +37,7 @@ struct OwnerStatsView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if loadingVisible { refreshingPill }
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
                     summaryCard
@@ -44,9 +52,11 @@ struct OwnerStatsView: View {
         .background(Color.moblySurface)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .task { await refresh() }
-        .refreshable { await refresh() }
-        .onAppear { startPolling() }
+        .refreshable { await refresh(showIndicator: false) }
+        .onAppear {
+            startPolling()
+            Task { await refresh(showIndicator: stats == nil) }
+        }
         .onDisappear { stopPolling() }
         // Nothing to poll for while the app is in someone's pocket.
         .onReceive(NotificationCenter.default.publisher(
@@ -54,7 +64,7 @@ struct OwnerStatsView: View {
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.didBecomeActiveNotification)) { _ in
             startPolling()
-            Task { await refresh() }
+            Task { await refresh(showIndicator: false) }
         }
     }
 
@@ -66,26 +76,58 @@ struct OwnerStatsView: View {
     private func startPolling() {
         stopPolling()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in
-            Task { await refresh() }
+            Task { await refresh(showIndicator: false) }
         }
     }
     private func stopPolling() {
         pollTimer?.invalidate(); pollTimer = nil
     }
-    private func refresh() async {
+    @MainActor
+    private func refresh(showIndicator: Bool = false) async {
         guard !loading else { return }
         loading = true
         defer { loading = false }
+        if showIndicator { startLoadingCapIfNeeded() }
         do {
             let s = try await MoblyAPI.shared.ownerListingStats(id: annonce.listing.id)
-            await MainActor.run { withAnimation(Motion.content) { self.stats = s } }
+            MoblyAPI.OwnerStatsCache.shared.save(s, for: annonce.listing.id)
+            loadingToken = UUID()
+            loadingVisible = false
+            withAnimation(Motion.content) { self.stats = s }
         } catch {
+            loadingToken = UUID()
+            loadingVisible = false
             // Keep the last-known values on screen; a failure here is
             // usually offline / auth expiring, not a hard error.
         }
     }
 
+    @MainActor
+    private func startLoadingCapIfNeeded() {
+        guard stats == nil else { return }
+        let token = UUID()
+        loadingToken = token
+        loadingVisible = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if loadingToken == token { loadingVisible = false }
+        }
+    }
+
     // MARK: Header
+
+    private var refreshingPill: some View {
+        HStack(spacing: 8) {
+            ProgressView().tint(Color.moblyPrimary).scaleEffect(0.82)
+            Text("Mise à jour des statistiques…")
+                .font(.moblyBody(12, weight: .medium))
+                .foregroundStyle(Color.moblyTextSecondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
 
     private var header: some View {
         HStack {

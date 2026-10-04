@@ -26,7 +26,6 @@ private let hasSeenOnboardingKey = "hasSeenOnboarding"
 
 struct RootView: View {
     @ObservedObject private var lang = AppLang.shared
-    @ObservedObject private var listingStore = ListingStore.shared
     @ObservedObject private var maintenance = MaintenanceStore.shared
     @ObservedObject private var remoteConfig = RemoteConfigStore.shared
     @ObservedObject private var auth = AuthStore.shared

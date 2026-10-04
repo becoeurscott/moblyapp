@@ -55,19 +55,34 @@ ownerRouter.get(
  *  and a per-annonce ranking. */
 async function overviewDetail(ownerId: string, d30: Date) {
   const mine = { listing: { ownerId } };
-  const [viewsAll, contactsAll, favoritesAll, visitsAll, events, contacts, sources, listings] =
+  const [viewsAll, contactsAll, favoritesAll, visitsAll, viewsByDay, contactsByDay, viewsByListing, sources, listings] =
     await Promise.all([
       prisma.viewEvent.count({ where: mine }),
       prisma.contactEvent.count({ where: mine }),
       prisma.favorite.count({ where: mine }),
       prisma.visitRequest.count({ where: mine }),
-      prisma.viewEvent.findMany({
+      // Bucketed in SQL, not in JS. These were `findMany` pulling EVERY view
+      // and contact row of the last 30 days across every annonce the owner
+      // has, only to count them by day in a loop — the payload grew with
+      // traffic, and together with the rest of this fan-out it exhausted the
+      // pooled connection and the endpoint 500'd after ~40s.
+      prisma.$queryRaw<{ day: Date; n: bigint }[]>`
+        SELECT date_trunc('day', ve."createdAt") AS day, COUNT(*)::bigint AS n
+        FROM "ViewEvent" ve
+        JOIN "Listing" l ON l.id = ve."listingId"
+        WHERE l."ownerId" = ${ownerId} AND ve."createdAt" >= ${d30}
+        GROUP BY 1`,
+      prisma.$queryRaw<{ day: Date; n: bigint }[]>`
+        SELECT date_trunc('day', ce."createdAt") AS day, COUNT(*)::bigint AS n
+        FROM "ContactEvent" ce
+        JOIN "Listing" l ON l.id = ce."listingId"
+        WHERE l."ownerId" = ${ownerId} AND ce."createdAt" >= ${d30}
+        GROUP BY 1`,
+      // Per-annonce 30-day views, previously derived from that same full scan.
+      prisma.viewEvent.groupBy({
+        by: ['listingId'],
         where: { ...mine, createdAt: { gte: d30 } },
-        select: { createdAt: true, listingId: true },
-      }),
-      prisma.contactEvent.findMany({
-        where: { ...mine, createdAt: { gte: d30 } },
-        select: { createdAt: true },
+        _count: { _all: true },
       }),
       prisma.viewEvent.groupBy({
         by: ['source'],
@@ -92,16 +107,17 @@ async function overviewDetail(ownerId: string, d30: Date) {
     index.set(key, daily.length);
     daily.push({ date: key, views: 0, contacts: 0 });
   }
-  const views30ByListing = new Map<string, number>();
-  for (const e of events) {
-    const i = index.get(day(e.createdAt));
-    if (i !== undefined) daily[i].views++;
-    views30ByListing.set(e.listingId, (views30ByListing.get(e.listingId) ?? 0) + 1);
+  for (const r of viewsByDay) {
+    const i = index.get(day(new Date(r.day)));
+    if (i !== undefined) daily[i].views += Number(r.n);
   }
-  for (const c of contacts) {
-    const i = index.get(day(c.createdAt));
-    if (i !== undefined) daily[i].contacts++;
+  for (const r of contactsByDay) {
+    const i = index.get(day(new Date(r.day)));
+    if (i !== undefined) daily[i].contacts += Number(r.n);
   }
+  const views30ByListing = new Map<string, number>(
+    viewsByListing.map((r) => [r.listingId, r._count._all])
+  );
 
   const KNOWN = new Set([
     'home', 'explore', 'search', 'boost', 'share', 'notification', 'chat',
@@ -112,7 +128,7 @@ async function overviewDetail(ownerId: string, d30: Date) {
     const key = s.source && KNOWN.has(s.source) ? s.source : 'other';
     merged.set(key, (merged.get(key) ?? 0) + s._count._all);
   }
-  const total = events.length;
+  const total = viewsByDay.reduce((acc, r) => acc + Number(r.n), 0);
   const sources30d = total === 0 ? [] : [...merged.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([source, count]) => ({ source, count, percent: Math.round((count / total) * 100) }));
@@ -232,7 +248,7 @@ ownerRouter.get(
     const [
       viewsAll, contactsAll, favoritesAll, visitsAll,
       viewsThis, viewsPrev, contactsThis, contactsPrev, favsThis, favsPrev,
-      viewEvents, sources,
+      viewsByDay, sources,
     ] = await Promise.all([
       prisma.viewEvent.count({ where: { listingId: listing.id } }),
       prisma.contactEvent.count({ where: { listingId: listing.id } }),
@@ -247,10 +263,14 @@ ownerRouter.get(
       prisma.favorite.count({ where: { listingId: listing.id, createdAt: { gte: sevenAgo } } }),
       prisma.favorite.count({ where: { listingId: listing.id,
                                        createdAt: { gte: fourteenAgo, lt: sevenAgo } } }),
-      prisma.viewEvent.findMany({
-        where: { listingId: listing.id, createdAt: { gte: sevenAgo } },
-        select: { createdAt: true, source: true },
-      }),
+      // Bucket in SQL so this endpoint does not pull every recent view row
+      // into Node just to count seven bars. The chart stays constant-size even
+      // when an annonce is popular.
+      prisma.$queryRaw<{ day: Date; n: bigint }[]>`
+        SELECT date_trunc('day', "createdAt") AS day, COUNT(*)::bigint AS n
+        FROM "ViewEvent"
+        WHERE "listingId" = ${listing.id} AND "createdAt" >= ${sevenAgo}
+        GROUP BY 1`,
       prisma.viewEvent.groupBy({
         by: ['source'],
         where: { listingId: listing.id, createdAt: { gte: sevenAgo } },
@@ -260,14 +280,16 @@ ownerRouter.get(
 
     // 7-day series bucketed by local day. Keep labels short (FR weekday
     // abbreviations) so the client chart doesn't have to re-derive them.
+    const dayKey = (d: Date) => d.toISOString().slice(0, 10);
+    const viewsByDayIndex = new Map<string, number>(
+      viewsByDay.map((r) => [dayKey(new Date(r.day)), Number(r.n)])
+    );
     const labels = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
     const daily: { date: string; label: string; views: number }[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(startOfDay(now)); d.setDate(d.getDate() - i);
-      const next = new Date(d); next.setDate(next.getDate() + 1);
-      const c = viewEvents.filter((e) => e.createdAt >= d && e.createdAt < next).length;
       const label = labels[(d.getDay() + 6) % 7]; // Monday = 0
-      daily.push({ date: d.toISOString(), label, views: c });
+      daily.push({ date: d.toISOString(), label, views: viewsByDayIndex.get(dayKey(d)) ?? 0 });
     }
 
     // "Origine des vues": normalise unknown/null into "Autre" so the chart

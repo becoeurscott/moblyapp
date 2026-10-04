@@ -365,11 +365,12 @@ struct FavoriteRow: View {
 
             rowCard
                 .offset(x: offsetX)
-                // A plain gesture, not high-priority: the list's vertical
-                // scroll wins a vertical drag and only a clearly horizontal
-                // swipe reaches the row. High-priority stole every scroll
-                // attempt, so the list froze while a row "armed" itself.
-                .gesture(
+                // Simultaneous, not `.gesture`: the card is a Button inside a
+                // ScrollView, and a plain gesture there never received the
+                // drag on iOS 18 — the swipe did nothing. Running alongside
+                // the scroll, it only reacts to a clearly sideways drag, so
+                // vertical scrolling is unaffected.
+                .simultaneousGesture(
                     DragGesture(minimumDistance: 20)
                         .onChanged { v in
                             // right → left only, and only when the drag is
@@ -380,7 +381,8 @@ struct FavoriteRow: View {
                             }
                         }
                         .onEnded { v in
-                            if v.translation.width < -80 {
+                            let sideways = abs(v.translation.width) > abs(v.translation.height) * 1.5
+                            if sideways && v.translation.width < -80 {
                                 withAnimation(Motion.instant) { offsetX = -450 }
                                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { onUnfav() }
@@ -392,59 +394,63 @@ struct FavoriteRow: View {
         }
     }
 
+    /// "Nouveau" until real avis exist, then the average — bottom-right of the card.
+    @ViewBuilder
+    private var ratingBadge: some View {
+        if fav.listing.rating.isEmpty {
+            Text("Nouveau")
+                .font(.moblyBody(10, weight: .semibold))
+                .foregroundStyle(Color.moblyPrimary)
+                .padding(.horizontal, 6).padding(.vertical, 3)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.moblySurfaceTint))
+        } else {
+            HStack(spacing: 3) {
+                Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(Color.moblyAccent)
+                Text(fav.listing.rating).font(.moblyBody(10.5, weight: .bold)).foregroundStyle(Color.moblyTextPrimary)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.moblySurfaceTint))
+        }
+    }
+
     private var rowCard: some View {
         Button(action: onOpen) {
             HStack(spacing: 13) {
                 ZStack(alignment: .topLeading) {
+                    // Shorter, same width: the list shows more saved spaces
+                    // per screen without shrinking the photo sideways.
                     ListingCover(listing: fav.listing, width: ImageSlot.thumb)
-                        .frame(width: 108, height: 108)
+                        .frame(width: 108, height: 84)
                         .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    if fav.listing.ownerVerified {
-                        VerifiedAvatarBadge(size: 20, ring: .white).padding(7)
-                    }
-                    // heart top-right
-                    HStack { Spacer()
-                        Button {
-                            liked.toggle()
-                            if !liked { onUnfav() }
-                        } label: {
-                            Image(systemName: liked ? "heart.fill" : "heart")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Color.moblyAccent)
-                                .frame(width: 26, height: 26)
-                                .background(Circle().fill(.white.opacity(0.92)))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(7)
-                    .frame(width: 108)
                 }
 
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .top) {
                         Text(fav.listing.title).font(.moblyHeading(15)).foregroundStyle(Color.moblyTextPrimary)
+                            .lineLimit(1)
                         Spacer()
-                        if fav.listing.rating.isEmpty {
-                            Text("Nouveau")
-                                .font(.moblyBody(10, weight: .semibold))
-                                .foregroundStyle(Color.moblyPrimary)
-                                .padding(.horizontal, 6).padding(.vertical, 3)
-                                .background(RoundedRectangle(cornerRadius: 8).fill(Color.moblySurfaceTint))
-                        } else {
-                            HStack(spacing: 3) {
-                                Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(Color.moblyAccent)
-                                Text(fav.listing.rating).font(.moblyBody(10.5, weight: .bold)).foregroundStyle(Color.moblyTextPrimary)
-                            }
-                            .padding(.horizontal, 6).padding(.vertical, 3)
-                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.moblySurfaceTint))
+                        // Off the photo, top-right of the card: the photo
+                        // stays clean and the heart sits where the eye reads
+                        // first.
+                        Button {
+                            liked.toggle()
+                            if !liked { onUnfav() }
+                        } label: {
+                            Image(systemName: liked ? "heart.fill" : "heart")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.moblyAccent)
+                                .frame(width: 28, height: 28)
+                                .background(Circle().fill(Color.moblySurfaceTint))
                         }
+                        .buttonStyle(.plain)
                     }
                     HStack(spacing: 4) {
                         Image(systemName: "mappin.and.ellipse").font(.system(size: 11, weight: .medium))
                         Text(fav.listing.location).font(.moblyBody(11.5))
                     }
                     .foregroundStyle(Color(hex: 0x9A9DAC))
+                    .lineLimit(1)
                     .padding(.top, 3)
 
                     if fav.priceDrop {
@@ -455,7 +461,7 @@ struct FavoriteRow: View {
                         .foregroundStyle(Color(hex: 0x1F8A5B))
                         .padding(.horizontal, 7).padding(.vertical, 3)
                         .background(Capsule().fill(Color(hex: 0xE9F9EF)))
-                        .padding(.top, 7)
+                        .padding(.top, 5)
                     }
 
                     Spacer(minLength: 4)
@@ -465,10 +471,13 @@ struct FavoriteRow: View {
                         if let old = fav.oldPrice {
                             Text(old).font(.moblyBody(11)).foregroundStyle(Color(hex: 0xB4B7C2)).strikethrough()
                         }
+                        Spacer(minLength: 4)
+                        ratingBadge
                     }
                 }
-                .padding(.vertical, 5).padding(.trailing, 4)
+                .padding(.vertical, 3).padding(.trailing, 4)
             }
+            .frame(height: 84)
             .padding(9)
             .background(RoundedRectangle(cornerRadius: 18).fill(.white))
             .shadow(color: Color(hex: 0x14152A).opacity(0.06), radius: 16, y: 4)

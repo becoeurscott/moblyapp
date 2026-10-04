@@ -217,6 +217,11 @@ adminUsersRouter.patch(
     if (patch.identityVerified !== undefined) {
       data.verifiedAt = patch.identityVerified ? new Date() : null;
     }
+    // An address typed by an admin hasn't been confirmed by its owner, and
+    // only confirmed addresses can receive password-reset codes.
+    if (patch.email !== undefined && patch.email !== before.email) {
+      data.emailVerifiedAt = null;
+    }
 
     const after = await prisma.user.update({
       where: { id: req.params.id },

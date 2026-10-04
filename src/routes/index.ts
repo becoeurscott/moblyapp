@@ -11,6 +11,7 @@ import { miscRouter, notificationsRouter, reviewsRouter, usersRouter } from './m
 import { visitsRouter, listingVisitsRouter } from './visits.routes';
 import { analyticsRouter } from './analytics.routes';
 import { oauthRouter } from './oauth.routes';
+import { emailRouter } from './email.routes';
 import { uploadsRouter } from './uploads.routes';
 import { adminRouter } from './admin.routes';
 import { cronRouter } from './cron.routes';
@@ -41,6 +42,7 @@ api.use('/config', configRouter); // public: feature flags, limits, copy, versio
 
 api.use('/auth', authRouter);
 api.use('/auth', oauthRouter);   // /auth/apple, /auth/google (later)
+api.use('/auth/email', emailRouter); // e-mail confirmation codes
 api.use('/auth/signup', signupRouter);
 // /auth/oauth lives on the signup router (it can end in signup or sign-in).
 api.use('/auth', signupRouter);

@@ -74,7 +74,7 @@ struct VisitsHubView: View {
     private func open(_ visit: VisitRequestDTO) {
         if let thread = ChatStore.shared.threads.first(where: { $0.listing?.id == visit.listingId }) {
             onClose()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            DispatchQueue.main.async {
                 PushService.shared.pendingThreadId = thread.id
             }
         } else {

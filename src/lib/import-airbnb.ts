@@ -219,8 +219,6 @@ async function main() {
     const rooms = parseRooms(rec);
     const tags = ['airbnb-import', ...extractTags(rec.amenities)];
     const photos = (rec.images ?? []).map((i) => i.imageUrl).slice(0, 12);
-    const rating = rec.rating?.guestSatisfaction ?? null;
-    const reviewCount = rec.rating?.reviewsCount ?? 0;
 
     // Category-specific features
     const features: Record<string, string> = {
@@ -248,8 +246,9 @@ async function main() {
         coverUrl: rec.thumbnail ?? null,
         photos,
         features,
-        rating,
-        reviewCount,
+        // No rating/reviewCount: Airbnb's score came with no review texts, so
+        // listings showed "4.6 · 9 avis" over an empty Avis section. Both are
+        // computed from real Mobly reviews when the first one is posted.
         verified: true,
         available: true,
       },

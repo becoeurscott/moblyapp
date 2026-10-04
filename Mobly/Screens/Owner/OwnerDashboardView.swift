@@ -9,6 +9,10 @@ struct OwnerDashboardView: View {
     @ObservedObject private var auth = AuthStore.shared
     /// Aggregate figures + real 30-day deltas from /owner/overview.
     @State private var overview: MoblyAPI.OwnerOverview?
+    /// Tracks the network request separately from the visible placeholder. The
+    /// placeholder is capped at 3 seconds; the request can continue quietly.
+    @State private var overviewRefreshInFlight = false
+    @State private var overviewLoadingToken = UUID()
     /// Nil `overview` alone can't tell "the numbers haven't arrived" from "the
     /// numbers really are zero", and the card rendered `?? 0` for both — so a
     /// new owner and an owner on a slow connection saw the identical, wrong
@@ -26,6 +30,12 @@ struct OwnerDashboardView: View {
     @State private var showReactivate = false
     @State private var showOverallStats = false
     @State private var deleteFailed = false
+
+    init() {
+        let cached = MoblyAPI.OwnerStatsCache.shared.overview()
+        _overview = State(initialValue: cached)
+        _overviewLoading = State(initialValue: cached == nil)
+    }
 
     /// The free trial ran out and the one-time inscription fee hasn't been paid:
     /// the whole dashboard is locked behind the paywall.
@@ -107,9 +117,7 @@ struct OwnerDashboardView: View {
                     .padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 40)
                 }
                 .refreshable {
-                    await UserDataStore.shared.loadMyListings()
-                    OwnerListings.shared.load(from: UserDataStore.shared.myListings)
-                    await loadOverview()
+                    await refreshDashboard(showInitialLoader: false, silentVisits: false)
                 }
             }
         }
@@ -117,13 +125,9 @@ struct OwnerDashboardView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(item: $statsAnnonce) { OwnerStatsView(annonce: $0) }
-        .task {
-            await visits.refresh(silent: !visits.items.isEmpty)
-            await loadOverview()
-        }
         // A view came in or an annonce was deleted: refresh the totals live.
         .onReceive(NotificationCenter.default.publisher(for: OwnerListings.statsChanged)) { _ in
-            Task { await loadOverview() }
+            Task { await loadOverview(showInitialLoader: false) }
         }
         .fullScreenCover(isPresented: $showOverallStats) {
             OwnerOverallStatsView(initial: overview)
@@ -134,13 +138,10 @@ struct OwnerDashboardView: View {
         } message: {
             Text("L'annonce n'a pas pu être supprimée. Vérifiez votre connexion et réessayez.")
         }
-        // Coming back to the app: refresh the figures with no sign of it.
+        // Coming back to the app: refresh every owner figure quietly.
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.didBecomeActiveNotification)) { _ in
-            Task {
-                await visits.refresh(silent: true)
-                await loadOverview()
-            }
+            Task { await refreshDashboard(showInitialLoader: false, silentVisits: true) }
         }
         .onAppear {
             if ProcessInfo.processInfo.environment["OPEN_VISITS"] == "1" {
@@ -159,6 +160,10 @@ struct OwnerDashboardView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     editAnnonce = store.annonces.first
                 }
+            }
+            Task {
+                await refreshDashboard(showInitialLoader: overview == nil,
+                                       silentVisits: !visits.items.isEmpty)
             }
         }
         .fullScreenCover(isPresented: $showAddListing) {
@@ -488,24 +493,53 @@ struct OwnerDashboardView: View {
         }
     }
 
+    /// Refresh listings, visits and performance figures whenever this page is
+    /// shown again. The current screen stays usable while the network catches up.
+    @MainActor
+    private func refreshDashboard(showInitialLoader: Bool, silentVisits: Bool = true) async {
+        guard MoblyAPI.shared.isAuthenticated else { return }
+        await visits.refresh(silent: silentVisits)
+        await UserDataStore.shared.loadMyListings()
+        OwnerListings.shared.load(from: UserDataStore.shared.myListings)
+        await loadOverview(showInitialLoader: showInitialLoader)
+    }
+
     /// Best-effort: on failure the card falls back to the listing totals and
-    /// simply shows no trend badge, rather than a stale or invented one.
-    private func loadOverview() async {
-        // Only show the placeholder on the first load. A silent refresh (app
-        // foregrounded, a view came in) must not blank figures already on
-        // screen — that reads as data being lost.
-        if overview == nil { overviewLoading = true }
+    /// simply shows no trend badge, rather than a stale or invented one. The
+    /// visible placeholder never lasts more than 3 seconds; if the request is
+    /// still running after that, the old figures stay up and the refresh
+    /// finishes in the background.
+    @MainActor
+    private func loadOverview(showInitialLoader: Bool = true) async {
+        guard !overviewRefreshInFlight else { return }
+        overviewRefreshInFlight = true
+        defer { overviewRefreshInFlight = false }
+
+        if showInitialLoader { startOverviewLoadingCapIfNeeded() }
+
         guard let fresh = try? await MoblyAPI.shared.ownerOverview() else {
-            // Keep the last-known figures when the call fails; only the very
-            // first load has nothing to fall back on, and that's the one case
-            // the user needs told about.
+            overviewLoadingToken = UUID()
             overviewLoading = false
             overviewFailed = overview == nil
             return
         }
+        MoblyAPI.OwnerStatsCache.shared.save(fresh)
         overviewFailed = false
+        overviewLoadingToken = UUID()
         overviewLoading = false
         withAnimation(Motion.content) { overview = fresh }
+    }
+
+    @MainActor
+    private func startOverviewLoadingCapIfNeeded() {
+        guard overview == nil else { return }
+        let token = UUID()
+        overviewLoadingToken = token
+        overviewLoading = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if overviewLoadingToken == token { overviewLoading = false }
+        }
     }
 
     // MARK: Performance card

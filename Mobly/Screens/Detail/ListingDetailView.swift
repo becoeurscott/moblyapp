@@ -1109,12 +1109,14 @@ struct ListingDetailView: View {
 
     private var stickyCTARow: some View {
         HStack(spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
+            // Unit on its own line: "157 000 FCFA /jour" on one line didn't
+            // fit beside the two buttons and was shrunk past legibility.
+            VStack(alignment: .leading, spacing: 0) {
                 Text(listing.price)
                     .font(.moblyHeading(16))
                     .foregroundStyle(Color.moblyTextPrimary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                    .minimumScaleFactor(0.8)
                 if !listing.priceUnit.isEmpty {
                     Text(LT(listing.priceUnit))
                         .font(.moblyBody(11))
@@ -1131,7 +1133,7 @@ struct ListingDetailView: View {
                     .shadow(color: Color(hex: 0x14152A).opacity(0.06), radius: 6, y: 2)
             )
             .layoutPriority(1)
-            Spacer(minLength: 4)
+            Spacer(minLength: 0)
             if config.isEnabled("visits.request") {
                 Button {
                     guard requireReadySession() else { return }
@@ -1153,7 +1155,7 @@ struct ListingDetailView: View {
                             .foregroundStyle(Color.moblyPrimary)
                         }
                     }
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, 12)
                     .frame(height: 48)
                     .background(Capsule().fill(Color(hex: 0xEEF0FE)))
                 }
@@ -1174,7 +1176,7 @@ struct ListingDetailView: View {
                             .foregroundStyle(Color(hex: 0x3A4FF0))
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, 14)
                     }
                 }
                 .frame(height: 48)

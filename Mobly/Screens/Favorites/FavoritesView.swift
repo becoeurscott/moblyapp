@@ -349,6 +349,9 @@ struct FavoriteRow: View {
     var onUnfav: () -> Void
     @State private var liked = true
     @State private var offsetX: CGFloat = 0
+    /// The finger moved: the touch-up that ends a swipe also reaches the
+    /// card's Button, which opened the listing instead of just removing it.
+    @State private var dragged = false
 
     var body: some View {
         ZStack(alignment: .trailing) {
@@ -373,6 +376,7 @@ struct FavoriteRow: View {
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 20)
                         .onChanged { v in
+                            if abs(v.translation.width) > 8 || abs(v.translation.height) > 8 { dragged = true }
                             // right → left only, and only when the drag is
                             // clearly sideways rather than a wobbly scroll.
                             guard abs(v.translation.width) > abs(v.translation.height) * 1.5 else { return }
@@ -381,6 +385,8 @@ struct FavoriteRow: View {
                             }
                         }
                         .onEnded { v in
+                            // Cleared after the Button has seen this touch-up.
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { dragged = false }
                             let sideways = abs(v.translation.width) > abs(v.translation.height) * 1.5
                             if sideways && v.translation.width < -80 {
                                 withAnimation(Motion.instant) { offsetX = -450 }
@@ -414,7 +420,7 @@ struct FavoriteRow: View {
     }
 
     private var rowCard: some View {
-        Button(action: onOpen) {
+        Button { if !dragged { onOpen() } } label: {
             HStack(spacing: 13) {
                 ZStack(alignment: .topLeading) {
                     // Shorter, same width: the list shows more saved spaces

@@ -678,102 +678,24 @@ struct HomeView: View {
     // MARK: Promo banner (boosted-listings monetization)
 
     private var promoBanner: some View {
-        ZStack {
-            // The photo fills whatever size the card is given instead of
-            // sizing the card: a bare `.fill` image is as wide as its height
-            // demands, which pushed the whole Accueil page past the screen.
-            Color.clear
-                .overlay(
-                    Image("OwnerBanner")
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                )
-                .clipped()
-
-            // Keeps the copy legible over the photo without darkening the
-            // person on the right.
-            LinearGradient(colors: [Color(hex: 0x1F2BB8).opacity(0.55), .clear],
-                           startPoint: .leading, endPoint: .center)
-
-            HStack {
-                // Three levels, read in order: what this is (label), why it
-                // matters (headline), what you get (supporting line) — then
-                // the one action. An existing owner has nothing to "become",
-                // so the banner turns into a shortcut to their dashboard.
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 9, weight: .bold))
-                        Text(L("ESPACE PROPRIÉTAIRE"))
-                            .font(.moblyBody(9.5, weight: .bold))
-                            .tracking(1.1)
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 9).padding(.vertical, 5)
-                    .background(Capsule().fill(.white.opacity(0.18)))
-                    .padding(.bottom, 10)
-
-                    Text(session.isOwner ? L("Vos annonces,\nen un coup d'œil") : L("Louez plus vite,\nsans intermédiaire"))
-                        .font(.moblyHeading(21))
-                        .foregroundStyle(.white)
-                        .lineSpacing(1)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.bottom, 6)
-                    Text(session.isOwner
-                         ? L("Vues, messages et visites\nen temps réel")
-                         : L("Des milliers de locataires\nvous cherchent déjà"))
-                        .font(.moblyBody(12))
-                        .foregroundStyle(.white.opacity(0.82))
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.bottom, 12)
-                    HStack(spacing: 10) {
-                        Button(action: {
-                            if session.isOwner { showOwnerDashboard = true }
-                            else { showBecomeOwner = true }
-                        }) {
-                            if session.isOwner {
-                                HStack(spacing: 6) {
-                                    Text(L("Mon espace"))
-                                        .font(.moblyBody(12.5, weight: .semibold))
-                                    Image(systemName: "arrow.right")
-                                        .font(.system(size: 12, weight: .bold))
-                                }
-                                .foregroundStyle(Color.moblyPrimary)
-                                .padding(.horizontal, 16).padding(.vertical, 9)
-                                .background(Capsule().fill(.white))
-                            } else {
-                                // One white button carrying the offer itself.
-                                HStack(spacing: 6) {
-                                    Image(systemName: "gift.fill")
-                                        .font(.system(size: 11, weight: .bold))
-                                    Text(L("7 jours d'essai gratuit"))
-                                        .font(.moblyBody(12.5, weight: .semibold))
-                                        .lineLimit(1)
-                                    Image(systemName: "arrow.right")
-                                        .font(.system(size: 12, weight: .bold))
-                                }
-                                .foregroundStyle(Color.moblyPrimary)
-                                .padding(.horizontal, 14).padding(.vertical, 9)
-                                .background(Capsule().fill(.white))
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                Spacer(minLength: 8)
+        // The designed banner carries its own copy and "Mon espace" button,
+        // so the whole image is the button.
+        Image("HomeOwnerBanner")
+            .resizable()
+            .aspectRatio(1695.0 / 702.0, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .onTapGesture {
+                // The dashboard needs an owner account; anyone else goes
+                // through becoming one first, which lands on it afterwards.
+                if session.isOwner { showOwnerDashboard = true }
+                else { showBecomeOwner = true }
             }
-            .padding(20)
-        }
-        .frame(height: 212)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        // The whole card is the target, not only the arrow.
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .onTapGesture {
-            if session.isOwner { showOwnerDashboard = true }
-            else { showBecomeOwner = true }
-        }
-        .shadow(color: Color.moblyPrimary.opacity(0.25), radius: 16, y: 10)
+            .accessibilityElement()
+            .accessibilityLabel("Gérer mes annonces")
+            .accessibilityAddTraits(.isButton)
+            .shadow(color: Color.moblyPrimary.opacity(0.25), radius: 16, y: 10)
         .fullScreenCover(isPresented: $showBecomeOwner) {
             BecomeOwnerView(
                 onClose: { showBecomeOwner = false },

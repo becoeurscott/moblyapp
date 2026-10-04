@@ -68,11 +68,13 @@ struct OwnerDashboardView: View {
     }
 
     private enum Filter: CaseIterable {
-        case all, active, boosted, pending
+        // "En attente" is gone: verified publishes go live on their own, so it
+        // was almost always empty. Owners look for what they switched off.
+        case all, active, boosted, unavailable
         var title: String {
             switch self {
             case .all: return "Toutes"; case .active: return "Actives"
-            case .boosted: return "Boostées"; case .pending: return "En attente"
+            case .boosted: return "Boostées"; case .unavailable: return "Indisponibles"
             }
         }
     }
@@ -379,7 +381,7 @@ struct OwnerDashboardView: View {
         case .all:     return store.annonces
         case .active:  return store.annonces.filter { $0.status == .active && $0.available }
         case .boosted: return store.annonces.filter { $0.isBoosted }
-        case .pending: return store.annonces.filter { $0.status == .pending }
+        case .unavailable: return store.annonces.filter { !$0.available }
         }
     }
 
@@ -388,7 +390,7 @@ struct OwnerDashboardView: View {
         case .all:     return store.annonces.count
         case .active:  return store.annonces.filter { $0.status == .active && $0.available }.count
         case .boosted: return store.annonces.filter { $0.isBoosted }.count
-        case .pending: return store.annonces.filter { $0.status == .pending }.count
+        case .unavailable: return store.annonces.filter { !$0.available }.count
         }
     }
 

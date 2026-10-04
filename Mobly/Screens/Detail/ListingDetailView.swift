@@ -1135,35 +1135,6 @@ struct ListingDetailView: View {
             )
             .layoutPriority(1)
             Spacer(minLength: 0)
-            if config.isEnabled("visits.request") {
-                Button {
-                    guard requireReadySession() else { return }
-                    showVisitSheet = true
-                } label: {
-                    Group {
-                        if auth.isRestoringSession {
-                            ProgressView()
-                                .tint(Color.moblyPrimary)
-                        } else {
-                            HStack(spacing: 6) {
-                                Image(systemName: "calendar")
-                                    .font(.system(size: 14, weight: .semibold))
-                                Text("Visiter")
-                                    .font(.moblyHeading(14))
-                                    .lineLimit(1)
-                                    .fixedSize(horizontal: true, vertical: false)
-                            }
-                            .foregroundStyle(Color.moblyPrimary)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .frame(height: 48)
-                    .background(Capsule().fill(Color(hex: 0xEEF0FE)))
-                }
-                .buttonStyle(.plain)
-                .disabled(!isAvailable || authActionDisabled)
-                .opacity(isAvailable ? 1 : 0.4)
-            }
             if config.isEnabled("chat.enabled") {
             Button(action: contactOwner) {
                 Group {
@@ -1185,6 +1156,30 @@ struct ListingDetailView: View {
             }
             .disabled(!isAvailable || authActionDisabled)
             .buttonStyle(.plain)
+            }
+            // Icon-only, at the far right: frees room for the price.
+            if config.isEnabled("visits.request") {
+                Button {
+                    guard requireReadySession() else { return }
+                    showVisitSheet = true
+                } label: {
+                    Group {
+                        if auth.isRestoringSession {
+                            ProgressView()
+                                .tint(Color.moblyPrimary)
+                        } else {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.moblyPrimary)
+                        }
+                    }
+                    .frame(width: 48, height: 48)
+                    .background(Circle().fill(Color(hex: 0xEEF0FE)))
+                    .accessibilityLabel("Demander une visite")
+                }
+                .buttonStyle(.plain)
+                .disabled(!isAvailable || authActionDisabled)
+                .opacity(isAvailable ? 1 : 0.4)
             }
         }
     }

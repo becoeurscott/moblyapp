@@ -678,13 +678,20 @@ struct HomeView: View {
     // MARK: Promo banner (boosted-listings monetization)
 
     private var promoBanner: some View {
-        // The designed banner carries its own copy and "Mon espace" button,
-        // so the whole image is the button.
+        // "Devenez propriétaire sur mobly": the designed banner carries its
+        // own copy, so the whole image is the button.
         Image("HomeOwnerBanner")
             .resizable()
-            .aspectRatio(1695.0 / 702.0, contentMode: .fit)
+            .aspectRatio(1832.0 / 859.0, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            // Shadow cast by a plain shape behind the image rather than by the
+            // photo itself, which is re-rendered offscreen on every scroll frame.
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color.moblyPrimary)
+                    .shadow(color: Color.moblyPrimary.opacity(0.25), radius: 16, y: 10)
+            )
             .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .onTapGesture {
                 // The dashboard needs an owner account; anyone else goes
@@ -693,9 +700,8 @@ struct HomeView: View {
                 else { showBecomeOwner = true }
             }
             .accessibilityElement()
-            .accessibilityLabel("Gérer mes annonces")
+            .accessibilityLabel(session.isOwner ? "Gérer mes annonces" : "Devenez propriétaire sur Mobly")
             .accessibilityAddTraits(.isButton)
-            .shadow(color: Color.moblyPrimary.opacity(0.25), radius: 16, y: 10)
         .fullScreenCover(isPresented: $showBecomeOwner) {
             BecomeOwnerView(
                 onClose: { showBecomeOwner = false },

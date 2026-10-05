@@ -678,11 +678,12 @@ struct HomeView: View {
     // MARK: Promo banner (boosted-listings monetization)
 
     private var promoBanner: some View {
-        // "Devenez propriétaire sur mobly": the designed banner carries its
-        // own copy, so the whole image is the button.
-        Image("HomeOwnerBanner")
+        // Two designed banners, each carrying its own copy, so the whole image
+        // is the button: owners see "Mon espace" (their dashboard), everyone
+        // else "Devenez propriétaire sur mobly" (the become-owner flow).
+        Image(session.isOwner ? "HomeOwnerDashboardBanner" : "HomeOwnerBanner")
             .resizable()
-            .aspectRatio(1832.0 / 859.0, contentMode: .fit)
+            .aspectRatio(session.isOwner ? 1695.0 / 702.0 : 1832.0 / 859.0, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             // Shadow cast by a plain shape behind the image rather than by the

@@ -16,6 +16,14 @@ final class NetworkMonitor: ObservableObject {
     private let queue = DispatchQueue(label: "cm.mobly.netmon", qos: .utility)
 
     private init() {
+        #if DEBUG
+        // FORCE_OFFLINE=1: show the offline state without cutting the Mac's
+        // network, for checking layouts under the connection banner.
+        if ProcessInfo.processInfo.environment["FORCE_OFFLINE"] == "1" {
+            isConnected = false
+            return
+        }
+        #endif
         monitor.pathUpdateHandler = { [weak self] path in
             Task { @MainActor [weak self] in
                 guard let self else { return }

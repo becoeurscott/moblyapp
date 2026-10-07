@@ -72,6 +72,20 @@ struct Listing: Identifiable, Hashable {
     /// written before this was plumbed through.
     var priceUnitRaw: String? = nil
 
+    /// Distance from the viewer, when the listing came from a "près de vous"
+    /// query. Nil everywhere else.
+    var distanceKm: Double? = nil
+
+    /// "à 800 m" / "à 2,4 km" for cards; nil without a distance.
+    var distanceLabel: String? {
+        guard let km = distanceKm else { return nil }
+        if km < 1 { return "à \(max(100, Int((km * 1000 / 100).rounded()) * 100)) m" }
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "fr_FR")
+        f.maximumFractionDigits = km < 10 ? 1 : 0
+        return "à \(f.string(from: NSNumber(value: km)) ?? "\(Int(km))") km"
+    }
+
     /// Suffix shown after the price: "/jour", "/mois", or empty for a sale.
     ///
     /// Prefers the stored value, because it is what the owner actually chose.

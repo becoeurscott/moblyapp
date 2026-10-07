@@ -3,7 +3,7 @@ import { featureGate } from '../middleware/gates';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
-import { sendWelcomeNotification } from '../services/welcome';
+import { sendWelcomeNotifications } from '../services/welcome';
 import { signToken } from '../lib/jwt';
 import { issueSession } from '../services/session';
 import { issueRefreshToken } from '../services/refresh';
@@ -88,7 +88,7 @@ oauthRouter.post(
               },
             }));
 
-      if (!existingByEmail) sendWelcomeNotification(user.id, user.fullName);
+      if (!existingByEmail) sendWelcomeNotifications(user);
 
       await prisma.oAuthIdentity.create({
         data: {
@@ -162,7 +162,7 @@ oauthRouter.post(
               },
             }));
 
-      if (!existingByEmail) sendWelcomeNotification(user.id, user.fullName);
+      if (!existingByEmail) sendWelcomeNotifications(user);
 
       await prisma.oAuthIdentity.create({
         data: {

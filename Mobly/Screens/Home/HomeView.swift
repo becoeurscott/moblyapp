@@ -26,6 +26,9 @@ struct HomeView: View {
     @ObservedObject private var store = ListingStore.shared
     @ObservedObject private var auth = AuthStore.shared
     @ObservedObject private var location = LocationService.shared
+    /// "Plus tard" on the location card — for this launch only, so the card
+    /// comes back next time until location is on.
+    @State private var locationPromptDismissed = false
     @ObservedObject private var placeCompleter = LocationSearchCompleter.shared
     @ObservedObject private var userData = UserDataStore.shared
     @ObservedObject private var savedSearches = SavedSearchStore.shared
@@ -78,6 +81,9 @@ struct HomeView: View {
                 }
                 .refreshable {
                     await store.refresh()
+                    if let origin = location.approximate {
+                        await store.loadNearby(origin, force: true)
+                    }
                     await UserDataStore.shared.loadFavorites()
                 }
 
@@ -97,6 +103,10 @@ struct HomeView: View {
                 withAnimation(open ? SearchDropdown.animation : SearchDropdown.closeAnimation) { showSuggestions = open }
             }
             .onChange(of: searchText) { _, t in if searching { panelText = t } }
+            // "Recommandé" ranks by distance once the device position is known.
+            .task(id: location.approximate) {
+                if let origin = location.approximate { await store.loadNearby(origin) }
+            }
         }
         .background(Color.white)
         .opacity(appeared ? 1 : 0)
@@ -254,6 +264,13 @@ struct HomeView: View {
                 .padding(.horizontal, 22)
                 .padding(.bottom, 14)
 
+            if (location.canAskPermission || location.isDenied) && !locationPromptDismissed {
+                locationPrompt
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 16)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             quickFilters
                 .padding(.bottom, 22)
 
@@ -306,17 +323,37 @@ struct HomeView: View {
                     ForEach(Array(savedSearches.items.prefix(Self.maxSuggestionRows))) { item in
                         Button {
                             dismissSearch()
-                            onOpenCityMap(item.query.isEmpty ? item.label : item.query)
+                            if item.listingId != nil {
+                                // A space picked earlier: straight to its page.
+                                Task {
+                                    if let l = await savedSearches.listing(for: item) {
+                                        onOpenListing(l)
+                                    } else {
+                                        savedSearches.remove(item)
+                                    }
+                                }
+                            } else {
+                                onOpenCityMap(item.query.isEmpty ? item.label : item.query)
+                            }
                         } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: "clock.arrow.circlepath")
+                                Image(systemName: item.listingId != nil ? "house.fill" : "clock.arrow.circlepath")
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundStyle(Color.moblyPrimary)
                                     .frame(width: 34, height: 34)
                                     .background(Circle().fill(Color.moblySurfaceTint))
-                                Text(item.label)
-                                    .font(.moblyBody(14, weight: .medium))
-                                    .foregroundStyle(Color.moblyTextPrimary)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(item.label)
+                                        .font(.moblyBody(14, weight: .medium))
+                                        .foregroundStyle(Color.moblyTextPrimary)
+                                        .lineLimit(1)
+                                    if let loc = item.listingLocation {
+                                        Text(loc)
+                                            .font(.moblyBody(11.5))
+                                            .foregroundStyle(Color(hex: 0x9A9DAC))
+                                            .lineLimit(1)
+                                    }
+                                }
                                 Spacer()
                                 Image(systemName: "arrow.up.left")
                                     .font(.system(size: 11, weight: .semibold))
@@ -338,7 +375,7 @@ struct HomeView: View {
                     ForEach(spaces) { l in
                         suggestionRow(l.title, "\(l.location) · \(l.price)", icon: "house.fill", action: {
                             dismissSearch()
-                            rememberSearch(l.title)
+                            savedSearches.addListing(l)
                             (onPickSpace ?? onOpenListing)(l)
                         })
                     }
@@ -719,6 +756,59 @@ struct HomeView: View {
         }
     }
 
+    // MARK: Location prompt
+
+    /// Shown above Recommandé while location is off. Each launch, until the
+    /// user turns it on: without it the row can't be "près de vous".
+    private var locationPrompt: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                Circle().fill(Color(hex: 0xEEF0FE))
+                Image(systemName: "location.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Color.moblyPrimary)
+            }
+            .frame(width: 42, height: 42)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Voir les espaces près de vous")
+                    .font(.moblyHeading(14.5))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                Text(location.isDenied
+                     ? "La localisation est désactivée pour Mobly. Activez-la dans Réglages pour des recommandations autour de vous."
+                     : "Autorisez la localisation pour recevoir les espaces les plus proches de vous, mis à jour quand vous vous déplacez.")
+                    .font(.moblyBody(12.5))
+                    .foregroundStyle(Color(hex: 0x6B6F80))
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 14) {
+                    Button {
+                        location.askForPermission()
+                    } label: {
+                        Text(location.isDenied ? "Ouvrir Réglages" : "Activer")
+                            .font(.moblyBody(13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .background(Capsule().fill(Color.moblyPrimary))
+                    }
+                    .buttonStyle(.plain)
+                    Button {
+                        withAnimation(Motion.quick) { locationPromptDismissed = true }
+                    } label: {
+                        Text("Plus tard")
+                            .font(.moblyBody(13, weight: .semibold))
+                            .foregroundStyle(Color(hex: 0x9A9DAC))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 6)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color(hex: 0xF7F8FF)))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color(hex: 0xE6E8EF), lineWidth: 1))
+    }
+
     // MARK: Recommended row
 
     /// City the recommendations should prioritise — device location wins
@@ -734,7 +824,26 @@ struct HomeView: View {
         return (trimmed?.isEmpty ?? true) ? nil : trimmed
     }
 
+    /// Nearest-first, with boosted annonces close to the user leading — the
+    /// server ranks the whole catalogue. A quick-filter chip narrows that same
+    /// ranking; only when it leaves nothing (or there is no position yet) does
+    /// the row fall back to the city-based ordering below.
     private var filteredRecommended: [Listing] {
+        if !store.nearby.isEmpty && isInCameroon {
+            let near: [Listing]
+            if let filter = selectedQuickFilter {
+                near = filter.hasPrefix("cat:")
+                    ? store.nearby.filter { $0.category == String(filter.dropFirst(4)) }
+                    : store.nearby.filter { $0.deals.contains(filter) }
+            } else {
+                near = store.nearby
+            }
+            if !near.isEmpty { return near }
+        }
+        return cityRecommended
+    }
+
+    private var cityRecommended: [Listing] {
         let base: [Listing]
         if let filter = selectedQuickFilter {
             // Chip ids prefixed with "cat:" are category filters; everything

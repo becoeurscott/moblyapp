@@ -155,6 +155,13 @@ struct RecommendedCard: View {
                         Image(systemName: "mappin.and.ellipse")
                             .font(.system(size: 11, weight: .medium))
                         Text(listing.location).font(.moblyBody(11.5)).lineLimit(1)
+                        if let distance = listing.distanceLabel {
+                            Text("· \(distance)")
+                                .font(.moblyBody(11.5, weight: .semibold))
+                                .foregroundStyle(Color.moblyPrimary)
+                                .lineLimit(1)
+                                .layoutPriority(1)
+                        }
                     }
                     .foregroundStyle(Color(hex: 0x9A9DAC))
                     HStack(alignment: .firstTextBaseline, spacing: 3) {

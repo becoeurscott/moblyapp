@@ -16,6 +16,7 @@ import {
 } from '../middleware/gates';
 import { configSnapshot } from '../services/config';
 import { notifyNewListing } from '../services/listingNotify';
+import { nearestListings } from '../services/nearby';
 import { emitToUsers } from '../realtime/hub';
 
 export const listingsRouter = Router();
@@ -53,6 +54,19 @@ listingsRouter.get(
         rooms: z.coerce.number().optional(),
         limit: z.coerce.number().int().min(1).max(500).default(200),
         offset: z.coerce.number().int().min(0).default(0),
+        // "lat,lng" of the viewer: sort by distance instead of recency, with
+        // boosted annonces near them first. Rounded to ~1 km before use — the
+        // ranking doesn't need more, and it keeps the cache key coarse so
+        // neighbours share an entry instead of each position missing.
+        near: z
+          .string()
+          .regex(/^-?\d{1,2}(\.\d+)?,-?\d{1,3}(\.\d+)?$/)
+          .transform((v) => {
+            const [lat, lng] = v.split(',').map(Number);
+            return { lat: Math.round(lat * 100) / 100, lng: Math.round(lng * 100) / 100 };
+          })
+          .refine((p) => Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180)
+          .optional(),
       })
       .parse(req.query);
 
@@ -97,6 +111,12 @@ listingsRouter.get(
           { neighborhood: { contains: q.query, mode: 'insensitive' } },
           { category: { contains: q.query, mode: 'insensitive' } },
         ];
+      }
+
+      if (q.near) {
+        return nearestListings(where, q.near, q.offset, q.limit, (ids) =>
+          prisma.listing.findMany({ where: { id: { in: ids } }, include: ownerSelect })
+        );
       }
 
       const [items, total] = await Promise.all([

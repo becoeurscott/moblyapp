@@ -26,6 +26,11 @@ struct ExploreView: View {
     @ObservedObject private var placeCompleter = LocationSearchCompleter.shared
     @ObservedObject private var savedSearches = SavedSearchStore.shared
     @ObservedObject private var config = RemoteConfigStore.shared
+    @ObservedObject private var location = LocationService.shared
+    /// The map has been put on the user's position (or they took over by
+    /// searching / picking something). After that, location updates never
+    /// move the camera on their own.
+    @State private var centeredOnUser = false
     @State private var activeChip = "Tous"
     /// Mirrors `searchActive` through an explicit animation (focus changes
     /// carry no animation, so the dropdown popped instead of sliding).
@@ -86,6 +91,18 @@ struct ExploreView: View {
             filtered.sort { a, b in
                 distSq(target, baseCoord(for: a)) < distSq(target, baseCoord(for: b))
             }
+        } else if let origin = location.precise {
+            // Nothing searched: the cards run from the space nearest the user
+            // to the farthest, instead of the feed's order (which led with
+            // Douala for someone in Yaoundé).
+            let here = CLLocation(latitude: origin.lat, longitude: origin.lng)
+            filtered = filtered
+                .map { l -> (l: Listing, m: CLLocationDistance) in
+                    let c = baseCoord(for: l)
+                    return (l, CLLocation(latitude: c.latitude, longitude: c.longitude).distance(from: here))
+                }
+                .sorted { $0.m < $1.m }
+                .map(\.l)
         }
 
         return filtered
@@ -244,12 +261,13 @@ struct ExploreView: View {
     /// Put one space front and centre: clear any city filter (the space may
     /// be anywhere), select its pin and zoom the map onto it.
     private func focusListing(_ l: Listing) {
+        centeredOnUser = true   // the user chose where to look
         searchedListingId = l.id
         nameMatchIds = nil
         searchActive = false
         searchText = l.title
         committedLocation = ""
-        SavedSearchStore.shared.add(label: l.title, query: l.title, filters: filters)
+        SavedSearchStore.shared.addListing(l)
         // `listings` is recomputed without the city filter above, so the
         // pin index is looked up after that change.
         DispatchQueue.main.async {
@@ -338,6 +356,7 @@ struct ExploreView: View {
     }
 
     private func goTo(_ location: String) {
+        centeredOnUser = true   // the user chose where to look
         nameMatchIds = nil
         let coord = locationCoordinate(location)
         let quartier = isQuartier(location)
@@ -525,8 +544,14 @@ struct ExploreView: View {
             } else if !initialFocusId.isEmpty {
                 focusListing(id: initialFocusId)
                 onLocationConsumed()
+            } else {
+                openOnUser()
             }
         }
+        // The position often lands a moment after the map first shows (cold
+        // start, permission just granted): move there then — once, and only
+        // while the user hasn't searched or picked anything.
+        .onChange(of: location.precise) { _, _ in openOnUser() }
         .onChange(of: initialFocusId) { _, id in
             guard !id.isEmpty else { return }
             focusListing(id: id)
@@ -641,11 +666,35 @@ struct ExploreView: View {
         }
     }
 
+    /// Where the user is: the exact device position (on-device only), else the
+    /// city they're in or have on their profile, else nil.
+    private var userCenter: CLLocationCoordinate2D? {
+        if let p = location.precise {
+            return CLLocationCoordinate2D(latitude: p.lat, longitude: p.lng)
+        }
+        if let city = location.city ?? auth.user?.city,
+           let c = CityCoordinates.coordinate(for: city) {
+            return c
+        }
+        return nil
+    }
+
+    /// Open the map around the user rather than on a fixed Douala point.
+    private func openOnUser() {
+        guard !centeredOnUser,
+              committedLocation.isEmpty, selected == nil, searchedListingId == nil,
+              nameMatchIds == nil,
+              let target = userCenter
+        else { return }
+        // Only the device position counts as "done": a city fallback may
+        // still be refined by the fix that's on its way.
+        if location.precise != nil { centeredOnUser = true }
+        zoomTo(target, span: MKCoordinateSpan(latitudeDelta: 0.04, longitudeDelta: 0.04))
+    }
+
     private func recenterUser() {
-        // Fall back to the city coordinate table — device coord isn't
-        // retained (privacy), so we can't jump to a precise GPS fix.
         currentCenter = committedLocation.isEmpty
-            ? (LocationService.shared.city.map(locationCoordinate) ?? center)
+            ? (userCenter ?? center)
             : locationCoordinate(committedLocation)
         currentSpan = MKCoordinateSpan(latitudeDelta: 0.06, longitudeDelta: 0.06)
         withAnimation(Motion.standard) {
@@ -723,11 +772,23 @@ struct ExploreView: View {
 
                     ForEach(Array(savedSearches.items.prefix(4))) { item in
                         suggestionRow(title: item.label,
-                                      subtitle: "Recherche récente",
-                                      icon: "clock.arrow.circlepath",
+                                      subtitle: item.listingLocation ?? "Recherche récente",
+                                      icon: item.listingId != nil ? "house.fill" : "clock.arrow.circlepath",
                                       action: {
-                                          if !item.filters.isEmpty { filters = item.filters }
-                                          goTo(item.query.isEmpty ? item.label : item.query)
+                                          if item.listingId != nil {
+                                              // A space picked earlier: straight to its page.
+                                              Task {
+                                                  if let l = await savedSearches.listing(for: item) {
+                                                      searchActive = false
+                                                      (onOpenListingFromSearch ?? onOpenListing)(l)
+                                                  } else {
+                                                      savedSearches.remove(item)
+                                                  }
+                                              }
+                                          } else {
+                                              if !item.filters.isEmpty { filters = item.filters }
+                                              goTo(item.query.isEmpty ? item.label : item.query)
+                                          }
                                       })
                     }
                 }

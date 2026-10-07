@@ -9,14 +9,24 @@ struct SavedSearchItem: Identifiable, Codable, Equatable {
     var query: String
     var filters: FilterState
     var createdAt: Date
+    /// Set when the user picked a specific space rather than searching a
+    /// place or a phrase: tapping the recent search opens that space again
+    /// instead of re-running its title as a map search. Optional, so lists
+    /// saved before this existed still decode.
+    var listingId: String?
+    /// "Akwa, Douala" for a space — the row's second line.
+    var listingLocation: String?
 
     init(label: String, query: String, filters: FilterState,
-         id: String = UUID().uuidString, createdAt: Date = Date()) {
+         id: String = UUID().uuidString, createdAt: Date = Date(),
+         listingId: String? = nil, listingLocation: String? = nil) {
         self.id = id
         self.label = label
         self.query = query
         self.filters = filters
         self.createdAt = createdAt
+        self.listingId = listingId
+        self.listingLocation = listingLocation
     }
 }
 
@@ -40,6 +50,34 @@ final class SavedSearchStore: ObservableObject {
         if items.contains(where: { $0.label == label && $0.filters == filters }) { return }
         items.insert(SavedSearchItem(label: label, query: query, filters: filters), at: 0)
         persist()
+    }
+
+    /// Remember a space the user opened from search. One entry per space,
+    /// moved back to the top when it's opened again.
+    func addListing(_ listing: Listing) {
+        guard RemoteConfigStore.shared.isEnabled("search.savedSearches") else { return }
+        let title = listing.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Also drop the plain-text entry older builds saved for this same
+        // space (its title, trimmed), so it doesn't sit there as a duplicate
+        // that still runs a map search.
+        items.removeAll {
+            $0.listingId == listing.id
+                || ($0.listingId == nil
+                    && $0.label.trimmingCharacters(in: .whitespacesAndNewlines)
+                        .caseInsensitiveCompare(title) == .orderedSame)
+        }
+        items.insert(SavedSearchItem(label: title, query: title, filters: FilterState(),
+                                     listingId: listing.id, listingLocation: listing.location), at: 0)
+        persist()
+    }
+
+    /// The space behind a "recent search" entry: from the loaded feed when
+    /// it's there, otherwise fetched — it may sit beyond the first page.
+    /// Nil when it no longer exists.
+    func listing(for item: SavedSearchItem) async -> Listing? {
+        guard let id = item.listingId else { return nil }
+        if let l = MoblyData.all.first(where: { $0.id == id }) { return l }
+        return try? await MoblyAPI.shared.listing(id: id).asListing
     }
 
     func remove(_ item: SavedSearchItem) {
@@ -70,6 +108,7 @@ final class SavedSearchStore: ObservableObject {
 extension SavedSearchItem {
     /// Human summary of what this search looks for — shown on the row.
     var subtitle: String {
+        if listingId != nil { return listingLocation ?? "Espace" }
         var bits: [String] = []
         if !filters.propertyTypes.isEmpty {
             bits.append(filters.propertyTypes.sorted().joined(separator: " · "))

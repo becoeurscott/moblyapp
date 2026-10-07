@@ -93,6 +93,10 @@ struct MoblyApp: App {
                     // Re-check maintenance on every foreground, signed in or
                     // not: a window may have opened (or been lifted) while the
                     // app sat in the background.
+                    // Follow the position only while Mobly is on screen:
+                    // a fresh fix on every return, nothing in the background.
+                    if phase == .active { LocationService.shared.startTracking() }
+                    if phase == .background { LocationService.shared.stopTracking() }
                     if phase == .active {
                         Task { await MaintenanceStore.shared.checkAtLaunch() }
                         // The socket does not survive suspension. Without this

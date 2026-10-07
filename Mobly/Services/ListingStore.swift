@@ -12,6 +12,24 @@ final class ListingStore: ObservableObject {
     static let shared = ListingStore()
 
     @Published private(set) var listings: [Listing] = []
+    /// Nearest annonces to the device (boosted ones close by first), ranked
+    /// server-side across the whole catalogue. Empty until a position is known.
+    @Published private(set) var nearby: [Listing] = []
+    private var nearbyOrigin: LocationService.Approx?
+
+    /// Load "près de vous" for a position. Repeat calls for the same rounded
+    /// position are skipped; a failure keeps whatever was there.
+    func loadNearby(_ origin: LocationService.Approx, force: Bool = false) async {
+        guard force || origin != nearbyOrigin else { return }
+        guard let dtos = try? await MoblyAPI.shared.nearbyListings(lat: origin.lat, lng: origin.lng)
+        else { return }
+        // A server without distance ranking ignores `near` and answers with
+        // the newest annonces — never pass those off as "près de vous".
+        guard dtos.contains(where: { $0.distanceKm != nil }) else { return }
+        nearbyOrigin = origin
+        let fresh = dtos.map { $0.asListing }
+        if fresh != nearby { nearby = fresh }
+    }
     @Published private(set) var isLoading = false
     @Published private(set) var isOffline = false
     /// Non-nil when the last fetch failed for a reason that isn't connectivity.
@@ -169,7 +187,8 @@ extension ListingDTO {
             features: features ?? [:],
             lat: lat,
             lng: lng,
-            priceUnitRaw: priceUnit
+            priceUnitRaw: priceUnit,
+            distanceKm: distanceKm
         )
     }
 }

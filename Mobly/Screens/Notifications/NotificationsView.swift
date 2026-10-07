@@ -5,11 +5,16 @@ enum NotificationTarget: Equatable {
     case thread(String)
     case listing(String)
     case visits
+    /// Start the become-owner flow (the "Vous avez un espace à louer ?" invite).
+    case becomeOwner
+    /// Open the e-mail confirmation screen.
+    case verifyEmail
 }
 
 struct MoblyNotification: Identifiable {
     enum Kind {
         case message, visit, match, priceDrop, verified, boost, newListing, reengage, welcome
+        case ownerInvite, verifyEmail
         var icon: String {
             switch self {
             case .message:    return "bubble.left.fill"
@@ -21,6 +26,8 @@ struct MoblyNotification: Identifiable {
             case .newListing: return "house.fill"
             case .reengage:   return "bell.badge.fill"
             case .welcome:    return "hand.wave.fill"
+            case .ownerInvite: return "house.fill"
+            case .verifyEmail: return "envelope.badge.fill"
             }
         }
         var tint: UInt32 {
@@ -34,11 +41,15 @@ struct MoblyNotification: Identifiable {
             case .newListing: return 0x4C9BFF
             case .reengage:   return 0x3A4FF0
             case .welcome:    return 0x3A4FF0
+            case .ownerInvite: return 0x1F8A5B
+            case .verifyEmail: return 0xE5950C
             }
         }
         var bg: UInt32 {
             switch self {
             case .message, .verified, .reengage, .welcome: return 0xEEF0FE
+            case .ownerInvite:                   return 0xEAF6EF
+            case .verifyEmail:                   return 0xFFF4E5
             case .visit, .priceDrop:             return 0xEAF6EF
             case .match, .boost, .newListing:    return 0xEAF3FF
             }
@@ -55,6 +66,8 @@ struct MoblyNotification: Identifiable {
             case .newListing: return "Nouvelles annonces"
             case .reengage:   return "Rappels"
             case .welcome:    return "Bienvenue"
+            case .ownerInvite: return "Devenir propriétaire"
+            case .verifyEmail: return "Adresse e-mail"
             }
         }
     }
@@ -80,6 +93,11 @@ struct MoblyNotification: Identifiable {
     /// Resolved destination for a tap. Nil when the server sent no target, in
     /// which case the row stays inert rather than pretending to lead somewhere.
     var destination: NotificationTarget? {
+        switch payload["action"] {
+        case "become_owner": return .becomeOwner
+        case "verify_email": return .verifyEmail
+        default: break
+        }
         if let t = payload["threadId"], !t.isEmpty { return .thread(t) }
         if let l = payload["listingId"], !l.isEmpty { return .listing(l) }
         if payload["visitId"] != nil || kind == .visit { return .visits }
@@ -100,6 +118,8 @@ struct MoblyNotification: Identifiable {
         case "NEW_LISTING":                                 k = .newListing
         case "REENGAGE_3D", "REENGAGE_7D", "REENGAGE_14D": k = .reengage
         case "WELCOME":                                     k = .welcome
+        case "OWNER_INVITE":                                k = .ownerInvite
+        case "VERIFY_EMAIL":                                k = .verifyEmail
         default:                                            k = .message
         }
         return MoblyNotification(
@@ -166,6 +186,8 @@ struct NotificationsView: View {
             ISO8601DateFormatter().string(from: now.addingTimeInterval(-minutesAgo * 60))
         }
         let rows: [(String, String, String, Double, Bool)] = [
+            ("OWNER_INVITE", "Vous avez un espace à louer ?", "Devenez propriétaire sur Mobly : publiez vos annonces gratuitement pendant 7 jours.", 61, false),
+            ("VERIFY_EMAIL", "Confirmez votre adresse e-mail", "Confirmez votre adresse avec un code pour pouvoir récupérer votre compte.", 62, false),
             ("MESSAGE", "Aïcha N.", "Bonjour, le studio est-il toujours disponible ?", 3, false),
             ("MESSAGE", "Paul M.", "Je peux passer demain à 10h ?", 18, false),
             ("MESSAGE", "Brenda T.", "Merci pour la visite !", 42, true),
@@ -176,7 +198,9 @@ struct NotificationsView: View {
             ("PRICE_DROP", "Baisse de prix", "Villa Bonapriso passe à 450 000 FCFA/mois", 2900, true),
         ]
         let json = "[" + rows.enumerated().map { i, r in
-            #"{"id":"demo\#(i)","type":"\#(r.0)","title":"\#(r.1)","body":"\#(r.2)","read":\#(r.4),"createdAt":"\#(at(r.3))"}"#
+            let action = r.0 == "OWNER_INVITE" ? #","payload":{"action":"become_owner"}"#
+                : r.0 == "VERIFY_EMAIL" ? #","payload":{"action":"verify_email"}"# : ""
+            return #"{"id":"demo\#(i)","type":"\#(r.0)","title":"\#(r.1)","body":"\#(r.2)","read":\#(r.4),"createdAt":"\#(at(r.3))"\#(action)}"#
         }.joined(separator: ",") + "]"
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601

@@ -68,6 +68,11 @@ struct MainTabView: View {
     @State private var showNotifications = false
     /// Set when a notification points at a visit; MessagesView opens the hub.
     @State private var showVisitsFromRoute = false
+    /// Opened from the "Vous avez un espace à louer ?" notification.
+    @State private var showBecomeOwnerFromRoute = false
+    @State private var showOwnerDashboardFromRoute = false
+    /// Opened from the "Confirmez votre adresse e-mail" notification.
+    @State private var showEmailFromRoute = false
     @State private var showSearch = false
     @State private var searchRequest: SearchRequest?
     @State private var searchCategory: String?
@@ -136,10 +141,25 @@ struct MainTabView: View {
         case .visits:
             withAnimation(Motion.quick) { tab = .messages }
             showVisitsFromRoute = true
+
+        case .becomeOwner:
+            // Already an owner by the time they tap it: their dashboard.
+            if Session.shared.isOwner { showOwnerDashboardFromRoute = true }
+            else { showBecomeOwnerFromRoute = true }
+
+        case .verifyEmail:
+            showEmailFromRoute = true
         }
     }
 
     var body: some View {
+        // The connection banner sits *above* the tabs in the layout. It used to
+        // be a top safe-area inset, which the tab roots honoured but pages
+        // pushed inside a tab's NavigationStack (Profil → Adresse e-mail,
+        // Modifier le profil…) did not: the banner landed on their back button
+        // and title. Stacked like this, every screen simply starts below it.
+        VStack(spacing: 0) {
+        ConnectionBanner()
         ZStack(alignment: .bottom) {
             Color.white.ignoresSafeArea()
 
@@ -232,6 +252,12 @@ struct MainTabView: View {
                         tab = .explore
                     },
                     onOpenSavedSearch: { item in
+                        // A space picked from search: open it, don't re-run
+                        // its title as a place search.
+                        if let id = item.listingId {
+                            openListing(id: id, from: "search")
+                            return
+                        }
                         guard config.isEnabled("maps") else {
                             searchCategory = nil
                             searchQuery = item.label
@@ -309,13 +335,29 @@ struct MainTabView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        // In the layout, not over it: the banner pushes the screen down.
-        .safeAreaInset(edge: .top, spacing: 0) { ConnectionBanner() }
+        }
         .animation(Motion.quick, value: chrome.hideTabBar)
         .ignoresSafeArea(.keyboard)
         .onAppear { SessionTracker.shared.log("screen.view", ["screen": "\(tab)"]) }
         .onChange(of: tab) { _, new in
             SessionTracker.shared.log("screen.view", ["screen": "\(new)"])
+        }
+        .fullScreenCover(isPresented: $showBecomeOwnerFromRoute) {
+            BecomeOwnerView(
+                onClose: { showBecomeOwnerFromRoute = false },
+                onPublished: {
+                    showBecomeOwnerFromRoute = false
+                    // After the cover finishes dismissing, land on the dashboard.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { showOwnerDashboardFromRoute = true }
+                }
+            )
+            .swipeToDismiss(onDismiss: { showBecomeOwnerFromRoute = false })
+        }
+        .fullScreenCover(isPresented: $showOwnerDashboardFromRoute) { OwnerDashboardCover() }
+        .fullScreenCover(isPresented: $showEmailFromRoute) {
+            // Its own stack: the screen's back button dismisses the cover.
+            NavigationStack { EmailVerificationView() }
+                .swipeToDismiss(onDismiss: { showEmailFromRoute = false })
         }
         .fullScreenCover(item: $selectedListing) { listing in
             ListingDetailView(listing: listing, source: selectedListingSource,

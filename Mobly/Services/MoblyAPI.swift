@@ -804,6 +804,15 @@ final class MoblyAPI {
         return w.items
     }
 
+    /// Annonces nearest to a position, boosted ones close by first — the
+    /// server ranks the whole catalogue, not just the page the app holds.
+    func nearbyListings(lat: Double, lng: Double, limit: Int = 40) async throws -> [ListingDTO] {
+        let q = ["near": String(format: "%.2f,%.2f", lat, lng), "limit": String(limit)]
+        struct Wrap: Decodable { let items: [ListingDTO] }
+        let w: Wrap = try await request("listings", query: q, retries: 1)
+        return w.items
+    }
+
     func listing(id: String) async throws -> ListingDTO {
         struct Wrap: Decodable { let listing: ListingDTO }
         let w: Wrap = try await request("listings/\(id)")
@@ -1523,6 +1532,8 @@ struct ListingDTO: Codable, Identifiable {
     let priceFcfa: Int
     let price: String
     let priceUnit: String?
+    /// Kilometres from the viewer — only on a `near=` feed query.
+    let distanceKm: Double?
     let furnished: Bool
     let rooms: Int
     /// Optional: nullable in the schema, and absent from payloads served by a
@@ -1602,6 +1613,10 @@ struct VisitRequestDTO: Codable, Identifiable {
         let avatarColor: String?
         let phone: String?
         let verified: Bool
+        /// Identity (ID document) check passed — what the badge means.
+        /// Optional so a server that doesn't send it shows no badge rather
+        /// than failing to decode.
+        let identityVerified: Bool?
     }
 }
 
@@ -1613,10 +1628,6 @@ private struct AnyEncodable: Encodable {
 }
 
 
-        /// Identity (ID document) check passed — what the badge means.
-        /// Optional so a server that doesn't send it shows no badge rather
-        /// than failing to decode.
-        let identityVerified: Bool?
 #if DEBUG
 /// Temporary diagnostic: the simulator's system log redacts app messages, so
 /// transport failures are appended to a file we can read from the host.

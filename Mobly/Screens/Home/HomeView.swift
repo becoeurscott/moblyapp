@@ -720,7 +720,7 @@ struct HomeView: View {
         // else "Devenez propriétaire sur mobly" (the become-owner flow).
         Image(session.isOwner ? "HomeOwnerDashboardBanner" : "HomeOwnerBanner")
             .resizable()
-            .aspectRatio(session.isOwner ? 1695.0 / 702.0 : 1832.0 / 859.0, contentMode: .fit)
+            .aspectRatio(session.isOwner ? 1695.0 / 702.0 : 1831.0 / 859.0, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             // Shadow cast by a plain shape behind the image rather than by the

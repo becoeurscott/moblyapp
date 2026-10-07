@@ -34,13 +34,24 @@ final class Session: ObservableObject {
     private init() {
         // Debug hook: START_AT flows can force owner mode for screenshotting.
         if ProcessInfo.processInfo.environment["AS_OWNER"] == "1" { isOwner = true }
+        if Self.forceVisitor { isOwner = false }
+    }
+
+    /// Debug hook: AS_OWNER=0 keeps an owner account in visitor mode, to see
+    /// what non-owners see. Debug builds only.
+    private static var forceVisitor: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["AS_OWNER"] == "0"
+        #else
+        return false
+        #endif
     }
 
     /// Called from auth on successful signup/signin.
     func signIn(fullName: String?, phone: String?, isOwner: Bool) {
         if let n = fullName, !n.trimmingCharacters(in: .whitespaces).isEmpty { self.fullName = n }
         if let p = phone, !p.trimmingCharacters(in: .whitespaces).isEmpty { self.phone = p }
-        self.isOwner = isOwner
+        self.isOwner = Self.forceVisitor ? false : isOwner
     }
 
     /// Visitor upgrading to owner in-app.

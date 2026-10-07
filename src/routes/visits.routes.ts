@@ -29,6 +29,9 @@ const userSelect = {
   avatarColor: true,
   phone: true,
   verified: true,
+  // The badge in the app means the ID check passed. `verified` is true for
+  // every active account, so on its own it put a checkmark on everyone.
+  identityVerified: true,
 } as const;
 
 /** Resolve (or create) the chat thread between visitor and owner about a listing. */

@@ -1613,6 +1613,10 @@ private struct AnyEncodable: Encodable {
 }
 
 
+        /// Identity (ID document) check passed — what the badge means.
+        /// Optional so a server that doesn't send it shows no badge rather
+        /// than failing to decode.
+        let identityVerified: Bool?
 #if DEBUG
 /// Temporary diagnostic: the simulator's system log redacts app messages, so
 /// transport failures are appended to a file we can read from the host.

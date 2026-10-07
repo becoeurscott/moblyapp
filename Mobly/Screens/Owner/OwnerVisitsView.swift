@@ -241,7 +241,7 @@ private struct VisitCard: View {
                     Text(visit.visitor?.fullName ?? "Visiteur")
                         .font(.moblyHeading(16)).foregroundStyle(Color.moblyTextPrimary)
                         .lineLimit(1)
-                    if visit.visitor?.verified == true {
+                    if visit.visitor?.identityVerified == true {
                         VerifiedBadge(size: 15)
                     }
                 }

@@ -1416,7 +1416,7 @@ struct AddListingView: View {
             coverUrl: dto.coverUrl ?? local.coverUrl,
             photos: (dto.photos?.isEmpty == false ? dto.photos! : local.photos),
             ownerName: dto.owner?.fullName ?? local.ownerName,
-            ownerVerified: dto.owner?.verified ?? local.ownerVerified,
+            ownerVerified: dto.owner?.identityVerified ?? local.ownerVerified,
             customImageData: local.customImageData,
             customPhotos: local.customPhotos,
             category: dto.category,

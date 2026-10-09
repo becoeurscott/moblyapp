@@ -164,15 +164,22 @@ struct RecommendedCard: View {
                         }
                     }
                     .foregroundStyle(Color(hex: 0x9A9DAC))
+                    // One line, always: the longest price today fits, but owners
+                    // can enter up to 500 000 000 FCFA, which would wrap and make
+                    // this card taller than its neighbours in the row.
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text(listing.price)
                             .font(.moblyHeading(14)).foregroundStyle(Color.moblyPrimary)
+                            .lineLimit(1)
                         if !listing.priceUnit.isEmpty {
                             Text(LT(listing.priceUnit))
                                 .font(.moblyBody(11))
                                 .foregroundStyle(Color(hex: 0x9A9DAC))
+                                .lineLimit(1)
+                                .fixedSize()
                         }
                     }
+                    .minimumScaleFactor(0.75)
                     .padding(.top, 2)
                 }
                 .padding(12)

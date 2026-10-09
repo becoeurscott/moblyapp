@@ -372,85 +372,71 @@ struct ProfileView: View {
     // Same entry as the Home card: the onboarding flow itself walks the user
     // through the identity check before anything is published.
     private var becomeOwnerCTA: some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        promoCard(icon: "sparkles",
+                  title: "Devenir propriétaire",
+                  subtitle: "Publiez votre espace. 7\u{00A0}jours d'essai gratuit.",
+                  cta: "Commencer") {
             showBecomeOwner = true
-        } label: {
-            ZStack(alignment: .topTrailing) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 11, weight: .bold))
-                        Text("NOUVEAU").font(.moblyBody(10, weight: .bold)).tracking(0.8)
-                    }
-                    .foregroundStyle(Color.moblyPrimary)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(Capsule().fill(.white.opacity(0.85)))
-
-                    Text("Devenez propriétaire\nsur Mobly")
-                        .font(.moblyHeading(21))
-                        .foregroundStyle(Color.moblyTextPrimary)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text("Publiez gratuitement et touchez des milliers de locataires vérifiés au Cameroun.")
-                        .font(.moblyBody(12.5))
-                        .foregroundStyle(Color(hex: 0x5A5F73))
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    HStack(spacing: 6) {
-                        Text("Commencer")
-                            .font(.moblyHeading(13.5))
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 12, weight: .bold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(Capsule().fill(Color.moblyPrimary))
-                    .padding(.top, 2)
-                }
-                .padding(20)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                LinearGradient(
-                    colors: [Color(hex: 0xF2F6FF), Color(hex: 0xE4ECFF)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                )
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 22))
-            // A tinted shadow at the old strength reads as a smudge under a
-            // near-white card, so it drops to a soft neutral lift.
-            .shadow(color: Color(hex: 0x14152A).opacity(0.07), radius: 12, y: 5)
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: Owner dashboard CTA (owner)
 
     private var ownerDashboardCTA: some View {
+        promoCard(icon: "square.grid.2x2.fill",
+                  title: "Mon espace propriétaire",
+                  subtitle: "Annonces, visites et statistiques.",
+                  cta: "Ouvrir") {
+            goToOwnerDashboard = true
+        }
+    }
+
+    /// Dark promo card shared by both states, so "become an owner" and "your
+    /// owner space" read as the same place: icon, title, one line of value,
+    /// and an outlined pill on the right. The whole card is the button.
+    private func promoCard(icon: String, title: String, subtitle: String, cta: String,
+                           action: @escaping () -> Void) -> some View {
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            goToOwnerDashboard = true
+            action()
         } label: {
-            HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 13).fill(Color(hex: 0xEEF0FE))
-                    Image(systemName: "square.grid.2x2.fill").font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Color.moblyPrimary)
-                }.frame(width: 44, height: 44)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Mon espace propriétaire").font(.moblyHeading(14.5)).foregroundStyle(Color.moblyTextPrimary)
-                    Text("Gérez vos annonces et vos demandes de visite")
-                        .font(.moblyBody(11.5)).foregroundStyle(Color(hex: 0x9A9DAC))
+            HStack(alignment: .center, spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(Color(hex: 0x3D7BFF))
+                    .frame(width: 34)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(LT(title))
+                        .font(.moblyHeading(15.5))
+                        .foregroundStyle(.white)
+                    Text(LT(subtitle))
+                        .font(.moblyBody(11.5))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
-                Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: 0xC4C7D2))
+
+                Spacer(minLength: 4)
+
+                HStack(spacing: 3) {
+                    Text(LT(cta)).font(.moblyBody(11.5, weight: .semibold))
+                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 11).padding(.vertical, 7)
+                .background(Capsule().fill(.white.opacity(0.1)))
+                .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
+                .fixedSize()
             }
-            .padding(15)
-            .background(RoundedRectangle(cornerRadius: 18).fill(.white))
-            .shadow(color: Color(hex: 0x14152A).opacity(0.06), radius: 10, y: 3)
+            .padding(.horizontal, 18).padding(.vertical, 18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                LinearGradient(colors: [Color(hex: 0x111114), Color(hex: 0x34343C)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .shadow(color: Color(hex: 0x14152A).opacity(0.18), radius: 12, y: 6)
         }
         .buttonStyle(.plain)
     }

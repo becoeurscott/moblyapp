@@ -31,6 +31,9 @@ struct ListingDetailView: View {
     /// truth: the `listing.rating`/`reviewCount` the page opened with can come
     /// from a saved feed that predates a change (a reset score, a new avis).
     @State private var reviewsConfirmed = false
+    /// Calls are not live yet; the phone button says so instead of doing
+    /// nothing. `onCall` was never wired by any caller, so taps were silent.
+    @State private var showCallMaintenance = false
     @State private var didLoad = false
     @State private var reviewPostError: String?
 
@@ -278,6 +281,12 @@ struct ListingDetailView: View {
             ChatOpeningView(listing: listing, onBack: { openingChat = false })
         }
 
+        // Same wording as the call buttons in a conversation.
+        .alert("Fonctionnalité en maintenance", isPresented: $showCallMaintenance) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Les appels sont temporairement indisponibles. Cette fonctionnalité sera bientôt de retour.")
+        }
         .alert("Impossible d'ouvrir la conversation", isPresented: $contactFailed) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -608,7 +617,7 @@ struct ListingDetailView: View {
                 // no one on the other end of these.
                 if !isOwnListing && ownerContactActive {
                     CircleIconButton(icon: "phone.fill", bg: .white,
-                                     tint: .moblyPrimary, size: 44, action: onCall)
+                                     tint: .moblyPrimary, size: 44) { showCallMaintenance = true }
                     CircleIconButton(icon: "bubble.left.fill", bg: .white,
                                      tint: .moblyPrimary, size: 44, action: contactOwner)
                 } else if isOwnListing {

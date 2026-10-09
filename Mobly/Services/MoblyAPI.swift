@@ -806,8 +806,9 @@ final class MoblyAPI {
 
     /// Annonces nearest to a position, boosted ones close by first — the
     /// server ranks the whole catalogue, not just the page the app holds.
-    func nearbyListings(lat: Double, lng: Double, limit: Int = 40) async throws -> [ListingDTO] {
-        let q = ["near": String(format: "%.2f,%.2f", lat, lng), "limit": String(limit)]
+    func nearbyListings(lat: Double, lng: Double, limit: Int = 40, offset: Int = 0) async throws -> [ListingDTO] {
+        var q = ["near": String(format: "%.2f,%.2f", lat, lng), "limit": String(limit)]
+        if offset > 0 { q["offset"] = String(offset) }
         struct Wrap: Decodable { let items: [ListingDTO] }
         let w: Wrap = try await request("listings", query: q, retries: 1)
         return w.items

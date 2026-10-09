@@ -15,20 +15,93 @@ struct OwnerVisitsView: View {
     @State private var busyVisitId: String?
     /// id of the visit whose chat is being opened.
     @State private var openingChatFor: String?
+    @State private var filter: StatusFilter = .all
+
+    /// Status chips above the list. `.all` keeps the Nouvelles / À venir /
+    /// Passées grouping; any other chip shows a flat list of that status.
+    private enum StatusFilter: CaseIterable, Hashable {
+        case all, requested, confirmed, completed, cancelled, noShow
+        var title: String {
+            switch self {
+            case .all: return "Toutes"
+            case .requested: return "En attente"
+            case .confirmed: return "Confirmées"
+            case .completed: return "Terminées"
+            case .cancelled: return "Refusées"
+            case .noShow: return "Non honorées"
+            }
+        }
+        var status: String? {
+            switch self {
+            case .all: return nil
+            case .requested: return "REQUESTED"
+            case .confirmed: return "CONFIRMED"
+            case .completed: return "COMPLETED"
+            case .cancelled: return "CANCELLED"
+            case .noShow: return "NO_SHOW"
+            }
+        }
+    }
+
+    private func count(_ f: StatusFilter) -> Int {
+        guard let st = f.status else { return store.items.count }
+        return store.items.filter { $0.status == st }.count
+    }
+
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                // Empty statuses stay out of the way, except the one in use.
+                ForEach(StatusFilter.allCases.filter { $0 == .all || $0 == filter || count($0) > 0 }, id: \.self) { f in
+                    let on = f == filter
+                    Button {
+                        withAnimation(Motion.quick) { filter = f }
+                    } label: {
+                        Text("\(LT(f.title)) (\(count(f)))")
+                            .font(.moblyBody(13, weight: .semibold))
+                            .foregroundStyle(on ? .white : Color(hex: 0x5A5F73))
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .background(Capsule().fill(on ? Color.moblyPrimary : .white))
+                            .overlay(Capsule().stroke(on ? .clear : Color(hex: 0xE2E4EC), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    /// The chosen status, newest visit first.
+    private var filtered: [VisitRequestDTO] {
+        guard let st = filter.status else { return store.items }
+        return store.items.filter { $0.status == st }.sorted { $0.scheduledAt > $1.scheduledAt }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
+            if !store.items.isEmpty {
+                filterBar.padding(.bottom, 10)
+            }
             ScrollView(showsIndicators: false) {
                 if store.isLoading && store.items.isEmpty {
                     ProgressView().padding(.top, 60)
                 } else if store.items.isEmpty {
                     emptyState.padding(.top, 60)
-                } else {
+                } else if filter == .all {
                     LazyVStack(spacing: 22) {
                         section("Nouvelles", nouvelles, accent: Color.moblyAccent)
                         section("À venir", aVenir, accent: Color(hex: 0x1F8A5B))
                         section("Passées", passees, accent: Color(hex: 0x9A9DAC))
+                    }
+                    .padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 40)
+                } else if filtered.isEmpty {
+                    Text("Aucune demande « \(LT(filter.title).lowercased()) »")
+                        .font(.moblyBody(13.5)).foregroundStyle(Color.moblyTextSecondary)
+                        .padding(.top, 60)
+                } else {
+                    LazyVStack(spacing: 22) {
+                        section(filter.title, filtered, accent: Color.moblyPrimary)
                     }
                     .padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 40)
                 }

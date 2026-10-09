@@ -6,6 +6,11 @@ struct SearchResultsView: View {
     var onClose: () -> Void = {}
 
     @ObservedObject private var listingStore = ListingStore.shared
+    @ObservedObject private var location = LocationService.shared
+    /// The whole catalogue ranked by distance from the user, fetched from the
+    /// server — the app only keeps the newest 200 locally, so "Voir tout"
+    /// would otherwise stop at 200. Empty until a position is known.
+    @State private var allByDistance: [Listing] = []
     @State private var query: String
     @State private var activeChip: String
     @State private var filters = FilterState()
@@ -34,7 +39,14 @@ struct SearchResultsView: View {
     }
 
     private var results: [Listing] {
-        var base = MoblyData.results(for: activeChip)
+        var base: [Listing]
+        if allByDistance.isEmpty {
+            base = MoblyData.results(for: activeChip)
+        } else if activeChip == "Tous" {
+            base = allByDistance
+        } else {
+            base = allByDistance.filter { $0.deals.contains(activeChip) }
+        }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         if !q.isEmpty, q != activeChip.lowercased() {
             let canon = MoblyData.canonicalCategory(query.trimmingCharacters(in: .whitespaces))
@@ -44,7 +56,53 @@ struct SearchResultsView: View {
                     || $0.location.lowercased().contains(q)
             }
         }
-        return base.filter { passesFilters($0) }
+        let kept = base.filter { passesFilters($0) }
+        // The server list is already nearest-first; only the local fallback
+        // needs sorting here.
+        return allByDistance.isEmpty ? nearestFirst(kept) : kept
+    }
+
+    /// Fetch every annonce, nearest first, in pages of 500 (the API's cap).
+    private func loadAllByDistance(_ o: LocationService.Approx) async {
+        var all: [Listing] = []
+        var offset = 0
+        while offset < 5_000 {
+            guard let page = try? await MoblyAPI.shared.nearbyListings(
+                lat: o.lat, lng: o.lng, limit: 500, offset: offset) else { return }
+            // A server without distance ranking returns the newest instead;
+            // keep the local list rather than mislabel it.
+            guard offset > 0 || page.contains(where: { $0.distanceKm != nil }) else { return }
+            all += page.map { $0.asListing }
+            if page.count < 500 { break }
+            offset += 500
+        }
+        allByDistance = all
+    }
+
+    /// Where the user is, when the phone shared it. The precise fix stays on
+    /// the device; only used here to order the list.
+    private var origin: LocationService.Approx? { location.precise ?? location.approximate }
+
+    /// Nearest annonces at the top when the position is known. Annonces with
+    /// no map pin keep their order, after the located ones.
+    private func nearestFirst(_ list: [Listing]) -> [Listing] {
+        guard let o = origin else { return list }
+        func km(_ l: Listing) -> Double? {
+            guard let lat = l.lat, let lng = l.lng, lat != 0 || lng != 0 else { return nil }
+            let r = 6371.0, dLat = (lat - o.lat) * .pi / 180, dLng = (lng - o.lng) * .pi / 180
+            let a = sin(dLat / 2) * sin(dLat / 2)
+                + cos(o.lat * .pi / 180) * cos(lat * .pi / 180) * sin(dLng / 2) * sin(dLng / 2)
+            return 2 * r * asin(min(1, sqrt(a)))
+        }
+        let ranked = list.enumerated().map { (i: $0.offset, l: $0.element, d: km($0.element)) }
+        return ranked.sorted { a, b in
+            switch (a.d, b.d) {
+            case let (x?, y?): return x < y
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default: return a.i < b.i
+            }
+        }.map(\.l)
     }
 
     private func passesFilters(_ l: Listing) -> Bool {
@@ -154,6 +212,11 @@ struct SearchResultsView: View {
             }
         }
         .background(Color.white)
+        // Ranked server-side across the whole catalogue once we know where
+        // the user is; re-ranked if they move to another ~1 km cell.
+        .task(id: location.approximate) {
+            if let o = location.approximate { await loadAllByDistance(o) }
+        }
         .sheet(isPresented: $showFilters) {
             FilterPanelView(filters: $filters,
                             onApply: { showFilters = false },
@@ -286,12 +349,21 @@ struct ResultCard: View {
                     }
                 }
 
-                Text(listing.reviewCount > 0
-                     ? "\(listing.location) · \(listing.reviewCount) avis"
-                     : listing.location)
-                    .font(.moblyBody(11.5))
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
-                    .lineLimit(1)
+                HStack(spacing: 0) {
+                    Text(listing.reviewCount > 0
+                         ? "\(listing.location) · \(listing.reviewCount) avis"
+                         : listing.location)
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                        .lineLimit(1)
+                    if let distance = listing.distanceLabel {
+                        Text(" · \(distance)")
+                            .font(.moblyBody(11.5, weight: .semibold))
+                            .foregroundStyle(Color.moblyPrimary)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                    }
+                }
+                .font(.moblyBody(11.5))
 
                 Text("Équipements")
                     .font(.moblyBody(11, weight: .semibold))

@@ -155,6 +155,11 @@ struct NotificationsView: View {
     @ObservedObject private var userData = UserDataStore.shared
     /// Stacks the user fanned out (section + category).
     @State private var expanded: Set<String> = []
+    /// Ties each card to its peek in the collapsed stack, so opening a stack
+    /// unfolds the cards from where they sat instead of swapping two layouts.
+    @Namespace private var stackSpace
+    /// One spring for open and close, slightly damped so cards don't bounce.
+    private let stackSpring = Animation.spring(response: 0.42, dampingFraction: 0.88)
 
     /// Server notifications split into "today" vs "earlier" so the section
     /// headers actually reflect when things happened. Both computed from a
@@ -308,7 +313,7 @@ struct NotificationsView: View {
                         .foregroundStyle(Color.moblyTextPrimary)
                     Spacer()
                     Button {
-                        withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
+                        withAnimation(stackSpring) {
                             _ = expanded.remove(group.id)
                         }
                     } label: {
@@ -324,13 +329,15 @@ struct NotificationsView: View {
                 }
                 .padding(.horizontal, 4)
                 .padding(.bottom, 2)
+                .transition(.opacity)
 
-                ForEach(group.items) { item in
+                ForEach(Array(group.items.enumerated()), id: \.element.id) { i, item in
                     card(item)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .top).combined(with: .opacity),
-                            removal: .opacity
-                        ))
+                        // The first three cards morph out of the collapsed
+                        // stack; the rest fade in just after, one by one.
+                        .matchedGeometryEffect(id: item.id, in: stackSpace)
+                        .transition(.opacity.combined(with: .offset(y: -10))
+                            .animation(stackSpring.delay(Double(max(i - 2, 0)) * 0.03)))
                 }
             }
         } else {
@@ -352,6 +359,7 @@ struct NotificationsView: View {
                         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .stroke(Color(hex: 0xE6E8EF), lineWidth: 1))
                         .padding(.horizontal, CGFloat(depth) * 10)
+                        .matchedGeometryEffect(id: group.items[depth].id, in: stackSpace)
                         .offset(y: CGFloat(depth) * 8)
                 }
             }
@@ -361,11 +369,12 @@ struct NotificationsView: View {
                     .foregroundStyle(Color.moblyPrimary)
                     .padding(.top, 4)
             }
+            .matchedGeometryEffect(id: top.id, in: stackSpace)
         }
         .padding(.bottom, CGFloat(behind) * 8)
         .contentShape(Rectangle())
         .onTapGesture {
-            withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+            withAnimation(stackSpring) {
                 _ = expanded.insert(group.id)
             }
         }

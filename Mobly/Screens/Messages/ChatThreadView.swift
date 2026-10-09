@@ -744,9 +744,15 @@ struct ChatThreadView: View {
                                         }
                                         let urls = validPhotos.compactMap { URL(string: $0.mediaUrl!) }
                                         guard !urls.isEmpty else { return }
-                                        galleryStart = min(start, urls.count - 1)
-                                        galleryURLs = urls
-                                        galleryMessages = validPhotos
+                                        // No slide-up: the viewer fades and
+                                        // zooms in over the chat on its own.
+                                        var t = Transaction()
+                                        t.disablesAnimations = true
+                                        withTransaction(t) {
+                                            galleryStart = min(start, urls.count - 1)
+                                            galleryURLs = urls
+                                            galleryMessages = validPhotos
+                                        }
                                     }
                                 )
                                 .transition(.scale(scale: 0.85, anchor: m.fromMe ? .bottomTrailing : .bottomLeading).combined(with: .opacity))
@@ -827,7 +833,12 @@ struct ChatThreadView: View {
             set: { if !$0 { galleryURLs = []; galleryMessages = [] } }
         )) {
             PhotoGroupViewer(urls: galleryURLs, startIndex: galleryStart,
-                             onClose: { galleryURLs = []; galleryMessages = [] },
+                             onClose: {
+                                 // The viewer has already faded out.
+                                 var t = Transaction()
+                                 t.disablesAnimations = true
+                                 withTransaction(t) { galleryURLs = []; galleryMessages = [] }
+                             },
                              onReply: galleryMessages.isEmpty ? nil : { index in
                                  let msg = galleryMessages[min(index, galleryMessages.count - 1)]
                                  galleryURLs = []; galleryMessages = []
@@ -845,6 +856,8 @@ struct ChatThreadView: View {
                                  Task { await chat.deleteMessage(threadId: thread.id, messageId: msg.id, forBoth: forBoth) }
                              })
                 .ignoresSafeArea()
+                // Clear, so the chat shows through while the viewer fades in.
+                .presentationBackground(.clear)
         }
     }
 

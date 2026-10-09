@@ -24,6 +24,15 @@ struct PhotoGroupViewer: View {
     @State private var fullScreenIndex: Int?
     /// Photo awaiting the delete confirmation.
     @State private var pendingDelete: Int?
+    /// Drives the open/close fade-and-zoom. The cover itself is presented
+    /// without its slide-up, so this is the only motion the user sees.
+    @State private var appeared = false
+
+    /// Fade out first, then let the caller drop the cover.
+    private func close() {
+        withAnimation(.easeIn(duration: 0.18)) { appeared = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { onClose() }
+    }
 
     var body: some View {
         ZStack {
@@ -49,10 +58,13 @@ struct PhotoGroupViewer: View {
                 .onAppear {
                     if startIndex > 0 { proxy.scrollTo(startIndex, anchor: .top) }
                 }
+                .scaleEffect(appeared ? 1 : 0.94)
             }
 
             header
         }
+        .opacity(appeared ? 1 : 0)
+        .onAppear { withAnimation(.easeOut(duration: 0.24)) { appeared = true } }
         .statusBarHidden()
         .overlay {
             if let i = fullScreenIndex {
@@ -90,7 +102,7 @@ struct PhotoGroupViewer: View {
                     .font(.moblyBody(14, weight: .semibold))
                     .foregroundStyle(.white)
                 Spacer()
-                Button(action: onClose) {
+                Button(action: close) {
                     Image(systemName: "xmark")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white)
@@ -134,7 +146,7 @@ private struct ReplyablePhoto: View {
                 .scaleEffect(min(dragX / 60, 1), anchor: .leading)
             }
 
-            RemoteImage(source: url.absoluteString, width: 900, contentMode: .fit)
+            GroupPhoto(url: url)
                 .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())
                 .offset(x: dragX)
@@ -296,5 +308,37 @@ struct PagedPhotoViewer: View {
                         .onEnded { _ in withAnimation(Motion.panel) { scale = 1 } }
                 )
         }
+    }
+}
+
+/// A photo in the group list, loaded through the same persistent cache as the
+/// chat bubbles. `RemoteImage` asked the CDN for a resized copy — a different
+/// URL — so every photo was downloaded again and popped in over a shimmer,
+/// shifting the list as each one landed. This one is usually already decoded
+/// in memory, and a fixed placeholder keeps the layout still until it is.
+private struct GroupPhoto: View {
+    let url: URL
+    @StateObject private var loader = CachedImageLoader()
+
+    var body: some View {
+        Group {
+            if let img = loader.image {
+                Image(uiImage: img)
+                    .resizable()
+                    .aspectRatio(img.size, contentMode: .fit)
+            } else {
+                Rectangle()
+                    .fill(Color.white.opacity(0.06))
+                    .aspectRatio(4.0 / 3.0, contentMode: .fit)
+                    .overlay {
+                        if loader.failed {
+                            Image(systemName: "photo").foregroundStyle(.white.opacity(0.4))
+                        } else {
+                            ProgressView().tint(.white.opacity(0.6))
+                        }
+                    }
+            }
+        }
+        .onAppear { loader.load(url, persistent: true) }
     }
 }

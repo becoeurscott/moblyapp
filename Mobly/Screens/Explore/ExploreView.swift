@@ -519,7 +519,9 @@ struct ExploreView: View {
                         carousel(items)
                     }
                 }
-                .padding(.bottom, 112)
+                // Just above the floating tab bar. At 112 the cards floated
+                // ~55pt over it, in the middle of the map.
+                .padding(.bottom, 80)
             }
         }
         // Filter changes and silently-refreshed listings restack the pins and

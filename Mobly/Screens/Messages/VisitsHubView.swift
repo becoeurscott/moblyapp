@@ -77,6 +77,7 @@ struct VisitsHubView: View {
                         ForEach(list) { visit in
                             VisitCard(
                                 visit: visit,
+                                isReceived: tab == .received && isOwner,
                                 showActions: tab == .received && isOwner
                                     && visit.status == "REQUESTED",
                                 busy: busyId == visit.id,
@@ -248,6 +249,12 @@ struct VisitsHubView: View {
 
 private struct VisitCard: View {
     let visit: VisitRequestDTO
+    /// Which list the card is in, so the name shown is always the other
+    /// person: the visitor for a received request, the owner being visited
+    /// for one of mine. It used to key off `showActions`, which is false for
+    /// any received request already answered — those showed the owner's own
+    /// name.
+    let isReceived: Bool
     let showActions: Bool
     let busy: Bool
     var onAccept: () -> Void
@@ -263,7 +270,7 @@ private struct VisitCard: View {
 
     /// The other party: an owner reads the visitor's name, a visitor the owner's.
     private var counterparty: String {
-        (showActions ? visit.visitor?.fullName : visit.owner?.fullName) ?? "Utilisateur"
+        (isReceived ? visit.visitor?.fullName : visit.owner?.fullName) ?? "Utilisateur"
     }
 
     var body: some View {
@@ -277,9 +284,14 @@ private struct VisitCard: View {
                     Text(whenText)
                         .font(.moblyBody(12.5))
                         .foregroundStyle(Color.moblyTextPrimary)
-                    Text(counterparty)
-                        .font(.moblyBody(12))
-                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                    HStack(spacing: 4) {
+                        Image(systemName: isReceived ? "person.fill" : "house.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(isReceived ? "Visiteur : \(counterparty)" : "Chez \(counterparty)")
+                            .lineLimit(1)
+                    }
+                    .font(.moblyBody(12))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
                 }
                 Spacer()
                 statusChip

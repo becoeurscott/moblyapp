@@ -1151,21 +1151,21 @@ struct ListingDetailView: View {
 
     private var stickyCTARow: some View {
         HStack(spacing: 10) {
-            // Unit on its own line: "157 000 FCFA /jour" on one line didn't
-            // fit beside the two buttons and was shrunk past legibility.
-            VStack(alignment: .leading, spacing: 0) {
+            // Price and unit stay on one line; a long price shrinks to fit
+            // instead of wrapping. The visit button is icon-only now, which
+            // leaves room for "1 152 500 FCFA /jour" at near full size.
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(listing.price)
                     .font(.moblyHeading(16))
                     .foregroundStyle(Color.moblyTextPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
                 if !listing.priceUnit.isEmpty {
                     Text(LT(listing.priceUnit))
                         .font(.moblyBody(11))
                         .foregroundStyle(Color(hex: 0x9A9DAC))
-                        .lineLimit(1)
                 }
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
             // Lifted off the frosted bar so the price reads first.
             // Capsule, like the Visiter and Message buttons beside it.
             .padding(.horizontal, 16)

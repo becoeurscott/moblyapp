@@ -21,8 +21,44 @@ struct VisitsHubView: View {
 
     @State private var tab: Tab = .mine
     @State private var busyId: String?
+    @State private var status: StatusFilter = .all
 
     enum Tab { case received, mine }
+
+    /// Sub-filter on the visit's state, applied within the selected tab.
+    enum StatusFilter: CaseIterable, Hashable {
+        case all, requested, confirmed, completed, cancelled, noShow
+        var title: String {
+            switch self {
+            case .all: return "Toutes"
+            case .requested: return "En attente"
+            case .confirmed: return "Confirmées"
+            case .completed: return "Terminées"
+            case .cancelled: return "Refusées"
+            case .noShow: return "Non honorées"
+            }
+        }
+        var code: String? {
+            switch self {
+            case .all: return nil
+            case .requested: return "REQUESTED"
+            case .confirmed: return "CONFIRMED"
+            case .completed: return "COMPLETED"
+            case .cancelled: return "CANCELLED"
+            case .noShow: return "NO_SHOW"
+            }
+        }
+    }
+
+    /// Everything in the selected tab, before the status sub-filter.
+    private var tabList: [VisitRequestDTO] {
+        (tab == .received && isOwner) ? store.items : store.myRequests
+    }
+
+    private func count(_ f: StatusFilter) -> Int {
+        guard let c = f.code else { return tabList.count }
+        return tabList.filter { $0.status == c }.count
+    }
 
     private var isOwner: Bool { session.isOwner }
 
@@ -30,10 +66,11 @@ struct VisitsHubView: View {
         VStack(spacing: 0) {
             header
             if isOwner { picker }
+            if !tabList.isEmpty { statusBar }
 
             ScrollView(showsIndicators: false) {
                 LazyVStack(spacing: 12) {
-                    let list = (tab == .received && isOwner) ? store.items : store.myRequests
+                    let list = status.code.map { c in tabList.filter { $0.status == c } } ?? tabList
                     if list.isEmpty {
                         emptyState
                     } else {
@@ -113,9 +150,10 @@ struct VisitsHubView: View {
         .padding(.bottom, 6)
     }
 
+    /// Two equal boxes filling the row, so the choice reads as one control.
     private var picker: some View {
         HStack(spacing: 8) {
-            tabButton("Reçues", .received, count: store.items.filter { $0.status == "REQUESTED" }.count)
+            tabButton("Demandes reçues", .received, count: store.items.filter { $0.status == "REQUESTED" }.count)
             tabButton("Mes demandes", .mine, count: nil)
         }
         .padding(.horizontal, 20)
@@ -124,7 +162,10 @@ struct VisitsHubView: View {
 
     private func tabButton(_ title: String, _ value: Tab, count: Int?) -> some View {
         Button {
-            withAnimation(Motion.quick) { tab = value }
+            withAnimation(Motion.quick) {
+                tab = value
+                status = .all   // the other tab may not have this state
+            }
         } label: {
             HStack(spacing: 6) {
                 Text(L(title))
@@ -138,8 +179,10 @@ struct VisitsHubView: View {
                 }
             }
             .foregroundStyle(tab == value ? .white : Color.moblyTextPrimary)
-            .padding(.horizontal, 16)
-            .frame(height: 38)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity)
+            .frame(height: 42)
+            .contentShape(Rectangle())
             .background(RoundedRectangle(cornerRadius: 12)
                 .fill(tab == value ? Color.moblyPrimary : .white))
             .overlay(RoundedRectangle(cornerRadius: 12)
@@ -148,21 +191,53 @@ struct VisitsHubView: View {
         .buttonStyle(.plain)
     }
 
+    /// Status chips with counts; states with nothing in them stay hidden,
+    /// except the one currently selected.
+    private var statusBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(StatusFilter.allCases.filter { $0 == .all || $0 == status || count($0) > 0 }, id: \.self) { f in
+                    let on = f == status
+                    Button {
+                        withAnimation(Motion.quick) { status = f }
+                    } label: {
+                        Text("\(LT(f.title)) (\(count(f)))")
+                            .font(.moblyBody(12.5, weight: .semibold))
+                            .foregroundStyle(on ? Color.moblyPrimary : Color(hex: 0x6B6F80))
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(Capsule().fill(on ? Color(hex: 0xEEF0FE) : .white))
+                            .overlay(Capsule().stroke(on ? Color.moblyPrimary.opacity(0.35) : Color(hex: 0xE2E4EC), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+        .padding(.top, 10)
+    }
+
     private var emptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: "calendar.badge.clock")
                 .font(.system(size: 34, weight: .medium))
                 .foregroundStyle(Color(hex: 0xD5D8E2))
-            Text(LT(tab == .received ? "Aucune demande reçue"
-                                     : "Aucune demande de visite"))
-                .font(.moblyBody(14, weight: .medium))
-                .foregroundStyle(Color(hex: 0x9A9DAC))
-            Text(LT(tab == .received
-                    ? "Les demandes de visite sur vos espaces apparaîtront ici."
-                    : "Depuis une annonce, touchez « Demander une visite »."))
-                .font(.moblyBody(12.5))
-                .foregroundStyle(Color(hex: 0xB0B3BF))
-                .multilineTextAlignment(.center)
+            if status != .all {
+                // The tab has visits, just none in this state.
+                Text("Aucune visite « \(LT(status.title).lowercased()) »")
+                    .font(.moblyBody(14, weight: .medium))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+            } else {
+                Text(LT(tab == .received ? "Aucune demande reçue"
+                                         : "Aucune demande de visite"))
+                    .font(.moblyBody(14, weight: .medium))
+                    .foregroundStyle(Color(hex: 0x9A9DAC))
+                Text(LT(tab == .received
+                        ? "Les demandes de visite sur vos espaces apparaîtront ici."
+                        : "Depuis une annonce, touchez « Demander une visite »."))
+                    .font(.moblyBody(12.5))
+                    .foregroundStyle(Color(hex: 0xB0B3BF))
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 50)

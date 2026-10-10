@@ -258,8 +258,10 @@ struct ListingDetailView: View {
             listenForReviews()
         }
         .fullScreenCover(isPresented: $showViewer) {
+            // Edge to edge: without ignoring the safe area the swipe wrapper
+            // left white bands above and below the black viewer.
             ImageViewer(images: gallery, index: $photoIndex)
-                .swipeToDismiss(onDismiss: { showViewer = false })
+                .swipeToDismiss(onDismiss: { showViewer = false }, ignoreTopSafeArea: true)
         }
         .fullScreenCover(isPresented: $showGrid) {
             PhotoGridView(images: gallery) { i in
@@ -490,7 +492,11 @@ struct ListingDetailView: View {
     private var heroGallery: some View {
         HeroGallery(images: gallery,
                     height: heroHeight + safeAreaTop,
-                    paused: showViewer)
+                    paused: showViewer,
+                    onOpen: { i in
+                        photoIndex = i
+                        showViewer = true
+                    })
     }
 
     private var heroButtons: some View {
@@ -616,10 +622,14 @@ struct ListingDetailView: View {
                 // Same rule as the sticky bar: you are the owner, so there is
                 // no one on the other end of these.
                 if !isOwnListing && ownerContactActive {
-                    CircleIconButton(icon: "phone.fill", bg: .white,
-                                     tint: .moblyPrimary, size: 44) { showCallMaintenance = true }
-                    CircleIconButton(icon: "bubble.left.fill", bg: .white,
-                                     tint: .moblyPrimary, size: 44, action: contactOwner)
+                    if config.isEnabled("listings.call") {
+                        CircleIconButton(icon: "phone.fill", bg: .white,
+                                         tint: .moblyPrimary, size: 44) { showCallMaintenance = true }
+                    }
+                    if config.isEnabled("chat.enabled") {
+                        CircleIconButton(icon: "bubble.left.fill", bg: .white,
+                                         tint: .moblyPrimary, size: 44, action: contactOwner)
+                    }
                 } else if isOwnListing {
                     Text("Votre espace")
                         .font(.moblyBody(11.5, weight: .semibold))
@@ -723,13 +733,15 @@ struct ListingDetailView: View {
                 locationMap
             }
 
-            divider
+            if config.isEnabled("reviews.read") {
+                divider
 
-            // Reviews
-            reviewsSection
+                // Reviews
+                reviewsSection
+            }
 
             // Similar listings
-            if !similarListings.isEmpty {
+            if config.isEnabled("listings.similar"), !similarListings.isEmpty {
                 divider
                 Text("Similaires")
                     .font(.moblyHeading(17))
@@ -1243,6 +1255,8 @@ private struct HeroGallery: View {
     /// True while the full-screen viewer is up: the auto-advance should not run
     /// behind it.
     let paused: Bool
+    /// Tap on a photo: open the full-screen viewer at that photo.
+    var onOpen: (Int) -> Void = { _ in }
 
     @State private var index = 0
     @State private var lastTouch: Date? = nil
@@ -1264,6 +1278,12 @@ private struct HeroGallery: View {
                         RemoteImage(source: name, width: ImageSlot.hero, contentMode: .fill)
                             .frame(width: geo.size.width, height: geo.size.height)
                             .clipped()
+                            // Tappable area = the visible frame, not the
+                            // filled image's overflow.
+                            .contentShape(Rectangle())
+                            .onTapGesture { onOpen(i) }
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityLabel("Voir la photo en plein écran")
                             .id(i)
                     }
                 }
@@ -1377,6 +1397,14 @@ struct ImageViewer: View {
 
     @State private var zoom: CGFloat = 1
 
+    /// The viewer is drawn edge to edge, so the controls clear the status
+    /// bar and home indicator by hand.
+    private var insets: UIEdgeInsets {
+        (UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.windows.first?.safeAreaInsets) ?? .zero
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -1391,7 +1419,7 @@ struct ImageViewer: View {
                     .background(Capsule().fill(.white.opacity(0.15)))
             }
             .padding(.horizontal, 18)
-            .padding(.top, 12)
+            .padding(.top, 12 + insets.top)
             .padding(.bottom, 8)
 
             TabView(selection: $index) {
@@ -1407,8 +1435,15 @@ struct ImageViewer: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .always))
+            .padding(.bottom, insets.bottom)
         }
-        .background(Color.black.ignoresSafeArea())
+        .background(
+            Color.black
+                // A fullScreenCover won't let content grow into the bottom
+                // inset, so the black is painted past its own frame instead.
+                .padding(.bottom, -insets.bottom)
+                .ignoresSafeArea()
+        )
     }
 }
 

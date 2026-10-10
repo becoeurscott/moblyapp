@@ -14,8 +14,15 @@ import Security
 enum Keychain {
     private static let service = "com.mobly.app.auth"
 
+    /// Token writes come from several threads (a refresh finishing while a
+    /// sign-in stores its pair). Unserialized, two delete-then-add sequences
+    /// interleaved and the second add hit errSecDuplicateItem — the newer
+    /// token was dropped (a crash in debug).
+    private static let lock = NSLock()
+
     static func set(_ value: String, for key: String) {
         guard let data = value.data(using: .utf8) else { return }
+        lock.lock(); defer { lock.unlock() }
         // Delete-then-add: SecItemUpdate needs a different query shape and
         // silently no-ops when the item is absent.
         delete(key)
@@ -26,7 +33,17 @@ enum Keychain {
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
-        let status = SecItemAdd(query as CFDictionary, nil)
+        var status = SecItemAdd(query as CFDictionary, nil)
+        if status == errSecDuplicateItem {
+            // Written by something outside this lock: overwrite it in place.
+            let match: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: key,
+            ]
+            status = SecItemUpdate(match as CFDictionary,
+                                   [kSecValueData as String: data] as CFDictionary)
+        }
         if status != errSecSuccess {
             assertionFailure("Keychain write failed for \(key): \(status)")
         }

@@ -1,47 +1,30 @@
 import SwiftUI
 
-/// Full-screen explainer shown right before an iOS permission prompt, at the
-/// end of signup.
+/// The middle of a permission screen at the end of signup: illustration,
+/// then why we ask. Buttons and progress live in `SignupOnboardingFlow`, so
+/// they stay put while this part changes.
 ///
 /// iOS shows its own dialog exactly once; a refusal there can only be undone
 /// in Réglages. So the user first sees, in Mobly's words, what the permission
 /// is for — and "Plus tard" leaves the system prompt unused, to be asked again
 /// at a better moment (e.g. the first message sent) instead of burnt.
-struct PermissionPrimerView: View {
-    enum Kind { case notifications, location }
-
-    var kind: Kind
-    var firstName: String = ""
-    /// Position of this screen among the primers actually shown (1-based).
-    var step: Int = 1
-    var stepCount: Int = 1
-    var isBusy: Bool = false
-    var onAllow: () -> Void
-    var onSkip: () -> Void
+struct PrimerContent: View {
+    var art: PrimerArt
+    var eyebrow: LocalizedStringKey?
+    var title: LocalizedStringKey
+    var message: LocalizedStringKey
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appear = false
 
     var body: some View {
         VStack(spacing: 0) {
-            if stepCount > 1 {
-                HStack(spacing: 6) {
-                    ForEach(1...stepCount, id: \.self) { i in
-                        Capsule()
-                            .fill(i <= step ? Color.moblyPrimary : Color(hex: 0xE2E4EC))
-                            .frame(width: i == step ? 22 : 8, height: 8)
-                    }
-                }
-                .padding(.top, 12)
-            }
-
-            Spacer(minLength: 12)
-
-            PrimerIllustration(art: kind == .notifications ? .notifications : .location, appear: appear)
-                .padding(.bottom, 34)
-
+            Spacer(minLength: 8)
+            PrimerIllustration(art: art, appear: appear)
+                .padding(.bottom, 30)
+            // Text is in place from the first frame — only the card moves.
             VStack(spacing: 12) {
-                if !firstName.isEmpty {
+                if let eyebrow {
                     Text(eyebrow)
                         .font(.moblyBody(13, weight: .semibold))
                         .foregroundStyle(Color.moblyPrimary)
@@ -59,69 +42,12 @@ struct PermissionPrimerView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 30)
-            .opacity(appear ? 1 : 0)
-            .offset(y: appear ? 0 : 12)
-
-            Spacer(minLength: 24)
-
-            VStack(spacing: 6) {
-                PillButton(title: allowTitle, style: .primaryBlue,
-                           trailingIcon: nil, action: onAllow)
-                    .opacity(isBusy ? 0.6 : 1)
-                    .disabled(isBusy)
-                Button(action: onSkip) {
-                    Text("Plus tard")
-                        .font(.moblyHeading(16))
-                        .foregroundStyle(Color.moblyTextPrimary)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                }
-                .buttonStyle(.plain)
-                .disabled(isBusy)
-            }
-            .padding(.horizontal, 30)
-            .padding(.bottom, 16)
+            Spacer(minLength: 8)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.white.ignoresSafeArea())
         .onAppear {
             if reduceMotion { appear = true } else {
-                withAnimation(.spring(response: 0.6, dampingFraction: 0.78).delay(0.1)) { appear = true }
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.15)) { appear = true }
             }
-        }
-    }
-
-    // Copy speaks to what a tenant or owner actually worries about — a
-    // reply missed, a visit forgotten, a listing too far away — and says
-    // plainly what we will NOT do with the permission.
-
-    private var eyebrow: LocalizedStringKey {
-        switch kind {
-        case .notifications: return "\(firstName), une dernière chose"
-        case .location:      return "Presque fini, \(firstName)"
-        }
-    }
-
-    private var title: LocalizedStringKey {
-        switch kind {
-        case .notifications: return "Ne ratez aucune réponse"
-        case .location:      return "Voyez d'abord ce qui est près de vous"
-        }
-    }
-
-    private var message: LocalizedStringKey {
-        switch kind {
-        case .notifications:
-            return "Les bons espaces partent vite. On vous prévient dès qu'un propriétaire vous répond ou confirme votre visite — rien d'autre."
-        case .location:
-            return "Mobly classe les annonces selon la distance. Votre position exacte n'est jamais partagée avec les propriétaires."
-        }
-    }
-
-    private var allowTitle: String {
-        switch kind {
-        case .notifications: return L("Activer les notifications")
-        case .location:      return L("Autoriser la localisation")
         }
     }
 }
@@ -346,14 +272,4 @@ struct CodeHeroHeader: View {
             }
         }
     }
-}
-
-#Preview("Notifications") {
-    PermissionPrimerView(kind: .notifications, firstName: "Jeanne", step: 1, stepCount: 2,
-                         onAllow: {}, onSkip: {})
-}
-
-#Preview("Location") {
-    PermissionPrimerView(kind: .location, firstName: "Jeanne", step: 2, stepCount: 2,
-                         onAllow: {}, onSkip: {})
 }

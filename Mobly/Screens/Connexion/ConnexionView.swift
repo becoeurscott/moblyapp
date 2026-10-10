@@ -13,9 +13,9 @@ private enum AuthPhase {
     /// created the account — the form already collected one), then an
     /// optional profile photo. Both end at `welcome`.
     case chooseName, chooseAvatar
-    /// Last stop before `welcome`: one explainer screen per permission iOS
-    /// can still ask for (notifications, then location).
-    case permissions
+    /// Last stop before `welcome`: a few questions about what the user
+    /// wants, then one explainer per permission iOS can still ask for.
+    case onboarding
 }
 
 /// Unified auth screen: the Connexion / Inscription toggle stays static at the
@@ -41,7 +41,7 @@ struct ConnexionView: View {
         if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "welcome" { return .welcome }
         if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "name" { return .chooseName }
         if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "avatar" { return .chooseAvatar }
-        if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "permissions" { return .permissions }
+        if ["onboarding", "permissions"].contains(ProcessInfo.processInfo.environment["AUTH_PHASE"]) { return .onboarding }
         return .form
     }()
 
@@ -62,14 +62,8 @@ struct ConnexionView: View {
     @State private var avatarError: String?
     @State private var newPassword = ""
     @State private var emailOtp = ""
-    /// Permission screens still to show, decided once on leaving the photo
-    /// step; `primerTotal` keeps the progress dots stable as it empties.
-    @State private var primers: [PermissionPrimerView.Kind] = {
-        ProcessInfo.processInfo.environment["AUTH_PHASE"] == "permissions" ? [.notifications, .location] : []
-    }()
-    @State private var primerTotal = ProcessInfo.processInfo.environment["AUTH_PHASE"] == "permissions" ? 2 : 0
-    @State private var primerBusy = false
-    @ObservedObject private var location = LocationService.shared
+    /// What the user answered after signup; words the welcome screen.
+    @State private var onboardingAnswers: OnboardingAnswers?
 
     init(initialMode: AuthMode = .signin,
          onExit: @escaping () -> Void = {},
@@ -99,17 +93,10 @@ struct ConnexionView: View {
             case .oauthCode:     oauthCodeView.transition(.opacity)
             case .chooseName:    chooseNameView.transition(.opacity)
             case .chooseAvatar:  chooseAvatarView.transition(.opacity)
-            case .permissions:   permissionsView.transition(.opacity)
+            case .onboarding:    onboardingView.transition(.opacity)
             }
         }
         .animation(Motion.standard, value: phase)
-        .onChange(of: location.authorization) { _, status in
-            guard phase == .permissions, primers.first == .location,
-                  status != .notDetermined else { return }
-            SessionTracker.shared.log("signup.primer.answered",
-                                      ["kind": "location", "granted": location.isAuthorized])
-            nextPrimer()
-        }
         // Flag a taken number/e-mail while the user is still typing rather than
         // after they submit. Debounced so each keystroke isn't a request.
         .task(id: availabilityKey) {
@@ -696,7 +683,7 @@ struct ConnexionView: View {
                 : (mode == .signin ? "Bon retour, \(firstName)" : "Bienvenue, \(firstName)"),
             subtitle: mode == .signin
                 ? "Vos recherches et préférés vous attendent."
-                : "Votre compte Mobly est prêt.",
+                : welcomeSignupSubtitle,
             // Session is already applied from the server's user object by
             // AuthStore — nothing to persist here.
             onDone: { onFinish() }
@@ -884,7 +871,7 @@ struct ConnexionView: View {
             }
 
             Button {
-                Task { await startPrimers() }
+                withAnimation { phase = .onboarding }
             } label: {
                 Text(auth.user?.avatarUrl == nil ? "Passer" : "Continuer")
                     .font(.moblyHeading(16))
@@ -905,71 +892,12 @@ struct ConnexionView: View {
         }
     }
 
-    // MARK: Post-signup — permissions
+    // MARK: Post-signup — questions and permissions
 
-    @ViewBuilder private var permissionsView: some View {
-        if let kind = primers.first {
-            PermissionPrimerView(
-                kind: kind,
-                firstName: firstName,
-                step: primerTotal - primers.count + 1,
-                stepCount: primerTotal,
-                isBusy: primerBusy,
-                onAllow: { allowPrimer(kind) },
-                onSkip: {
-                    SessionTracker.shared.log("signup.primer.skipped", ["kind": "\(kind)"])
-                    nextPrimer()
-                }
-            )
-            .id(kind)
-            .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
-                                    removal: .move(edge: .leading).combined(with: .opacity)))
-            .onAppear { SessionTracker.shared.log("signup.primer.shown", ["kind": "\(kind)"]) }
-        }
-    }
-
-    /// Only permissions iOS can still prompt for get a screen — one already
-    /// granted or refused would be a dead end. Remote flag
-    /// `signup.permissionPrimers` switches the experiment off.
-    private func startPrimers() async {
-        var queue: [PermissionPrimerView.Kind] = []
-        if config.isEnabled("signup.permissionPrimers") {
-            await PushService.shared.refreshStatus()
-            if config.isEnabled("notifications.push"), PushService.shared.status == .notDetermined {
-                queue.append(.notifications)
-            }
-            if location.canAskPermission { queue.append(.location) }
-        }
-        primers = queue
-        primerTotal = queue.count
-        withAnimation { phase = queue.isEmpty ? .welcome : .permissions }
-    }
-
-    private func allowPrimer(_ kind: PermissionPrimerView.Kind) {
-        primerBusy = true
-        switch kind {
-        case .notifications:
-            Task {
-                let granted = await PushService.shared.requestFromPrimer()
-                SessionTracker.shared.log("signup.primer.answered", ["kind": "notifications", "granted": granted])
-                primerBusy = false
-                nextPrimer()
-            }
-        case .location:
-            // Already answered (e.g. in Réglages meanwhile): no prompt will
-            // come, so don't wait for one.
-            guard location.canAskPermission else { nextPrimer(); return }
-            // The answer arrives through the delegate; `.onChange` below moves on.
-            location.askForPermission()
-        }
-    }
-
-    private func nextPrimer() {
-        primerBusy = false
-        guard !primers.isEmpty else { return }
-        withAnimation(Motion.standard) {
-            primers.removeFirst()
-            if primers.isEmpty { phase = .welcome }
+    private var onboardingView: some View {
+        SignupOnboardingFlow(firstName: firstName) { answers in
+            onboardingAnswers = answers
+            withAnimation(Motion.gentle) { phase = .welcome }
         }
     }
 
@@ -1113,6 +1041,17 @@ struct ConnexionView: View {
     /// Where the code went, as a complete phrase including its preposition —
     /// "au +237677889900" vs "à votre numéro". Keeping the preposition here is
     /// what stops the fallback reading as "au votre numéro".
+    /// Says back what they asked for during onboarding, when they said.
+    private var welcomeSignupSubtitle: String {
+        if onboardingAnswers?.intent == .offering {
+            return L("Publiez votre premier espace quand vous voulez.")
+        }
+        if let summary = onboardingAnswers?.summary {
+            return L("Votre recherche est prête :") + " \(summary)."
+        }
+        return L("Votre compte Mobly est prêt.")
+    }
+
     /// Why the phone code: owners trust a verified number.
     private var phoneCodeWhy: LocalizedStringKey {
         // Where it went is already in the step's green banner.

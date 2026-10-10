@@ -58,6 +58,21 @@ final class PushService: NSObject, ObservableObject {
         if granted { UIApplication.shared.registerForRemoteNotifications() }
     }
 
+    /// The signup primer: the user just tapped "Activer les notifications" on
+    /// our own explainer, so the system prompt is wanted now. Returns whether
+    /// notifications ended up allowed.
+    @discardableResult
+    func requestFromPrimer() async -> Bool {
+        await refreshStatus()
+        guard status == .notDetermined else { return status == .authorized }
+        UserDefaults.standard.set(true, forKey: askedKey)
+        let granted = (try? await UNUserNotificationCenter.current()
+            .requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+        status = granted ? .authorized : .denied
+        if granted { UIApplication.shared.registerForRemoteNotifications() }
+        return granted
+    }
+
     // MARK: - Token
 
     /// Called from the app delegate once APNs issues a token.

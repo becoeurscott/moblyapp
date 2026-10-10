@@ -188,6 +188,8 @@ struct SignupOTPStep: View {
     /// Where the code went, as a complete phrase including its preposition
     /// (e.g. "au +237677889900"), so the caller controls the grammar.
     var destination: String = ""
+    /// The code went to an inbox, not by SMS — only changes the banner.
+    var byEmail: Bool = false
     /// Dev-mode only: the server echoes the code back so the simulator can
     /// prefill. Always nil once OTP_DEV_MODE is off.
     var devCode: String? = nil
@@ -231,7 +233,7 @@ struct SignupOTPStep: View {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(Color(hex: 0x1F8A5B))
-                    Text("Code envoyé par SMS \(destination)")
+                    Text(byEmail ? "Code envoyé par e-mail \(destination)" : "Code envoyé par SMS \(destination)")
                         .font(.moblyBody(12, weight: .medium))
                         .foregroundStyle(Color(hex: 0x1F8A5B))
                     Spacer()

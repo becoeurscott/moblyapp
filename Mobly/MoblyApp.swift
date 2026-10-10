@@ -76,7 +76,7 @@ struct MoblyApp: App {
                     SessionTracker.shared.log("app.open", [
                         "signedIn": AuthStore.shared.isSignedIn
                     ])
-                    LocationService.shared.requestIfNeeded()
+                    LocationService.shared.startTracking(prompt: AuthStore.shared.isSignedIn)
                     await PushService.shared.refreshStatus()
                     // From here on the app keeps itself current on its own:
                     // silent polls + foreground + reconnect, no spinners.
@@ -95,7 +95,7 @@ struct MoblyApp: App {
                     // app sat in the background.
                     // Follow the position only while Mobly is on screen:
                     // a fresh fix on every return, nothing in the background.
-                    if phase == .active { LocationService.shared.startTracking() }
+                    if phase == .active { LocationService.shared.startTracking(prompt: AuthStore.shared.isSignedIn) }
                     if phase == .background { LocationService.shared.stopTracking() }
                     if phase == .active {
                         Task { await MaintenanceStore.shared.checkAtLaunch() }

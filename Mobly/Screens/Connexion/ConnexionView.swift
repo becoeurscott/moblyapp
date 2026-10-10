@@ -13,6 +13,9 @@ private enum AuthPhase {
     /// created the account — the form already collected one), then an
     /// optional profile photo. Both end at `welcome`.
     case chooseName, chooseAvatar
+    /// Last stop before `welcome`: one explainer screen per permission iOS
+    /// can still ask for (notifications, then location).
+    case permissions
 }
 
 /// Unified auth screen: the Connexion / Inscription toggle stays static at the
@@ -34,9 +37,11 @@ struct ConnexionView: View {
     @State private var phase: AuthPhase = {
         // Debug hook to screenshot a specific phase directly.
         if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "code" { return .code }
+        if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "emailcode" { return .emailCode }
         if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "welcome" { return .welcome }
         if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "name" { return .chooseName }
         if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "avatar" { return .chooseAvatar }
+        if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "permissions" { return .permissions }
         return .form
     }()
 
@@ -57,6 +62,14 @@ struct ConnexionView: View {
     @State private var avatarError: String?
     @State private var newPassword = ""
     @State private var emailOtp = ""
+    /// Permission screens still to show, decided once on leaving the photo
+    /// step; `primerTotal` keeps the progress dots stable as it empties.
+    @State private var primers: [PermissionPrimerView.Kind] = {
+        ProcessInfo.processInfo.environment["AUTH_PHASE"] == "permissions" ? [.notifications, .location] : []
+    }()
+    @State private var primerTotal = ProcessInfo.processInfo.environment["AUTH_PHASE"] == "permissions" ? 2 : 0
+    @State private var primerBusy = false
+    @ObservedObject private var location = LocationService.shared
 
     init(initialMode: AuthMode = .signin,
          onExit: @escaping () -> Void = {},
@@ -86,9 +99,17 @@ struct ConnexionView: View {
             case .oauthCode:     oauthCodeView.transition(.opacity)
             case .chooseName:    chooseNameView.transition(.opacity)
             case .chooseAvatar:  chooseAvatarView.transition(.opacity)
+            case .permissions:   permissionsView.transition(.opacity)
             }
         }
         .animation(Motion.standard, value: phase)
+        .onChange(of: location.authorization) { _, status in
+            guard phase == .permissions, primers.first == .location,
+                  status != .notDetermined else { return }
+            SessionTracker.shared.log("signup.primer.answered",
+                                      ["kind": "location", "granted": location.isAuthorized])
+            nextPrimer()
+        }
         // Flag a taken number/e-mail while the user is still typing rather than
         // after they submit. Debounced so each keystroke isn't a request.
         .task(id: availabilityKey) {
@@ -396,23 +417,15 @@ struct ConnexionView: View {
 
     private var codeView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button(action: { withAnimation { phase = .form } }) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.moblyTextPrimary)
-                    .frame(width: 40, height: 40)
-                    .background(RoundedRectangle(cornerRadius: 13).fill(Color(hex: 0xF4F5F8)))
+            if mode == .signup {
+                CodeHeroHeader(art: .sms, title: "Vérifions que c'est bien vous",
+                               message: phoneCodeWhy,
+                               onBack: { withAnimation { phase = .form } })
+            } else {
+                CodeHeroHeader(art: .sms, title: "Entrez le code",
+                               message: "Code à \(auth.codeLength) chiffres envoyé \(codeDestination).",
+                               onBack: { withAnimation { phase = .form } })
             }
-            .padding(.bottom, 22)
-
-            Text("Entrez le code")
-                .font(.moblyHeading(24))
-                .foregroundStyle(Color.moblyTextPrimary)
-                .padding(.bottom, 6)
-            Text("Code à \(auth.codeLength) chiffres envoyé \(codeDestination).")
-                .font(.moblyBody(13.5))
-                .foregroundStyle(Color(hex: 0x9A9DAC))
-                .padding(.bottom, 26)
 
             SignupOTPStep(
                 otp: $otp,
@@ -438,7 +451,7 @@ struct ConnexionView: View {
             Spacer()
         }
         .padding(.horizontal, 26)
-        .padding(.top, 56)
+        .padding(.top, 12)
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
@@ -521,28 +534,13 @@ struct ConnexionView: View {
 
     private var emailCodeView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Image(systemName: "envelope.badge")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(Color.moblyPrimary)
-                .frame(width: 48, height: 48)
-                .background(RoundedRectangle(cornerRadius: 15).fill(Color.moblySurfaceTint))
-                .padding(.bottom, 20)
-
-            Text("Confirmez votre e-mail")
-                .font(.moblyHeading(24))
-                .foregroundStyle(Color.moblyTextPrimary)
-                .padding(.bottom, 6)
-            Text(auth.emailCodeDestination.map {
-                "Code à \(auth.emailCodeLength) chiffres envoyé à \($0). Il sert aussi à récupérer votre compte si vous oubliez votre mot de passe."
-            } ?? "Nous envoyons un code à \(email).")
-                .font(.moblyBody(13.5))
-                .foregroundStyle(Color(hex: 0x9A9DAC))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, 26)
+            CodeHeroHeader(art: .email, title: "Sécurisez votre compte",
+                           message: emailCodeWhy)
 
             SignupOTPStep(
                 otp: $emailOtp,
                 destination: auth.emailCodeDestination.map { "à \($0)" } ?? "",
+                byEmail: true,
                 devCode: auth.devCode,
                 isBusy: auth.isBusy,
                 error: auth.errorMessage,
@@ -577,7 +575,7 @@ struct ConnexionView: View {
             Spacer()
         }
         .padding(.horizontal, 26)
-        .padding(.top, 56)
+        .padding(.top, 12)
         .frame(maxHeight: .infinity, alignment: .top)
         .task {
             // Send once on arrival; resends go through the step's button.
@@ -758,16 +756,9 @@ struct ConnexionView: View {
 
     private var oauthCodeView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            backButton { withAnimation { phase = .oauthPhone } }
-
-            Text("Entrez le code")
-                .font(.moblyHeading(24))
-                .foregroundStyle(Color.moblyTextPrimary)
-                .padding(.bottom, 6)
-            Text("Code à \(auth.codeLength) chiffres envoyé \(codeDestination).")
-                .font(.moblyBody(13.5))
-                .foregroundStyle(Color(hex: 0x9A9DAC))
-                .padding(.bottom, 26)
+            CodeHeroHeader(art: .sms, title: "Vérifions que c'est bien vous",
+                           message: phoneCodeWhy,
+                           onBack: { withAnimation { phase = .oauthPhone } })
 
             SignupOTPStep(
                 otp: $otp,
@@ -793,7 +784,7 @@ struct ConnexionView: View {
             Spacer()
         }
         .padding(.horizontal, 26)
-        .padding(.top, 56)
+        .padding(.top, 12)
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
@@ -893,7 +884,7 @@ struct ConnexionView: View {
             }
 
             Button {
-                withAnimation { phase = .welcome }
+                Task { await startPrimers() }
             } label: {
                 Text(auth.user?.avatarUrl == nil ? "Passer" : "Continuer")
                     .font(.moblyHeading(16))
@@ -911,6 +902,74 @@ struct ConnexionView: View {
         .onChange(of: pickerItems) { _, items in
             guard let item = items.first else { return }
             Task { await uploadAvatar(item) }
+        }
+    }
+
+    // MARK: Post-signup — permissions
+
+    @ViewBuilder private var permissionsView: some View {
+        if let kind = primers.first {
+            PermissionPrimerView(
+                kind: kind,
+                firstName: firstName,
+                step: primerTotal - primers.count + 1,
+                stepCount: primerTotal,
+                isBusy: primerBusy,
+                onAllow: { allowPrimer(kind) },
+                onSkip: {
+                    SessionTracker.shared.log("signup.primer.skipped", ["kind": "\(kind)"])
+                    nextPrimer()
+                }
+            )
+            .id(kind)
+            .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
+                                    removal: .move(edge: .leading).combined(with: .opacity)))
+            .onAppear { SessionTracker.shared.log("signup.primer.shown", ["kind": "\(kind)"]) }
+        }
+    }
+
+    /// Only permissions iOS can still prompt for get a screen — one already
+    /// granted or refused would be a dead end. Remote flag
+    /// `signup.permissionPrimers` switches the experiment off.
+    private func startPrimers() async {
+        var queue: [PermissionPrimerView.Kind] = []
+        if config.isEnabled("signup.permissionPrimers") {
+            await PushService.shared.refreshStatus()
+            if config.isEnabled("notifications.push"), PushService.shared.status == .notDetermined {
+                queue.append(.notifications)
+            }
+            if location.canAskPermission { queue.append(.location) }
+        }
+        primers = queue
+        primerTotal = queue.count
+        withAnimation { phase = queue.isEmpty ? .welcome : .permissions }
+    }
+
+    private func allowPrimer(_ kind: PermissionPrimerView.Kind) {
+        primerBusy = true
+        switch kind {
+        case .notifications:
+            Task {
+                let granted = await PushService.shared.requestFromPrimer()
+                SessionTracker.shared.log("signup.primer.answered", ["kind": "notifications", "granted": granted])
+                primerBusy = false
+                nextPrimer()
+            }
+        case .location:
+            // Already answered (e.g. in Réglages meanwhile): no prompt will
+            // come, so don't wait for one.
+            guard location.canAskPermission else { nextPrimer(); return }
+            // The answer arrives through the delegate; `.onChange` below moves on.
+            location.askForPermission()
+        }
+    }
+
+    private func nextPrimer() {
+        primerBusy = false
+        guard !primers.isEmpty else { return }
+        withAnimation(Motion.standard) {
+            primers.removeFirst()
+            if primers.isEmpty { phase = .welcome }
         }
     }
 
@@ -1054,6 +1113,20 @@ struct ConnexionView: View {
     /// Where the code went, as a complete phrase including its preposition —
     /// "au +237677889900" vs "à votre numéro". Keeping the preposition here is
     /// what stops the fallback reading as "au votre numéro".
+    /// Why the phone code: owners trust a verified number.
+    private var phoneCodeWhy: LocalizedStringKey {
+        // Where it went is already in the step's green banner.
+        "Les propriétaires répondent plus vite aux numéros vérifiés. Saisissez le code à \(auth.codeLength) chiffres reçu par SMS."
+    }
+
+    /// Why the e-mail code — it's the way back in after a forgotten password.
+    private var emailCodeWhy: LocalizedStringKey {
+        if auth.emailCodeDestination != nil {
+            return "Si vous oubliez votre mot de passe, c'est cette adresse qui vous permettra de récupérer votre compte."
+        }
+        return "Nous envoyons un code à \(email)."
+    }
+
     private var codeDestination: String {
         guard phone.contains(where: \.isNumber) || identifier.contains(where: \.isNumber)
         else { return "à votre numéro" }

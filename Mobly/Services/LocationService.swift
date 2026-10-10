@@ -79,12 +79,18 @@ final class LocationService: NSObject, ObservableObject {
     // MARK: - Tracking
 
     /// Start following the position — called on launch and every return to the
-    /// foreground. Asks for permission the first time; safe to call repeatedly.
-    func startTracking() {
+    /// foreground. Asks for permission the first time unless `prompt` is false;
+    /// safe to call repeatedly.
+    ///
+    /// Signed-out launches pass `prompt: false`: the signup flow ends on an
+    /// explainer screen that asks for location itself, and a system dialog
+    /// popping over the onboarding slides would spend iOS's one prompt
+    /// before the user knows what it's for.
+    func startTracking(prompt: Bool = true) {
         authorization = manager.authorizationStatus
         switch authorization {
         case .notDetermined:
-            manager.requestWhenInUseAuthorization()
+            if prompt { manager.requestWhenInUseAuthorization() }
         case .denied, .restricted:
             status = .denied
         case .authorizedWhenInUse, .authorizedAlways:

@@ -72,6 +72,10 @@ struct Listing: Identifiable, Hashable {
     /// written before this was plumbed through.
     var priceUnitRaw: String? = nil
 
+    /// Shortest rental the owner accepts, in months. Nil when not set (most
+    /// listings, and backends older than this field).
+    var minDurationMonths: Int? = nil
+
     /// Distance from the viewer, when the listing came from a "près de vous"
     /// query. Nil everywhere else.
     var distanceKm: Double? = nil
@@ -102,6 +106,25 @@ struct Listing: Identifiable, Hashable {
         }
         if deals.contains("Acheter") { return "" }
         return deals.contains("Court séjour") ? "/jour" : "/mois"
+    }
+
+    /// Short stay: priced per day, or tagged "Court séjour".
+    var isShortStay: Bool {
+        priceUnitRaw == "PER_DAY" || (priceUnitRaw == nil && deals.contains("Court séjour"))
+    }
+
+    /// Whether this listing fits the stay chosen at onboarding ("long" or
+    /// "court"); a long stay also drops listings whose minimum rental is
+    /// longer than the months the user asked for. Sales match neither.
+    func matchesStay(_ stay: String?, minDuration: Int? = nil) -> Bool {
+        switch stay {
+        case "court": return isShortStay
+        case "long":
+            guard !isShortStay, !deals.contains("Acheter"), priceUnitRaw != "TOTAL" else { return false }
+            if let want = minDuration, let need = minDurationMonths, need > want { return false }
+            return true
+        default: return true
+        }
     }
 }
 
@@ -149,6 +172,9 @@ enum MoblyData {
         Neighborhood(name: "Limbé",     region: "Cameroun", imageName: "CityLimbe"),
         Neighborhood(name: "Garoua",    region: "Cameroun", imageName: "CityGaroua"),
         Neighborhood(name: "Bafoussam", region: "Cameroun", imageName: "CityBafoussam"),
+        Neighborhood(name: "Ngaoundéré", region: "Cameroun", imageName: "CityNgaoundere"),
+        Neighborhood(name: "Maroua",    region: "Cameroun", imageName: "CityMaroua"),
+        Neighborhood(name: "Bertoua",   region: "Cameroun", imageName: "CityBertoua"),
     ]
 
     static let quickFilters: [QuickFilter] = [

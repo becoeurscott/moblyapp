@@ -4,23 +4,27 @@ struct OnboardingView: View {
     /// False while the splash wordmark is still flying into the header.
     var showWordmark: Bool = true
     var onFinished: () -> Void = {}
+    /// Back from the first slide returns to the photo intro.
+    var onBackToIntro: () -> Void = {}
 
     @State private var index: Int = {
         if let raw = ProcessInfo.processInfo.environment["ONBOARDING_START"],
-           let i = Int(raw), (0..<3).contains(i) {
+           let i = Int(raw), (0..<2).contains(i) {
             return i
         }
         return 0
     }()
-    private let slideCount = 3
+    private let slideCount = 2
+    /// The intro's "Continuer" sits exactly where "Suivant" does; ignore taps
+    /// for a moment after appearing so one tap can't skip the first slide.
+    @State private var acceptsTaps = false
 
     var body: some View {
         ZStack {
             // Background changes per slide with a soft crossfade
             Group {
                 switch index {
-                case 0: OnboardingSlide1MapView.bg
-                case 1: Color.moblySurface
+                case 0: Color.moblySurface
                 default: Color.white
                 }
             }
@@ -28,29 +32,27 @@ struct OnboardingView: View {
             .animation(Motion.gentle, value: index)
 
             TabView(selection: $index) {
-                OnboardingSlide1MapView(
-                    showWordmark: showWordmark,
+                // The photo intro (IntroView) replaced the old first slide.
+                OnboardingSlide3ChatView(
                     onSkip: onFinished,
+                    onBack: onBackToIntro,
                     onNext: { advance() }
                 )
                 .tag(0)
-
-                OnboardingSlide3ChatView(
-                    onSkip: onFinished,
-                    onBack: { retreat() },
-                    onNext: { advance() }
-                )
-                .tag(1)
 
                 OnboardingSlide2ListingView(
                     onSkip: onFinished,
                     onBack: { retreat() },
                     onStart: onFinished
                 )
-                .tag(2)
+                .tag(1)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .animation(Motion.gentle, value: index)
+        }
+        .allowsHitTesting(acceptsTaps)
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { acceptsTaps = true }
         }
     }
 

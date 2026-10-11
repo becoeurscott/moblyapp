@@ -32,6 +32,8 @@ struct ConnexionView: View {
     private var socialLogin: Bool {
         config.isEnabled("signup.method.google") || config.isEnabled("signup.method.apple")
     }
+    /// The photo step only exists while profile photos are switched on.
+    private var avatarStep: AuthPhase { config.isEnabled("profile.avatar") ? .chooseAvatar : .onboarding }
 
     @State private var mode: AuthMode
     @State private var phase: AuthPhase = {
@@ -97,6 +99,8 @@ struct ConnexionView: View {
             }
         }
         .animation(Motion.standard, value: phase)
+        // Edge swipe does what each screen's back button does.
+        .stepSwipeBack(enabled: swipeBackAction != nil) { swipeBackAction?() }
         // Flag a taken number/e-mail while the user is still typing rather than
         // after they submit. Debounced so each keystroke isn't a request.
         .task(id: availabilityKey) {
@@ -537,7 +541,7 @@ struct ConnexionView: View {
                     guard code.count == auth.emailCodeLength, !auth.isBusy else { return }
                     Task {
                         if await auth.verifyEmailCode(code) {
-                            withAnimation { phase = .chooseAvatar }
+                            withAnimation { phase = avatarStep }
                         }
                     }
                 },
@@ -548,7 +552,7 @@ struct ConnexionView: View {
                 // Skippable: a slow inbox must never block a finished signup.
                 // The profile offers "Vérifier mon e-mail" later.
                 auth.errorMessage = nil
-                withAnimation { phase = .chooseAvatar }
+                withAnimation { phase = avatarStep }
             } label: {
                 Text("Plus tard")
                     .font(.moblyBody(14, weight: .semibold))
@@ -892,11 +896,28 @@ struct ConnexionView: View {
         }
     }
 
+    /// The back button's action on the current phase, nil where the screen
+    /// has none (in-flight requests, the post-signup steps).
+    private var swipeBackAction: (() -> Void)? {
+        switch phase {
+        case .form:          return onExit
+        case .code, .resetCode:
+            return { withAnimation { phase = .form } }
+        case .resetPassword: return { withAnimation { phase = .resetCode } }
+        case .oauthPhone:
+            return { auth.cancelOAuthSignup(); withAnimation { phase = .form } }
+        case .oauthCode:     return { withAnimation { phase = .oauthPhone } }
+        default:             return nil
+        }
+    }
+
     // MARK: Post-signup — questions and permissions
 
     private var onboardingView: some View {
         SignupOnboardingFlow(firstName: firstName) { answers in
             onboardingAnswers = answers
+            // A new account: Home greets it once with the welcome banner.
+            WelcomeBannerGate.markPending()
             withAnimation(Motion.gentle) { phase = .welcome }
         }
     }
@@ -906,7 +927,7 @@ struct ConnexionView: View {
         await auth.updateFullName(trimmed)
         // A failed rename must not trap the user on this screen: the account
         // exists and carries the provider's name, so onboarding continues.
-        withAnimation { phase = .chooseAvatar }
+        withAnimation { phase = avatarStep }
     }
 
     private func uploadAvatar(_ item: PhotosPickerItem) async {
@@ -991,11 +1012,15 @@ struct ConnexionView: View {
 
     private var firstName: String {
         // Prefer the name the server returned; fall back to what was typed.
-        if let name = auth.user?.fullName.split(separator: " ").first { return String(name) }
-        if mode == .signup, let f = fullName.split(separator: " ").first { return String(f) }
-        if identifier.contains("@") {
-            return identifier.split(separator: "@").first.map { String($0).capitalized } ?? ""
+        if let u = auth.user {
+            let n = Session.greetingFirstName(u.fullName, email: u.email)
+            if !n.isEmpty { return n }
         }
+        if mode == .signup {
+            let n = Session.greetingFirstName(fullName, email: email)
+            if !n.isEmpty { return n }
+        }
+        // Never greet with the e-mail's local part.
         // No invented name — the welcome copy drops the name when we don't
         // have one rather than greeting everyone as "Jeanne".
         return ""
@@ -1044,7 +1069,7 @@ struct ConnexionView: View {
     /// Says back what they asked for during onboarding, when they said.
     private var welcomeSignupSubtitle: String {
         if onboardingAnswers?.intent == .offering {
-            return L("Publiez votre premier espace quand vous voulez.")
+            return L("Préparons ensemble votre première annonce.")
         }
         if let summary = onboardingAnswers?.summary {
             return L("Votre recherche est prête :") + " \(summary)."

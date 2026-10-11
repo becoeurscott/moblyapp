@@ -5,6 +5,21 @@ import SwiftUI
 /// the Profile stack) keeps the tab bar out of the way, and the short branded
 /// intro makes entering "Mon espace propriétaire" feel like switching modes.
 struct OwnerDashboardCover: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        // The intro's state and animation must live INSIDE the swipe container:
+        // it hosts its content in its own UIHostingController, and an
+        // animation started outside it doesn't cross over, so the blue intro
+        // just snapped away instead of animating.
+        OwnerDashboardIntroReveal()
+            // Edge swipe closes the dashboard when it's on its first screen; on
+            // a pushed screen inside it, the navigation stack's own back swipe wins.
+            .swipeToDismiss(onDismiss: { dismiss() })
+    }
+}
+
+private struct OwnerDashboardIntroReveal: View {
     @State private var phase: Phase = .intro
 
     private enum Phase { case intro, revealing, shown }

@@ -139,7 +139,7 @@ async function postVisitSystemMessage(opts: {
       userId: recipientId,
       type: 'visit',
       title: pushTitles[action] ?? 'Demande de visite',
-      body: `${sender?.fullName ?? 'Quelqu\'un'} — ${visitMessageText(action, visit.scheduledAt)}`,
+      body: `${sender?.fullName ?? 'Quelqu\'un'} : ${visitMessageText(action, visit.scheduledAt)}`,
       payload: { threadId, visitId: visit.id },
       threadId,
       badge: unread?.unreadCount ?? 1,
@@ -215,7 +215,7 @@ listingVisitsRouter.post(
       userId: listing.ownerId,
       type: 'visit.requested',
       title: 'Nouvelle demande de visite',
-      body: `${visit.visitor.fullName ?? 'Un visiteur'} — ${listing.title}`,
+      body: `${visit.visitor.fullName ?? 'Un visiteur'} · ${listing.title}`,
       payload: { visitId: visit.id, listingId: listing.id },
     }).catch(() => {});
 
@@ -288,7 +288,7 @@ listingVisitsRouter.post(
       userId: visitor.id,
       type: 'visit.invited',
       title: 'Proposition de visite',
-      body: `${visit.owner?.fullName ?? 'Le propriétaire'} — ${listing.title}`,
+      body: `${visit.owner?.fullName ?? 'Le propriétaire'} · ${listing.title}`,
       payload: { visitId: visit.id, listingId: listing.id },
     }).catch(() => {});
 
@@ -343,6 +343,7 @@ visitsRouter.get(
 visitsRouter.patch(
   '/visits/:id',
   requireAuth,
+  featureGate('visits.respond'),
   writeLimiter,
   asyncHandler(async (req, res) => {
     const parsed = z
@@ -386,6 +387,12 @@ visitsRouter.patch(
         throw new ApiError(403, 'Non autorisé', 'FORBIDDEN');
       }
       data.scheduledAt = when;
+      // A new time means new reminders.
+      data.reminderEveSentAt = null;
+      data.reminderMorningSentAt = null;
+      data.reminder1hSentAt = null;
+      data.reminder30mSentAt = null;
+      data.pendingReminderSentAt = null;
       if (isOwner && !parsed.data.status) data.status = 'REQUESTED';
     }
     if (parsed.data.note !== undefined) data.note = parsed.data.note;

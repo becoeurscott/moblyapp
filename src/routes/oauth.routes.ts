@@ -66,6 +66,14 @@ oauthRouter.post(
           data: { email: claims.email },
         });
       }
+      // Accounts created before Google's name was read carry the placeholder;
+      // fill in the real name so greetings stop falling back.
+      if (user.fullName === 'Utilisateur Mobly' && claims.name) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: { fullName: claims.name },
+        });
+      }
     } else {
       // Existing account with the same email? Link the identity to it instead
       // of creating a duplicate — this lets an OTP-signed-up user later add
@@ -143,6 +151,14 @@ oauthRouter.post(
         user = await prisma.user.update({
           where: { id: user.id },
           data: { email: claims.email },
+        });
+      }
+      // Accounts created before Google's name was read carry the placeholder;
+      // fill in the real name so greetings stop falling back.
+      if (user.fullName === 'Utilisateur Mobly' && claims.name) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: { fullName: claims.name },
         });
       }
     } else {

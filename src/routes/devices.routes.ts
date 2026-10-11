@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { asyncHandler } from '../lib/http';
 import { requireAuth } from '../middleware/auth';
+import { resendWelcomePushOnFirstDevice } from '../services/welcome';
 
 export const devicesRouter = Router();
 
@@ -48,6 +49,12 @@ devicesRouter.post(
         locale: body.locale,
       },
     });
+    // The WELCOME notification is written at signup, before the app has asked
+    // for push permission, so its push reached no device. Deliver it now that
+    // one exists. Fire-and-forget; it must never fail the registration.
+    resendWelcomePushOnFirstDevice(req.userId!).catch((err) =>
+      console.error('[welcome] late push failed', { userId: req.userId, err: String(err) })
+    );
     res.json({ registered: true, id: device.id });
   })
 );

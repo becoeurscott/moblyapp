@@ -52,7 +52,12 @@ export async function verifyGoogleIdentityToken(idToken: string): Promise<Google
     sub: payload.sub,
     email: typeof payload.email === 'string' ? payload.email : undefined,
     email_verified: payload.email_verified === true || payload.email_verified === 'true',
-    name: typeof payload.name === 'string' ? payload.name : undefined,
+    name:
+      (typeof payload.name === 'string' && payload.name.trim()) ||
+      [payload.given_name, payload.family_name]
+        .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+        .join(' ') ||
+      undefined,
     picture: typeof payload.picture === 'string' ? payload.picture : undefined,
   };
 }

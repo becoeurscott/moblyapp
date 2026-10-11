@@ -38,8 +38,8 @@ struct AddListingView: View {
         _region       = State(initialValue: env["ADD_REGION"]
                               ?? CameroonGeo.region(for: env["ADD_CITY"] ?? c)
                               ?? "")
-        _title     = State(initialValue: l?.title ?? "")
-        _about     = State(initialValue: l?.about ?? "")
+        _title     = State(initialValue: l?.title ?? ProcessInfo.processInfo.environment["ADD_TITLE"] ?? "")
+        _about     = State(initialValue: l?.about ?? ProcessInfo.processInfo.environment["ADD_ABOUT"] ?? "")
         _rooms     = State(initialValue: AddListingView.parseRooms(l?.subtitle ?? "") ?? 1)
         _furnished = State(initialValue: l?.deals.contains("Meublé") ?? true)
         _priceValue = State(initialValue: (l?.price ?? "").filter(\.isNumber))
@@ -209,6 +209,9 @@ struct AddListingView: View {
             footer
         }
         .background(Color.moblySurface.ignoresSafeArea())
+        // Back one step instead of closing the wizard and losing what was
+        // typed; from the first step the cover's swipe closes it as before.
+        .stepSwipeBack(enabled: stepIndex > 0) { back() }
     }
 
     private var topBar: some View {
@@ -653,7 +656,7 @@ struct AddListingView: View {
     private var photosStep: some View {
         VStack(alignment: .leading, spacing: 18) {
             stepHeader("Photos de l'espace", uploadedPhotos.isEmpty
-                       ? "Ajoutez des photos de votre espace. La première sera la couverture — vous pourrez la changer ensuite."
+                       ? "Ajoutez des photos de votre espace. La première sera la couverture, vous pourrez la changer ensuite."
                        : "Touchez ou faites glisser une photo pour la définir comme couverture.")
 
             // A plain button driving `.photosPicker(isPresented:)`, not an
@@ -857,8 +860,9 @@ struct AddListingView: View {
             .clipShape(RoundedRectangle(cornerRadius: 18))
 
             VStack(spacing: 0) {
-                reviewRow("Titre", title.isEmpty ? "—" : title)
-                reviewRow("Description", about.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "—" : about.trimmingCharacters(in: .whitespacesAndNewlines))
+                reviewRow("Titre", title.isEmpty ? "—" : title, stacked: !title.isEmpty)
+                reviewRow("Description", about.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "—" : about.trimmingCharacters(in: .whitespacesAndNewlines),
+                          stacked: !about.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 reviewRow("Type", category.isEmpty ? "—" : "\(category) · \(stay == .court ? "Court séjour" : "Long séjour")")
                 if stay == .long { reviewRow("Meublé", furnished ? "Oui" : "Non") }
                 reviewRow("Lieu", locationLabel.isEmpty ? "—" : locationLabel)
@@ -915,15 +919,36 @@ struct AddListingView: View {
         }
     }
 
-    private func reviewRow(_ k: String, _ v: String, last: Bool = false) -> some View {
+    /// One line of the recap. Short facts sit in two left-aligned columns on
+    /// a shared first-line baseline. Free text (title, description) goes under
+    /// its label, left-aligned like a paragraph — right-aligned it wrapped
+    /// into a ragged block with the label floating halfway down.
+    @ViewBuilder
+    private func reviewRow(_ k: String, _ v: String, last: Bool = false, stacked: Bool = false) -> some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(k).font(.moblyBody(13)).foregroundStyle(Color(hex: 0x9A9DAC))
-                Spacer()
-                Text(LT(v)).font(.moblyHeading(14)).foregroundStyle(Color.moblyTextPrimary).multilineTextAlignment(.trailing)
+            if stacked {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(LT(k)).font(.moblyBody(13)).foregroundStyle(Color(hex: 0x9A9DAC))
+                    Text(v).font(.moblyBody(14.5, weight: .medium))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                        .lineSpacing(3)
+                        .lineLimit(k == "Description" ? 6 : 3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16).padding(.vertical, 13)
+            } else {
+                // Everything reads left to right: labels in one column, values
+                // starting on the same line in the next.
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(LT(k)).font(.moblyBody(13)).foregroundStyle(Color(hex: 0x9A9DAC))
+                        .frame(width: 124, alignment: .leading)
+                    Text(LT(v)).font(.moblyHeading(14)).foregroundStyle(Color.moblyTextPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 13)
             }
-            .padding(.horizontal, 16).padding(.vertical, 13)
-            if !last { Divider().padding(.leading, 16) }
+            if !last { Divider().padding(.horizontal, 16) }
         }
     }
 

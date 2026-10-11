@@ -6,13 +6,18 @@ struct MessagesView: View {
     @ObservedObject private var prefs = ThreadPrefs.shared
     @ObservedObject private var push = PushService.shared
     @ObservedObject private var visits = VisitRequestStore.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
     @State private var openThread: ChatThread?
     @State private var searchText = ""
+    @FocusState private var searchFocused: Bool
     @State private var showArchived = false
     @State private var showVisits = false
     @State private var pendingListingId: String?
     /// Driven from outside (a notification that points at a visit).
     var openVisits: Binding<Bool>? = nil
+    /// Hub tab to open on when `openVisits` fires (from a visit notification).
+    var openVisitsTab: VisitsHubView.Tab? = nil
+    @State private var visitsHubTab: VisitsHubView.Tab?
     @State private var confirmDelete: ChatThread?
 
     /// Rows come from the server, mapped per render — there is no local copy
@@ -124,31 +129,38 @@ struct MessagesView: View {
                         // Archive. Full-swipe left archives the row (or
                         // unarchives when we're already in the archive).
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button {
-                                withAnimation { prefs.toggleArchive(thread.id) }
-                            } label: {
-                                Label(prefs.flags(for: thread.id).archived ? "Désarchiver" : "Archiver",
-                                      systemImage: prefs.flags(for: thread.id).archived ? "tray.and.arrow.up" : "archivebox.fill")
+                            if config.isEnabled("chat.organize") {
+                                Button {
+                                    withAnimation { prefs.toggleArchive(thread.id) }
+                                } label: {
+                                    Label(prefs.flags(for: thread.id).archived ? "Désarchiver" : "Archiver",
+                                          systemImage: prefs.flags(for: thread.id).archived ? "tray.and.arrow.up" : "archivebox.fill")
+                                }
+                                .tint(Color(hex: 0x5B6CF5))
                             }
-                            .tint(Color(hex: 0x5B6CF5))
 
-                            Button {
-                                confirmDelete = thread
-                            } label: {
-                                Label("Supprimer", systemImage: "trash")
+                            if config.isEnabled("chat.deleteThread") {
+                                Button {
+                                    confirmDelete = thread
+                                } label: {
+                                    Label("Supprimer", systemImage: "trash")
+                                }
+                                .tint(Color(hex: 0xE5484D))
                             }
-                            .tint(Color(hex: 0xE5484D))
 
-                            Menu {
-                                menu(for: thread)
-                            } label: {
-                                Label("Plus", systemImage: "ellipsis.circle")
+                            if config.isEnabled("chat.organize") {
+                                Menu {
+                                    menu(for: thread)
+                                } label: {
+                                    Label("Plus", systemImage: "ellipsis.circle")
+                                }
+                                .tint(Color(hex: 0x6B6F80))
                             }
-                            .tint(Color(hex: 0x6B6F80))
                         }
                         // Swipe-RIGHT (leading) — Pin + Unread. Full-swipe
                         // right marks the row unread (WhatsApp behaviour).
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            if config.isEnabled("chat.organize") {
                             Button {
                                 if thread.unread > 0 || prefs.flags(for: thread.id).manuallyUnread {
                                     prefs.clearManualUnread(thread.id)
@@ -171,6 +183,7 @@ struct MessagesView: View {
                                       systemImage: prefs.flags(for: thread.id).pinned ? "pin.slash.fill" : "pin.fill")
                             }
                             .tint(Color(hex: 0x4C9BFF))
+                            }
                         }
                     }
                 }
@@ -181,6 +194,12 @@ struct MessagesView: View {
                     .listRowInsets(EdgeInsets())
             }
             .listStyle(.plain)
+            .scrollDismissesKeyboard(.immediately)
+            // Tapping the list (outside a row's own action) drops the keyboard
+            // without swallowing the row taps.
+            .simultaneousGesture(TapGesture().onEnded {
+                if searchFocused { searchFocused = false }
+            })
             .scrollContentBackground(.hidden)
             .background(Color.white)
             // A message landing over the socket, or a thread reordering after
@@ -192,18 +211,23 @@ struct MessagesView: View {
         .refreshable { await chat.loadThreads() }
         .onChange(of: openVisits?.wrappedValue ?? false) { _, wants in
             guard wants else { return }
-            showVisits = true
+            if config.isEnabled("visits.hub") {
+                visitsHubTab = openVisitsTab
+                showVisits = true
+            }
             openVisits?.wrappedValue = false
         }
         .fullScreenCover(isPresented: $showVisits) {
             VisitsHubView(
-                onClose: { showVisits = false },
+                onClose: { showVisits = false; visitsHubTab = nil },
                 onOpenListing: { id in
                     showVisits = false
                     DispatchQueue.main.async {
                         pendingListingId = id
                     }
                 }
+            ,
+                initialTab: visitsHubTab
             )
                 .swipeToDismiss(onDismiss: { showVisits = false })
         }
@@ -330,6 +354,7 @@ struct MessagesView: View {
     @ViewBuilder
     private func menu(for thread: ChatThread) -> some View {
         let f = prefs.flags(for: thread.id)
+        if config.isEnabled("chat.organize") {
         // Read / unread — reads the same channel as tapping the row, plus a
         // local override for "mark as unread" (the server has no dedicated
         // endpoint for that yet).
@@ -364,12 +389,15 @@ struct MessagesView: View {
             Label(f.archived ? "Désarchiver" : "Archiver",
                   systemImage: f.archived ? "tray.and.arrow.up" : "archivebox")
         }
+        }
 
-        Divider()
+        if config.isEnabled("chat.deleteThread") {
+            Divider()
 
-        Button(role: .destructive) {
-            confirmDelete = thread
-        } label: { Label("Supprimer", systemImage: "trash") }
+            Button(role: .destructive) {
+                confirmDelete = thread
+            } label: { Label("Supprimer", systemImage: "trash") }
+        }
     }
 
     /// Two distinct empty states: signed-out users are told to sign in, signed-in
@@ -419,6 +447,7 @@ struct MessagesView: View {
                 // Was a decorative `square.and.pencil` that wasn't even a
                 // button. Visits now live here: an owner reviews what came in,
                 // a visitor follows what they asked for.
+                if config.isEnabled("visits.hub") {
                 Button { showVisits = true } label: {
                     ZStack(alignment: .topTrailing) {
                         Image(systemName: "calendar.badge.clock")
@@ -437,8 +466,10 @@ struct MessagesView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                }
             }
 
+            HStack(spacing: 12) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 15, weight: .medium))
@@ -447,10 +478,28 @@ struct MessagesView: View {
                     .font(.moblyBody(13.5))
                     .foregroundStyle(Color.moblyTextPrimary)
                     .autocorrectionDisabled()
+                    .focused($searchFocused)
+                    .submitLabel(.search)
             }
             .padding(.horizontal, 15)
-            .frame(height: 46)
+            .frame(maxWidth: .infinity, minHeight: 46, maxHeight: 46)
             .background(RoundedRectangle(cornerRadius: 14).fill(Color(hex: 0xF4F5F8)))
+
+            if searchFocused || !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                    searchFocused = false
+                } label: {
+                    Text("Annuler")
+                        .font(.moblyBody(14, weight: .semibold))
+                        .foregroundStyle(Color.moblyPrimary)
+                        .fixedSize()
+                }
+                .buttonStyle(.plain)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(Motion.quick, value: searchFocused || !searchText.isEmpty)
         }
         .padding(.horizontal, 22)
         .padding(.top, 8)

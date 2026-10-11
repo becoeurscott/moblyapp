@@ -6,6 +6,7 @@ import { requireAuth } from '../middleware/auth';
 import { authLimiter, otpVerifyLimiter } from '../middleware/security';
 import { serializeUser } from '../lib/serialize';
 import { maskEmail } from '../services/email';
+import { getConfig, isFlagEnabled, flagMessage } from '../services/config';
 import {
   sendEmailCode,
   checkEmailCode,
@@ -50,6 +51,12 @@ emailRouter.post(
     }
 
     if (target !== user.email) {
+      // Switching to (or adding) another address is its own switch; confirming
+      // the address already on the account — part of signup — never is.
+      const cfg = await getConfig();
+      if (!isFlagEnabled('profile.emailChange', cfg)) {
+        throw new ApiError(403, flagMessage('profile.emailChange', cfg), 'FEATURE_DISABLED');
+      }
       const taken = await prisma.user.findFirst({
         where: { email: target, NOT: { id: user.id } },
         select: { id: true },

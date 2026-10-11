@@ -19,6 +19,8 @@ struct MoblyApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .dismissKeyboardOnTap()
+                .scrollDismissesKeyboard(.immediately)
                 .preferredColorScheme(.light)
                 // Text scales with the system setting, but stops at xxLarge.
                 //
@@ -72,11 +74,14 @@ struct MoblyApp: App {
                     // anonymous session to their account.
                     if AuthStore.shared.isSignedIn {
                         await SessionTracker.shared.attach()
+                        // Onboarding answers that didn't reach the server
+                        // at signup (offline, server error) go up now.
+                        await OnboardingAnswers.syncPending()
                     }
                     SessionTracker.shared.log("app.open", [
                         "signedIn": AuthStore.shared.isSignedIn
                     ])
-                    LocationService.shared.startTracking(prompt: AuthStore.shared.isSignedIn)
+                    LocationService.shared.startTracking()
                     await PushService.shared.refreshStatus()
                     // From here on the app keeps itself current on its own:
                     // silent polls + foreground + reconnect, no spinners.
@@ -95,7 +100,7 @@ struct MoblyApp: App {
                     // app sat in the background.
                     // Follow the position only while Mobly is on screen:
                     // a fresh fix on every return, nothing in the background.
-                    if phase == .active { LocationService.shared.startTracking(prompt: AuthStore.shared.isSignedIn) }
+                    if phase == .active { LocationService.shared.startTracking() }
                     if phase == .background { LocationService.shared.stopTracking() }
                     if phase == .active {
                         Task { await MaintenanceStore.shared.checkAtLaunch() }

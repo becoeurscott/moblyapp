@@ -196,7 +196,11 @@ usersRouter.get(
     // Attach how many listings this user has published (owner view) and the
     // average rating of their listings so the profile card can show it at a
     // glance, in one round trip.
-    const listingsCount = await prisma.listing.count({ where: { ownerId: u.id } });
+    // Only live listings count: ACTIVE/BOOSTED and marked available. Paused,
+    // pending, rejected, archived or "indisponible" spaces aren't on offer.
+    const listingsCount = await prisma.listing.count({
+      where: { ownerId: u.id, status: { in: ['ACTIVE', 'BOOSTED'] }, available: true },
+    });
     const agg = await prisma.listing.aggregate({
       where: { ownerId: u.id },
       _avg: { rating: true },

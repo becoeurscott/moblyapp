@@ -4,7 +4,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import { asyncHandler, ApiError } from '../lib/http';
 import { requireAuth, requireOwner } from '../middleware/auth';
 import { writeLimiter } from '../middleware/security';
-import { restrictionGate } from '../middleware/gates';
+import { featureGate, restrictionGate } from '../middleware/gates';
 import { env } from '../config/env';
 
 export const uploadsRouter = Router();
@@ -142,6 +142,7 @@ uploadsRouter.post(
 uploadsRouter.post(
   '/chat-image',
   requireAuth,
+  featureGate('chat.media'),
   restrictionGate('MESSAGE_MEDIA'),
   writeLimiter,
   upload.single('image'),
@@ -163,6 +164,7 @@ uploadsRouter.post(
 uploadsRouter.post(
   '/avatar',
   requireAuth,
+  featureGate('profile.avatar'),
   restrictionGate('AVATAR_UPLOAD'),
   writeLimiter,
   upload.single('avatar'),
@@ -189,6 +191,7 @@ uploadsRouter.post(
 uploadsRouter.post(
   '/voice',
   requireAuth,
+  featureGate('chat.voice'),
   restrictionGate('MESSAGE_MEDIA'),
   writeLimiter,
   uploadAudio.single('voice'),

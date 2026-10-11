@@ -11,6 +11,7 @@ import { notifyUser, pushConfigured } from '../services/push';
 import { serializeMessage } from '../lib/serialize';
 import { broadcastMessage } from '../realtime/hub';
 import { configSnapshot } from '../services/config';
+import { OWNER_STATUSES, OWNER_TRIAL_DAYS, ownerStatusWhere, ownerStatusOf } from '../lib/ownerTrial';
 import { adminIpGate, adminWriteLimiter, requireConfirmation } from '../middleware/adminSecurity';
 import { adminUsersRouter } from './admin/users.routes';
 import { adminConfigRouter } from './admin/config.routes';
@@ -182,9 +183,15 @@ const userSummarySelect = {
   avatarColor: true,
   createdAt: true,
   lastSeenAt: true,
+  ownerPaid: true,
+  ownerTrialStartedAt: true,
 } as const;
 
-/** GET /api/admin/users — paginated, search, filter. */
+/** GET /api/admin/users — paginated, search, filter.
+ *
+ *  `ownerStatus` narrows to owners in one trial state (see `ownerStatusWhere`).
+ *  Every page also carries `ownerCounts` — one aggregate query — so the
+ *  dashboard's filter chips can show how many owners sit in each state. */
 adminRouter.get(
   '/users',
   asyncHandler(async (req, res) => {
@@ -193,6 +200,7 @@ adminRouter.get(
         query: z.string().optional(),
         role: z.enum(['all', 'owner', 'visitor', 'admin']).optional(),
         active: z.enum(['all', 'active', 'suspended']).optional(),
+        ownerStatus: z.enum(['all', ...OWNER_STATUSES]).optional(),
         page: z.coerce.number().int().min(0).optional(),
         pageSize: z.coerce.number().int().min(1).max(100).optional(),
       })
@@ -216,11 +224,16 @@ adminRouter.get(
     if (q.data.role === 'admin') where.isAdmin = true;
     if (q.data.active === 'active') where.isActive = true;
     if (q.data.active === 'suspended') where.isActive = false;
+    // AND-ed rather than spread: `where.OR` may already hold the search.
+    if (q.data.ownerStatus && q.data.ownerStatus !== 'all') {
+      where.AND = [ownerStatusWhere(q.data.ownerStatus)];
+    }
 
     const page = q.data.page ?? 0;
     const pageSize = q.data.pageSize ?? 20;
+    const cutoff = new Date(Date.now() - OWNER_TRIAL_DAYS * 24 * 60 * 60 * 1000);
 
-    const [total, items] = await Promise.all([
+    const [total, items, [counts]] = await Promise.all([
       prisma.user.count({ where }),
       prisma.user.findMany({
         where,
@@ -229,9 +242,20 @@ adminRouter.get(
         skip: page * pageSize,
         take: pageSize,
       }),
+      prisma.$queryRaw<{ trial: number; locked: number; paid: number; grandfathered: number }[]>`
+        SELECT
+          COUNT(*) FILTER (WHERE NOT "ownerPaid" AND "ownerTrialStartedAt" >= ${cutoff})::int AS "trial",
+          COUNT(*) FILTER (WHERE NOT "ownerPaid" AND "ownerTrialStartedAt" < ${cutoff})::int AS "locked",
+          COUNT(*) FILTER (WHERE "ownerPaid")::int AS "paid",
+          COUNT(*) FILTER (WHERE NOT "ownerPaid" AND "ownerTrialStartedAt" IS NULL)::int AS "grandfathered"
+        FROM "User" WHERE "isOwner" = true`,
     ]);
 
-    res.json({ total, page, pageSize, items });
+    res.json({
+      total, page, pageSize,
+      items: items.map((u) => ({ ...u, ownerStatus: ownerStatusOf(u) })),
+      ownerCounts: counts ?? { trial: 0, locked: 0, paid: 0, grandfathered: 0 },
+    });
   })
 );
 
@@ -332,6 +356,114 @@ adminRouter.delete(
       throw new ApiError(404, 'Utilisateur introuvable', 'NOT_FOUND');
     });
     res.json({ deleted: true });
+  })
+);
+
+// ═════════════════════════════════════════════════════════════
+// Identity checks (KYC queue across every user)
+// ═════════════════════════════════════════════════════════════
+
+/** Queue groups the dashboard tabs map to. */
+const IDENTITY_GROUPS = {
+  open: ['PENDING', 'IN_REVIEW'],
+  closed: ['DECLINED', 'ABANDONED'],
+  approved: ['APPROVED'],
+} as const;
+
+/**
+ * GET /api/admin/identity-checks?status=open|closed|approved|all|<STATUS>
+ *
+ * The verification queue. `open` (the default) lists waiting checks oldest
+ * first — first come, first served; the other views are newest first, and
+ * `approved` only reaches back 30 days. Each row says whether it is the user's
+ * latest check, because the decision endpoint (`POST /users/:id/identity`)
+ * always acts on the latest one — acting from an older row would decide a
+ * different check than the one on screen.
+ */
+adminRouter.get(
+  '/identity-checks',
+  asyncHandler(async (req, res) => {
+    const q = z
+      .object({
+        status: z
+          .enum(['open', 'closed', 'approved', 'all', 'PENDING', 'IN_REVIEW', 'APPROVED', 'DECLINED', 'ABANDONED'])
+          .default('open'),
+        query: z.string().optional(),
+        page: z.coerce.number().int().min(0).default(0),
+        pageSize: z.coerce.number().int().min(1).max(100).default(30),
+      })
+      .safeParse(req.query);
+    if (!q.success) throw new ApiError(400, 'Filtres invalides', 'VALIDATION_FAILED');
+    const { status, query, page, pageSize } = q.data;
+
+    const where: any = {};
+    if (status in IDENTITY_GROUPS) {
+      where.status = { in: [...IDENTITY_GROUPS[status as keyof typeof IDENTITY_GROUPS]] };
+    } else if (status !== 'all') {
+      where.status = status;
+    }
+    if (status === 'approved') {
+      // "Recent" = requested or decided in the last 30 days.
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      where.OR = [{ createdAt: { gte: since } }, { decidedAt: { gte: since } }];
+    }
+    const search = query?.trim();
+    if (search) {
+      const digits = search.replace(/\D/g, '');
+      where.user = {
+        OR: [
+          { fullName: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+          { phone: { contains: digits.length >= 3 ? digits : search } },
+        ],
+      };
+    }
+
+    const [total, items, grouped] = await Promise.all([
+      prisma.identityCheck.count({ where }),
+      prisma.identityCheck.findMany({
+        where,
+        orderBy: { createdAt: status === 'open' ? 'asc' : 'desc' },
+        skip: page * pageSize,
+        take: pageSize,
+        include: {
+          user: {
+            select: {
+              id: true, fullName: true, phone: true, email: true,
+              avatarUrl: true, avatarColor: true, isOwner: true, identityVerified: true,
+            },
+          },
+        },
+      }),
+      prisma.identityCheck.groupBy({ by: ['status'], _count: { _all: true } }),
+    ]);
+
+    const userIds = [...new Set(items.map((c) => c.userId))];
+    const deciderIds = [...new Set(items.map((c) => c.decidedBy).filter((x): x is string => !!x))];
+    const [latest, deciders] = await Promise.all([
+      prisma.identityCheck.findMany({
+        where: { userId: { in: userIds } },
+        orderBy: [{ userId: 'asc' }, { createdAt: 'desc' }],
+        distinct: ['userId'],
+        select: { id: true },
+      }),
+      prisma.user.findMany({ where: { id: { in: deciderIds } }, select: { id: true, fullName: true } }),
+    ]);
+    const latestIds = new Set(latest.map((l) => l.id));
+    const deciderName = new Map(deciders.map((d) => [d.id, d.fullName]));
+
+    const counts: Record<string, number> = {};
+    for (const g of grouped) counts[g.status] = g._count._all;
+
+    res.json({
+      total, page, pageSize,
+      counts,
+      items: items.map(({ hostedUrl: _hostedUrl, ...c }) => ({
+        ...c,
+        isLatest: latestIds.has(c.id),
+        decidedByName: c.decidedBy ? deciderName.get(c.decidedBy) ?? null : null,
+      })),
+    });
   })
 );
 
@@ -686,7 +818,9 @@ adminRouter.get(
             : null,
           imported,
           ownerId: t.listing?.ownerId ?? null,
-          participants: t.participants.map((p) => p.user),
+          // `muted` is per participant (push alerts silenced) — the moderation
+          // pane toggles it through POST /moderation/threads/:id/mute.
+          participants: t.participants.map((p) => ({ ...p.user, muted: p.muted })),
           messageCount: t._count.messages,
           lastMessage: t.messages[0] ?? null,
           frozenAt: t.frozenAt,
@@ -977,14 +1111,68 @@ const broadcastBody = z.object({
   title: z.string().min(1).max(120),
   body: z.string().min(1).max(500),
   payload: z.record(z.string()).optional(),
+  /** Who receives it. Omitted = everyone, as before segments existed. */
+  segment: z.enum(['all', 'owners', 'visitors']).default('all'),
+  /** Optional city filter, matched case-insensitively against `User.city`. */
+  city: z.string().trim().max(80).optional(),
 });
 
-/** POST /api/admin/notifications/broadcast — send to every user. */
+/** Recipients of a broadcast: active accounts in the segment / city. */
+function broadcastWhere(segment: 'all' | 'owners' | 'visitors', city?: string) {
+  return {
+    isActive: true,
+    ...(segment === 'owners' ? { isOwner: true } : {}),
+    ...(segment === 'visitors' ? { isOwner: false } : {}),
+    ...(city ? { city: { equals: city, mode: 'insensitive' as const } } : {}),
+  };
+}
+
+/** GET /api/admin/notifications/audience?segment=&city= — recipient count
+ *  for a broadcast, so the operator sees the reach before sending. */
+adminRouter.get(
+  '/notifications/audience',
+  asyncHandler(async (req, res) => {
+    const { segment, city } = z
+      .object({
+        segment: z.enum(['all', 'owners', 'visitors']).default('all'),
+        city: z.string().trim().max(80).optional(),
+      })
+      .parse(req.query);
+    const count = await prisma.user.count({ where: broadcastWhere(segment, city || undefined) });
+    res.json({ segment, city: city || null, count });
+  })
+);
+
+/** GET /api/admin/notifications/cities — cities with at least one active
+ *  user, most populated first, for the broadcast city picker. */
+adminRouter.get(
+  '/notifications/cities',
+  asyncHandler(async (_req, res) => {
+    const rows = await prisma.user.groupBy({
+      by: ['city'],
+      where: { isActive: true, city: { not: null } },
+      _count: { _all: true },
+      orderBy: { _count: { city: 'desc' } },
+      take: 50,
+    });
+    res.json({ items: rows.filter((r) => r.city).map((r) => ({ city: r.city, users: r._count._all })) });
+  })
+);
+
+/**
+ * POST /api/admin/notifications/broadcast — send to every active user, or to
+ * one segment (owners / visitors) and/or one city.
+ *
+ * Each send is recorded as a `ScheduledNotification` row that is already sent
+ * (`sentAt` = now), which is what the history list reads back.
+ */
 adminRouter.post(
   '/notifications/broadcast',
+  requirePermission('notification.broadcast'),
   asyncHandler(async (req, res) => {
     const b = broadcastBody.parse(req.body);
-    const users = await prisma.user.findMany({ select: { id: true } });
+    const city = b.city || undefined;
+    const users = await prisma.user.findMany({ where: broadcastWhere(b.segment, city), select: { id: true } });
     // Bulk insert notifications; push fan-out happens per user so an APNs
     // failure on one recipient doesn't block the others.
     await prisma.notification.createMany({
@@ -1004,7 +1192,61 @@ adminRouter.post(
         pushToUser(u.id, { title: b.title, body: b.body, data: b.payload }).catch(() => {})
       )
     );
+
+    const now = new Date();
+    await prisma.scheduledNotification
+      .create({
+        data: {
+          segment: b.segment,
+          city: city ?? null,
+          type: b.type,
+          title: b.title,
+          body: b.body,
+          payload: b.payload ?? {},
+          scheduledAt: now,
+          sentAt: now,
+          sentCount: users.length,
+          createdBy: req.userId!,
+        },
+      })
+      .catch((err) => console.error('[admin] broadcast history write failed', err));
+    await audit(req, {
+      action: 'notification.broadcast',
+      after: { segment: b.segment, city: city ?? null, title: b.title, sent: users.length },
+    });
     res.json({ sent: users.length });
+  })
+);
+
+/** GET /api/admin/notifications/history — broadcasts already sent, newest first. */
+adminRouter.get(
+  '/notifications/history',
+  asyncHandler(async (req, res) => {
+    const { page, pageSize } = z
+      .object({
+        page: z.coerce.number().int().min(0).default(0),
+        pageSize: z.coerce.number().int().min(1).max(100).default(20),
+      })
+      .parse(req.query);
+    const where = { sentAt: { not: null } };
+    const [total, rows] = await Promise.all([
+      prisma.scheduledNotification.count({ where }),
+      prisma.scheduledNotification.findMany({
+        where,
+        orderBy: { sentAt: 'desc' },
+        skip: page * pageSize,
+        take: pageSize,
+      }),
+    ]);
+    const authors = await prisma.user.findMany({
+      where: { id: { in: [...new Set(rows.map((r) => r.createdBy))] } },
+      select: { id: true, fullName: true },
+    });
+    const name = new Map(authors.map((a) => [a.id, a.fullName]));
+    res.json({
+      total, page, pageSize,
+      items: rows.map((r) => ({ ...r, createdByName: name.get(r.createdBy) ?? null })),
+    });
   })
 );
 

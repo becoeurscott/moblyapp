@@ -2,67 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!--
-	  Keys that Xcode's generated Info.plist can't express (dictionaries).
-	  The INFOPLIST_KEY_* build settings still merge into this file.
-	-->
-
-	<!--
-	  App Transport Security.
-
-	  `NSAllowsLocalNetworking` permits cleartext HTTP to LAN addresses only
-	  (192.168.x.x, .local, etc.) so a device build can reach a dev server on
-	  the same wifi. It does NOT weaken ATS for the public internet — a
-	  production https:// host is still required and still validated.
-	-->
-	<!--
-	  Export compliance. The app uses only HTTPS/TLS and Apple's own Keychain
-	  crypto, which is exempt. Declaring it here means App Store Connect stops
-	  gating every single build behind the manual encryption questionnaire.
-	  If a custom crypto implementation is ever added, this must be revisited.
-	-->
-	<!-- Microphone: needed for voice-note recording in chat. -->
-	<!--
-	  Required before the camera can be opened at all: iOS terminates an app
-	  that presents a camera picker without this key, which is exactly why
-	  "+ → Caméra" in a conversation was quitting the app.
-	-->
-	<key>NSCameraUsageDescription</key>
-	<string>Mobly utilise l'appareil photo pour envoyer des photos dans vos conversations et illustrer vos annonces.</string>
-
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Mobly utilise le micro pour enregistrer des notes vocales dans vos conversations.</string>
-
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
-
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
-
-	<!-- iOS 14+ requires this before an app may touch the local network. -->
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Mobly se connecte au serveur de développement sur votre réseau local.</string>
-
-	<!--
-	  API the app talks to. Overridable per build configuration without
-	  touching code; the app also accepts an API_BASE_URL environment
-	  variable, which takes priority when running from Xcode.
-	-->
-	<key>MoblyAPIBaseURL</key>
-	<string>$(MOBLY_API_BASE_URL)</string>
-
-	<!--
-	  URL schemes the app claims. Google's OAuth for iOS uses the *reversed*
-	  client id as the redirect-uri scheme:
-	    client id  : 961218606453-eqc5653fn5spgnlse82kljemo0g59r4n.apps.googleusercontent.com
-	    reversed   : com.googleusercontent.apps.961218606453-eqc5653fn5spgnlse82kljemo0g59r4n
-	  ASWebAuthenticationSession only intercepts callbacks whose scheme is
-	  declared here — without it Google's redirect opens Safari instead of
-	  returning to the app.
-	-->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -73,9 +12,6 @@
 				<string>com.googleusercontent.apps.961218606453-eqc5653fn5spgnlse82kljemo0g59r4n</string>
 			</array>
 		</dict>
-		<!-- Didit redirects here (DIDIT_CALLBACK_URL) when the user taps
-		     Continue at the end of the identity check; the app closes the
-		     Safari sheet on receipt. -->
 		<dict>
 			<key>CFBundleURLName</key>
 			<string>com.mobly.app.return</string>
@@ -85,20 +21,24 @@
 			</array>
 		</dict>
 	</array>
-	<!--
-	  Camera and photo library.
-
-	  The chat attachment sheet opens UIImagePickerController with
-	  sourceType = .camera; without NSCameraUsageDescription iOS terminates the
-	  app the instant it touches the camera (TCC), which is exactly what
-	  crashed build 5 on device. Photo picking goes through SwiftUI's
-	  PhotosPicker, which runs out of process and does not strictly require a
-	  key — the entry is kept so a future switch to PHPhotoLibrary cannot
-	  reintroduce the same crash.
-	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>MoblyAPIBaseURL</key>
+	<string>$(MOBLY_API_BASE_URL)</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Mobly utilise l'appareil photo pour envoyer des photos dans vos conversations.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Mobly se connecte au serveur de développement sur votre réseau local.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Mobly utilise le micro pour enregistrer des notes vocales dans vos conversations.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Mobly accède à vos photos pour les envoyer dans vos conversations et illustrer vos annonces.</string>
+	<key>UILaunchScreen</key>
+	<dict/>
 </dict>
 </plist>

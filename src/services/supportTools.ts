@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { cacheBust } from '../lib/cache';
 import { createSession } from './didit';
 import { activeRestrictions, restrictionMessage } from './restrictions';
+import { greetingFirstName } from '../lib/displayName';
 import { configSnapshot } from './config';
 
 /**
@@ -162,7 +163,7 @@ export async function runSupportTool(
 
         return {
           content: JSON.stringify({
-            prenom: u.fullName.split(' ')[0],
+            prenom: greetingFirstName(u.fullName) || null,
             identiteVerifiee: u.identityVerified,
             proprietaire: u.isOwner,
             compteActif: u.isActive,

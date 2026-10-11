@@ -791,14 +791,38 @@ final class MoblyAPI {
         return w.user
     }
 
+    // MARK: - Search preferences
+
+    /// The onboarding answers, stored on the account (`SearchPreference`).
+    struct SearchPreferencesBody: Encodable {
+        let intent: String?
+        let spaceTypes: [String]
+        let region: String?
+        /// "long" | "court"
+        let stay: String?
+        let minDuration: Int?
+        let budgetMin: Int?
+        let budgetMax: Int?
+    }
+
+    func saveSearchPreferences(_ body: SearchPreferencesBody) async throws {
+        _ = try await request("auth/me/preferences", method: "PUT", body: body,
+                              authorized: true, retries: 1) as EmptyResponse
+    }
+
     // MARK: - Listings
 
     func searchListings(query: String? = nil, category: String? = nil,
-                        city: String? = nil, limit: Int = 200) async throws -> [ListingDTO] {
+                        city: String? = nil, region: String? = nil,
+                        minPrice: Int? = nil, maxPrice: Int? = nil,
+                        limit: Int = 200) async throws -> [ListingDTO] {
         var q: [String: String] = ["limit": String(limit)]
         if let query { q["query"] = query }
         if let category, category != "Tous" { q["category"] = category }
         if let city { q["city"] = city }
+        if let region { q["region"] = region }
+        if let minPrice { q["min"] = String(minPrice) }
+        if let maxPrice { q["max"] = String(maxPrice) }
         struct Wrap: Decodable { let items: [ListingDTO] }
         let w: Wrap = try await request("listings", query: q)
         return w.items
@@ -1533,6 +1557,8 @@ struct ListingDTO: Codable, Identifiable {
     let priceFcfa: Int
     let price: String
     let priceUnit: String?
+    /// Owner's minimum rental in months; absent from older backends.
+    let minDurationMonths: Int?
     /// Kilometres from the viewer — only on a `near=` feed query.
     let distanceKm: Double?
     let furnished: Bool

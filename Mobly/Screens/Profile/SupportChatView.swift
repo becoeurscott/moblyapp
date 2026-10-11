@@ -94,6 +94,8 @@ struct SupportChatView: View {
             }
         }
         .onDisappear { chat.markRead(threadId: thread.id) }
+        // Same edge / pull-down close as an owner conversation.
+        .swipeToDismiss(onDismiss: onBack)
     }
 
     // MARK: Header

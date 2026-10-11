@@ -91,7 +91,7 @@ struct ExploreView: View {
             filtered.sort { a, b in
                 distSq(target, baseCoord(for: a)) < distSq(target, baseCoord(for: b))
             }
-        } else if let origin = location.precise {
+        } else if let origin = location.precise, config.isEnabled("search.nearby") {
             // Nothing searched: the cards run from the space nearest the user
             // to the farthest, instead of the feed's order (which led with
             // Douala for someone in Yaoundé).
@@ -144,7 +144,7 @@ struct ExploreView: View {
 
     private func passesFilters(_ l: Listing) -> Bool {
         if !filters.activities.isEmpty {
-            let ok = filters.activities.contains { l.deals.contains($0) || ($0 == "Commercial" && l.category == "Commercial") }
+            let ok = filters.activities.contains { l.deals.contains($0) || ($0 == "Commercial" && l.category == "Commercial") || ($0 == "Court séjour" && l.isShortStay) }
             if !ok { return false }
         }
         if !filters.propertyTypes.isEmpty {
@@ -189,7 +189,7 @@ struct ExploreView: View {
             let n = Int(digits.dropLast().filter(\.isNumber)) ?? 0
             return (n, .max)
         }
-        let parts = b.components(separatedBy: "–").map { Int($0.filter(\.isNumber)) ?? 0 }
+        let parts = b.replacingOccurrences(of: " à ", with: "–").components(separatedBy: "–").map { Int($0.filter(\.isNumber)) ?? 0 }
         return parts.count == 2 ? (parts[0], parts[1]) : nil
     }
 
@@ -803,7 +803,7 @@ struct ExploreView: View {
                         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 2)
                     ForEach(spaces) { l in
                         suggestionRow(title: l.title,
-                                      subtitle: "\(l.location) · \(l.price)",
+                                      subtitle: "\(l.location) · \(l.price)\(LT(l.priceUnit))",
                                       icon: "house.fill",
                                       action: { focusListing(l) })
                     }
@@ -976,6 +976,7 @@ struct ExploreView: View {
                             .autocorrectionDisabled()
                             .submitLabel(.search)
                             .onSubmit { runSearch(searchText) }
+                            .disabled(!config.isEnabled("search.enabled"))
                         if !searchText.isEmpty {
                             Button(action: clearSearchTextOnly) {
                                 Image(systemName: "xmark.circle.fill")
@@ -987,9 +988,10 @@ struct ExploreView: View {
                     if !searchActive {
                         Color.clear
                             .contentShape(Rectangle())
-                            .onTapGesture { searchActive = true }
+                            .onTapGesture { if config.can("search.enabled") { searchActive = true } }
                     }
                 }
+                if config.isEnabled("search.filters") {
                 Button { showFilters = true } label: {
                     Image(systemName: "line.3.horizontal.decrease")
                         .font(.system(size: 14, weight: .semibold))
@@ -1000,6 +1002,7 @@ struct ExploreView: View {
                                     .frame(width: 7, height: 7).offset(x: 5, y: -5)
                             }
                         }
+                }
                 }
             }
             .padding(.horizontal, 16)
@@ -1061,7 +1064,7 @@ struct ExploreView: View {
     private func previewCategoryLine(_ l: Listing) -> String {
         let furnished = l.deals.contains("Meublé") ? "Meublé" : (l.deals.contains("Non meublé") ? "Non meublé" : nil)
         if let f = furnished {
-            return "\(LT(l.category)) - \(f)"
+            return "\(LT(l.category)) · \(f)"
         }
         return LT(l.category)
     }

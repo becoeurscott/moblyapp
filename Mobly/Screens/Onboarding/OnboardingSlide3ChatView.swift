@@ -19,7 +19,7 @@ struct OnboardingSlide3ChatView: View {
             Spacer(minLength: 8)
 
             VStack(alignment: .leading, spacing: 0) {
-                PageIndicator(count: 3, current: 1)
+                PageIndicator(count: 2, current: 0)
                     .padding(.bottom, 22)
 
                 Text("Échangez et planifiez sans quitter l'app")
@@ -28,7 +28,7 @@ struct OnboardingSlide3ChatView: View {
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Contactez le propriétaire, convenez d'une visite et gardez votre numéro privé — tout se passe dans Mobly.")
+                Text("Contactez le propriétaire, convenez d'une visite et gardez votre numéro privé : tout se passe dans Mobly.")
                     .font(.moblyBody(14))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
                     .lineSpacing(3)

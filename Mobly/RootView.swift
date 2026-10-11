@@ -4,6 +4,7 @@ import UIKit
 enum AppRoute: Hashable {
     case splash
     case onboarding
+    case intro
     case welcome
     case signup
     case connexion
@@ -21,6 +22,8 @@ enum AppRoute: Hashable {
     case addListing
     case ownerStats
     case placeholder
+    /// Mobly's location screen before Home, for an "Allow Once" user.
+    case locationPrimer
 }
 
 private let hasSeenOnboardingKey = "hasSeenOnboarding"
@@ -40,6 +43,9 @@ struct RootView: View {
     @State private var wordmarkDestination: WordmarkFlight.Destination = .onboarding
     @State private var route: AppRoute = {
         // Allow launch arg to skip splash for screenshotting: -skipSplash 1
+        if ProcessInfo.processInfo.environment["START_AT"] == "intro" {
+            return .intro
+        }
         if ProcessInfo.processInfo.environment["START_AT"] == "welcome" {
             return .welcome
         }
@@ -54,6 +60,9 @@ struct RootView: View {
         }
         if ProcessInfo.processInfo.environment["START_AT"] == "connexion" {
             return .connexion
+        }
+        if ProcessInfo.processInfo.environment["START_AT"] == "locationprimer" {
+            return .locationPrimer
         }
         if ProcessInfo.processInfo.environment["START_AT"] == "home" {
             return .placeholder
@@ -123,11 +132,12 @@ struct RootView: View {
                     // `gentle` (0.5s), not `standard` (0.32s): this is the one
                     // transition carrying the wordmark between two screens, and
                     // a third of a second is too brief to read as movement.
-                    let toOnboarding = !MoblyAPI.shared.isAuthenticated
-                        && !UserDefaults.standard.bool(forKey: hasSeenOnboardingKey)
-                    let toWelcome = !MoblyAPI.shared.isAuthenticated && !toOnboarding
-                    wordmarkDestination = toWelcome ? .welcome : .onboarding
-                    if toOnboarding || toWelcome {
+                    // First launch opens on the photo intro (no wordmark), so
+                    // the wordmark only flies into Welcome for returning users.
+                    let toWelcome = !MoblyAPI.shared.isAuthenticated
+                        && UserDefaults.standard.bool(forKey: hasSeenOnboardingKey)
+                    wordmarkDestination = .welcome
+                    if toWelcome {
                         // Appears exactly over the splash wordmark (which hides
                         // in the same update), then flies on the next tick.
                         wordmarkLanded = false
@@ -154,7 +164,7 @@ struct RootView: View {
                         // `sessionExpired` and the handler below bounces to
                         // Welcome a moment later.
                         if MoblyAPI.shared.isAuthenticated {
-                            route = .placeholder
+                            route = LocationService.shared.shouldReofferAtLaunch ? .locationPrimer : .placeholder
                         } else {
                             // Onboarding is a one-time, first-launch-ever intro.
                             // The flag is written the instant onboarding is
@@ -167,18 +177,27 @@ struct RootView: View {
                             // Welcome.
                             let seen = UserDefaults.standard.bool(forKey: hasSeenOnboardingKey)
                             if !seen { UserDefaults.standard.set(true, forKey: hasSeenOnboardingKey) }
-                            route = seen ? .welcome : .onboarding
+                            route = seen ? .welcome : .intro
                         }
                     }
                 }
                 .transition(.moblyScreen)
 
             case .onboarding:
-                OnboardingView(showWordmark: !wordmarkFlying) {
+                OnboardingView(showWordmark: !wordmarkFlying, onFinished: {
                     UserDefaults.standard.set(true, forKey: hasSeenOnboardingKey)
                     withAnimation(Motion.gentle) {
                         route = .welcome
                     }
+                }, onBackToIntro: {
+                    withAnimation(Motion.gentle) { route = .intro }
+                })
+                .transition(.moblyScreen)
+
+            case .intro:
+                // First screen of the first-launch onboarding.
+                IntroView {
+                    withAnimation(Motion.gentle) { route = .onboarding }
                 }
                 .transition(.moblyScreen)
 
@@ -218,7 +237,10 @@ struct RootView: View {
                         withAnimation(Motion.standard) { route = .welcome }
                     },
                     onFinish: {
-                        withAnimation(Motion.standard) { route = .placeholder }
+                        // Signing back in counts as arriving: same re-offer.
+                        withAnimation(Motion.standard) {
+                            route = LocationService.shared.shouldReofferAtLaunch ? .locationPrimer : .placeholder
+                        }
                     }
                 )
                 .id("auth-signin")
@@ -307,6 +329,12 @@ struct RootView: View {
             case .ownerStats:
                 NavigationStack { OwnerStatsView(annonce: OwnerListings.shared.annonces[0]) }
                     .transition(.opacity)
+
+            case .locationPrimer:
+                LocationPrimerScreen(context: .reoffer) { _ in
+                    withAnimation(Motion.gentle) { route = .placeholder }
+                }
+                .transition(.moblyScreen)
 
             case .placeholder:
                 MainTabView(onLogout: {

@@ -60,6 +60,7 @@ private func card<C: View>(@ViewBuilder _ c: () -> C) -> some View {
 struct EditProfileView: View {
     @ObservedObject private var auth = AuthStore.shared
     @ObservedObject private var location = LocationService.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
 
     /// Prefer what's stored on the account; fall back to a fresh reading.
     private var detectedCity: String {
@@ -174,6 +175,7 @@ struct EditProfileView: View {
                             }
                         }
                     }
+                    if config.isEnabled("profile.avatar") {
                     PhotosPicker(selection: $pickerItems, maxSelectionCount: 1, matching: .images) {
                         ZStack {
                             Circle().fill(.white).frame(width: 32, height: 32)
@@ -183,6 +185,7 @@ struct EditProfileView: View {
                         }
                     }
                     .disabled(uploadingAvatar)
+                    }
                 }
                 .padding(.top, 8)
                 .onChange(of: pickerItems) { _, items in
@@ -1041,6 +1044,7 @@ struct PrivacySecurityView: View {
     @AppStorage("privacy.maskNumber") private var maskNumber: Bool = true
     @AppStorage("privacy.twoFA")      private var twoFA: Bool = false
     @ObservedObject private var blocked = BlockedUsers.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
     @State private var showChangePassword = false
     @State private var showBlocked = false
     @State private var showExportShare: URL?
@@ -1054,21 +1058,26 @@ struct PrivacySecurityView: View {
             VStack(spacing: 16) {
                 card {
                     VStack(spacing: 0) {
-                        Button { showChangePassword = true } label: {
-                            navRow("Changer le mot de passe", "key.fill")
-                        }.buttonStyle(.plain)
-                        Divider().padding(.leading, 46)
+                        if config.isEnabled("password.change") {
+                            Button { showChangePassword = true } label: {
+                                navRow("Changer le mot de passe", "key.fill")
+                            }.buttonStyle(.plain)
+                            Divider().padding(.leading, 46)
+                        }
                         toggle("Numéro masqué lors des appels", "phone.badge.waveform.fill", $maskNumber)
                         Divider().padding(.leading, 46)
                         toggle("Authentification à deux facteurs", "lock.shield.fill", $twoFA)
-                        Divider().padding(.leading, 46)
-                        Button { showBlocked = true } label: {
-                            navRow("Utilisateurs bloqués (\(blocked.ids.count))", "hand.raised.fill")
-                        }.buttonStyle(.plain)
+                        if config.isEnabled("users.block") {
+                            Divider().padding(.leading, 46)
+                            Button { showBlocked = true } label: {
+                                navRow("Utilisateurs bloqués (\(blocked.ids.count))", "hand.raised.fill")
+                            }.buttonStyle(.plain)
+                        }
                     }
                 }
                 card {
                     VStack(spacing: 0) {
+                        if config.isEnabled("account.export") {
                         Button { exportData() } label: {
                             HStack(spacing: 13) {
                                 iconBox("arrow.down.doc.fill", 0x3A4FF0)
@@ -1085,6 +1094,7 @@ struct PrivacySecurityView: View {
                             }.padding(.vertical, 11)
                         }.buttonStyle(.plain)
                         Divider().padding(.leading, 46)
+                        }
                         Button { if RemoteConfigStore.shared.can("account.delete") { confirmDelete = true } } label: {
                             HStack(spacing: 13) {
                                 iconBox("trash.fill", 0xE5484D)
@@ -1364,14 +1374,6 @@ struct AboutView: View {
 
                 card {
                     VStack(spacing: 0) {
-                        NavigationLink { LegalDocumentView(doc: LegalLibrary.cgu) } label: {
-                            aboutRow("Conditions d'utilisation")
-                        }.buttonStyle(.plain)
-                        Divider()
-                        NavigationLink { LegalDocumentView(doc: LegalLibrary.confidentialite) } label: {
-                            aboutRow("Politique de confidentialité")
-                        }.buttonStyle(.plain)
-                        Divider()
                         NavigationLink { LegalHubView() } label: {
                             aboutRow("Tous les documents légaux")
                         }.buttonStyle(.plain)
@@ -1436,8 +1438,10 @@ struct BecomeOwnerView: View {
     /// The plan chosen on the pricing step. Defaults to the free trial, which
     /// is the offer we lead with on the home banner.
     @State private var selectedPlan: OwnerPlan = .trial
+    /// The price now lives in a bottom sheet opened from the last step.
+    @State private var showPlanSheet = false
 
-    private let totalSteps = 6
+    private let totalSteps = 5
 
     /// Whether the KYC step applies at all. Driven by the same
     /// `owners.identityRequired` switch the server enforces, so relaxing the
@@ -1461,7 +1465,11 @@ struct BecomeOwnerView: View {
     var body: some View {
         ZStack {
             // Very light blue ground for the whole become-owner flow.
-            Color(hex: 0xF2F7FF).ignoresSafeArea()
+            // White on the intro (the illustration's disc needs it), then
+            // the flow's very light blue.
+            (step == 0 ? Color.white : Color(hex: 0xF2F7FF))
+                .ignoresSafeArea()
+                .animation(Motion.quick, value: step)
 
             VStack(spacing: 0) {
                 progressHeader
@@ -1480,6 +1488,9 @@ struct BecomeOwnerView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
+        // Edge swipe goes back one step; on the first step the cover's own
+        // swipe closes the flow.
+        .stepSwipeBack(enabled: step > 0) { withAnimation(Motion.quick) { step -= 1 } }
         .fullScreenCover(isPresented: $showCelebration) {
             // No swipe-to-dismiss wrapper: its hosting controller pins the
             // content inside the safe area, so the welcome gradient stopped
@@ -1513,6 +1524,12 @@ struct BecomeOwnerView: View {
                 showAddListing = false
                 onClose()
             })
+        }
+        .sheet(isPresented: $showPlanSheet) {
+            OwnerPlanSheet(selectedPlan: $selectedPlan, onConfirm: confirmPlan)
+                .presentationDetents([.height(560), .large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
         }
         .fullScreenCover(isPresented: $showPayment) {
             OwnerPaymentView(
@@ -1611,8 +1628,7 @@ struct BecomeOwnerView: View {
         case 1: StepBenefits()
         case 2: StepHowItWorks()
         case 3: StepSocialProof(listingsCount: listingsCount, citiesCount: citiesCount)
-        case 4: StepConfirm()
-        default: StepPricing(selectedPlan: $selectedPlan)
+        default: StepConfirm()
         }
     }
 
@@ -1625,22 +1641,13 @@ struct BecomeOwnerView: View {
                 if step < totalSteps - 1 {
                     withAnimation(Motion.quick) { step += 1 }
                 } else {
-                    SessionTracker.shared.log("owner.plan_selected", ["plan": selectedPlan.analyticsId])
-                    if selectedPlan == .paid {
-                        // Pay the 5 000 FCFA now → active straight away, no trial.
-                        showPayment = true
-                    } else {
-                        // Free 7-day trial, no payment now.
-                        activateOwner()
-                    }
+                    showPlanSheet = true
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Text(step == totalSteps - 1 ? selectedPlan.ctaTitle : "Suivant")
+                    Text(step == totalSteps - 1 ? "Continuer" : "Suivant")
                         .font(.moblyHeading(15.5))
-                    Image(systemName: step == totalSteps - 1
-                          ? (selectedPlan == .paid ? "lock.fill" : "checkmark")
-                          : "arrow.right")
+                    Image(systemName: "arrow.right")
                         .font(.system(size: 13, weight: .bold))
                 }
                 .foregroundStyle(.white)
@@ -1656,11 +1663,24 @@ struct BecomeOwnerView: View {
             }
             .buttonStyle(.plain)
 
-            if step == totalSteps - 1 {
-                Text(selectedPlan.footnote)
-                    .font(.moblyBody(11))
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
-                    .multilineTextAlignment(.center)
+        }
+    }
+
+    /// Called by the plan sheet's primary button: same action the pricing
+    /// step's footer used to run.
+    private func confirmPlan() {
+        guard RemoteConfigStore.shared.can(selectedPlan == .paid ? "owners.payment" : "owners.trial")
+        else { return }
+        SessionTracker.shared.log("owner.plan_selected", ["plan": selectedPlan.analyticsId])
+        showPlanSheet = false
+        // Let the sheet slide away before presenting the next cover.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            if selectedPlan == .paid {
+                // Pay the 5 000 FCFA now → active straight away, no trial.
+                showPayment = true
+            } else {
+                // Free 7-day trial, no payment now.
+                activateOwner()
             }
         }
     }
@@ -1692,71 +1712,18 @@ struct BecomeOwnerView: View {
 
 // MARK: - Step 1: Intro
 
+/// Same layout as the signup permission screens: a phone rising out of a
+/// soft disc, a card floating across it, then a centred title and message.
+/// The card shows what being an owner on Mobly brings — a tenant asking to
+/// visit.
 private struct StepIntro: View {
-    @State private var appear = false
-    @State private var float = false
-
     var body: some View {
-        VStack(spacing: 30) {
-            Spacer(minLength: 20)
-
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(colors: [Color.moblyPrimary.opacity(0.30), Color.moblyPrimary.opacity(0)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .frame(width: 320, height: 320)
-                    .blur(radius: 40)
-
-                IntroPhotoDeck()
-                    .offset(y: float ? -8 : 0)
-
-                // Floating sparkle chips
-                chip("×3", 24, 0xEAF3FF, 0x1F6FD9)
-                    .offset(x: 120, y: -118)
-                    .opacity(appear ? 1 : 0)
-                chip("Gratuit", 32, 0xE9F9EF, 0x1F8A5B)
-                    .offset(x: -125, y: -40)
-                    .opacity(appear ? 1 : 0)
-                chip("En 5 min", 32, 0xEEF0FE, 0x3A4FF0)
-                    .offset(x: 110, y: 116)
-                    .opacity(appear ? 1 : 0)
-            }
-            .frame(height: 280)
-
-            VStack(spacing: 12) {
-                Text("Devenez propriétaire\nsur Mobly")
-                    .font(.moblyHeading(28))
-                    .foregroundStyle(Color.moblyTextPrimary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("Publiez votre espace en quelques minutes\net touchez des locataires vérifiés\npartout au Cameroun.")
-                    .font(.moblyBody(14.5))
-                    .foregroundStyle(Color(hex: 0x666F80))
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 30)
-            .opacity(appear ? 1 : 0)
-            .offset(y: appear ? 0 : 12)
-
-            Spacer(minLength: 20)
-        }
-        .onAppear {
-            withAnimation(Motion.gentle) { appear = true }
-            withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { float = true }
-        }
-    }
-
-    private func chip(_ text: String, _ size: CGFloat, _ bg: UInt32, _ fg: UInt32) -> some View {
-        Text(LT(text))
-            .font(.moblyHeading(size == 24 ? 14 : 12.5))
-            .foregroundStyle(Color(hex: fg))
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(Capsule().fill(Color(hex: bg)))
-            .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
+        PrimerContent(
+            art: .owner,
+            eyebrow: nil,
+            title: "Louez votre espace avec Mobly",
+            message: "Publiez votre annonce en quelques minutes et recevez les demandes de visite de locataires vérifiés, partout au Cameroun."
+        )
     }
 }
 
@@ -1766,13 +1733,13 @@ private struct StepBenefits: View {
     private let benefits: [(icon: String, tint: UInt32, bg: UInt32, title: String, body: String)] = [
         ("megaphone.fill", 0x4C9BFF, 0xEAF3FF,
          "Visible partout au Cameroun",
-         "Home, Explore, carte — dès la publication."),
+         "Home, Explore et carte, dès la publication."),
         ("bubble.left.and.bubble.right.fill", 0x3A4FF0, 0xEEF0FE,
          "Chat et visites intégrés",
          "Discutez et planifiez sans partager votre numéro."),
         ("chart.line.uptrend.xyaxis", 0x1F8A5B, 0xE9F9EF,
          "Vos statistiques en temps réel",
-         "Vues, contacts, taux — au jour le jour."),
+         "Vues, contacts et taux, au jour le jour."),
         ("bolt.badge.checkmark.fill", 0x1F6FD9, 0xEAF3FF,
          "Boostez et vendez plus vite",
          "×3 plus de vues à partir de 500 FCFA."),
@@ -1839,7 +1806,7 @@ private struct StepHowItWorks: View {
     private let steps: [(icon: String, title: String, body: String)] = [
         ("photo.on.rectangle.angled",
          "1. Créez votre annonce",
-         "Photos, prix, description — quelques minutes suffisent."),
+         "Photos, prix, description : quelques minutes suffisent."),
         ("envelope.badge.fill",
          "2. Recevez des demandes",
          "Chat sécurisé et visites planifiées, numéro masqué."),
@@ -2247,133 +2214,121 @@ enum OwnerPlan {
     }
 }
 
-// MARK: - Step 6: Pricing
+// MARK: - Owner plan sheet
 //
-// The offer screen: become an owner from 5 000 FCFA / month, or start with a
-// free 7-day trial. Two tappable cards drive `selectedPlan`, which the footer
-// and the payment page both read.
-private struct StepPricing: View {
+// Bottom sheet opened from the last step of the become-owner flow: pick the
+// free 7-day trial or pay the 5 000 FCFA now, then continue.
+private struct OwnerPlanSheet: View {
     @Binding var selectedPlan: OwnerPlan
-    @State private var appear = false
-
-    private let perks: [String] = [
-        "Annonces illimitées",
-        "Badge propriétaire vérifié",
-        "Demandes de visite & messagerie",
-        "Statistiques de vos annonces",
-    ]
+    var onConfirm: () -> Void
+    @ObservedObject private var config = RemoteConfigStore.shared
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 22) {
-                VStack(spacing: 10) {
-                    Text("Devenez propriétaire")
-                        .font(.moblyHeading(27))
-                        .foregroundStyle(Color.moblyTextPrimary)
-                        .multilineTextAlignment(.center)
-                    Text("Essayez 7 jours gratuitement,\nou payez une fois pour tout activer.")
-                        .font(.moblyBody(14))
-                        .foregroundStyle(Color(hex: 0x666F80))
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(3)
-                }
-                .padding(.top, 16)
-                .padding(.horizontal, 30)
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Devenez propriétaire")
+                .font(.moblyHeading(24))
+                .foregroundStyle(Color.moblyTextPrimary)
+                .padding(.top, 28)
+            Text("Annonces illimitées, badge vérifié, demandes de visite et statistiques.")
+                .font(.moblyBody(13.5))
+                .foregroundStyle(Color.moblyTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 6)
 
-                VStack(spacing: 14) {
-                    planCard(
-                        plan: .trial,
-                        badge: "GRATUIT",
-                        title: "Essai gratuit 7 jours",
-                        price: "0 FCFA",
-                        priceCaption: "aujourd'hui",
-                        subtitle: "Activez gratuitement. Après 7 jours, payez 5 000 FCFA pour rester actif."
-                    )
-                    planCard(
-                        plan: .paid,
-                        badge: nil,
-                        title: "Payer maintenant",
-                        price: "5 000 FCFA",
-                        priceCaption: "une seule fois",
-                        subtitle: "Compte actif immédiatement. Paiement unique, sans abonnement."
-                    )
+            VStack(spacing: 12) {
+                if config.isEnabled("owners.trial") {
+                    planCard(plan: .trial,
+                             name: "Essai gratuit",
+                             price: "0 FCFA",
+                             unit: "aujourd'hui",
+                             subtitle: "Puis 5 000 FCFA pour rester actif après 7 jours",
+                             badge: "7 JOURS GRATUITS")
                 }
-                .padding(.horizontal, 20)
-
-                VStack(spacing: 10) {
-                    ForEach(Array(perks.enumerated()), id: \.offset) { _, p in
-                        HStack(spacing: 12) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(Color(hex: 0x1F8A5B))
-                            Text(p)
-                                .font(.moblyBody(13.5, weight: .medium))
-                                .foregroundStyle(Color.moblyTextPrimary)
-                            Spacer()
-                        }
-                    }
+                if config.isEnabled("owners.payment") {
+                    planCard(plan: .paid,
+                             name: "Payer maintenant",
+                             price: "5 000 FCFA",
+                             unit: "une fois",
+                             subtitle: "Compte actif immédiatement, sans abonnement",
+                             badge: nil)
                 }
-                .padding(.horizontal, 34)
-
-                Spacer(minLength: 10)
             }
-            .opacity(appear ? 1 : 0)
-            .offset(y: appear ? 0 : 10)
-            .animation(Motion.standard, value: appear)
+            .padding(.top, 22)
+
+            Spacer(minLength: 18)
+
+            Button {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                onConfirm()
+            } label: {
+                Text(selectedPlan.ctaTitle)
+                    .font(.moblyHeading(16))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 54)
+                    .background(Capsule().fill(Color.black))
+            }
+            .buttonStyle(.plain)
+
+            Text(selectedPlan == .trial
+                 ? "Aucun paiement aujourd'hui. À la fin des 7 jours d'essai, payez 5 000 FCFA pour garder votre compte propriétaire actif. En continuant, vous acceptez les Conditions d'utilisation de Mobly."
+                 : "Paiement unique de 5 000 FCFA par Mobile Money. Votre compte propriétaire est activé dès la confirmation du paiement. En continuant, vous acceptez les Conditions d'utilisation de Mobly.")
+                .font(.moblyBody(11))
+                .foregroundStyle(Color.moblyTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.moblyDivider, lineWidth: 1))
+                .padding(.top, 14)
+                .padding(.bottom, 8)
         }
-        .onAppear { appear = true }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color.white.ignoresSafeArea())
+        .onAppear {
+            // The trial is the default pick; with it switched off, start on
+            // the plan that is still offered.
+            if selectedPlan == .trial && !config.isEnabled("owners.trial") { selectedPlan = .paid }
+        }
     }
 
-    private func planCard(plan: OwnerPlan, badge: String?, title: String,
-                          price: String, priceCaption: String, subtitle: String) -> some View {
+    private func planCard(plan: OwnerPlan, name: String, price: String, unit: String,
+                          subtitle: String, badge: String?) -> some View {
         let selected = selectedPlan == plan
         return Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             withAnimation(Motion.quick) { selectedPlan = plan }
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Text(title)
-                        .font(.moblyHeading(16))
-                        .foregroundStyle(Color.moblyTextPrimary)
-                    if let badge {
-                        Text(badge)
-                            .font(.moblyBody(9.5, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Capsule().fill(Color.moblyAccent))
-                    }
-                    Spacer()
-                    ZStack {
-                        Circle()
-                            .strokeBorder(selected ? Color.moblyPrimary : Color(hex: 0xCED2DE),
-                                          lineWidth: selected ? 7 : 2)
-                            .frame(width: 22, height: 22)
-                    }
+            VStack(alignment: .leading, spacing: 6) {
+                if let badge {
+                    Text(badge)
+                        .font(.moblyBody(10, weight: .bold))
+                        .foregroundStyle(Color(hex: 0x1F8A5B))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(Color(hex: 0xE3F5EC)))
                 }
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(name)
+                        .font(.moblyHeading(17))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                    Spacer()
                     Text(price)
-                        .font(.moblyHeading(22))
-                        .foregroundStyle(Color.moblyPrimary)
-                    Text(priceCaption)
-                        .font(.moblyBody(12.5))
-                        .foregroundStyle(Color(hex: 0x9A9DAC))
+                        .font(.moblyHeading(17))
+                        .foregroundStyle(Color.moblyTextPrimary)
+                    Text("/ \(unit)")
+                        .font(.moblyBody(13))
+                        .foregroundStyle(Color.moblyTextSecondary)
                 }
                 Text(subtitle)
                     .font(.moblyBody(12.5))
-                    .foregroundStyle(Color(hex: 0x666F80))
+                    .foregroundStyle(Color.moblyTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 18).fill(.white))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18)
-                    .stroke(selected ? Color.moblyPrimary : Color(hex: 0xE7E9F0),
-                            lineWidth: selected ? 2 : 1)
-            )
-            .shadow(color: selected ? Color.moblyPrimary.opacity(0.18) : Color(hex: 0x14152A).opacity(0.04),
-                    radius: selected ? 12 : 5, y: selected ? 6 : 2)
+            .background(RoundedRectangle(cornerRadius: 16)
+                .fill(selected ? Color.white : Color(hex: 0xF2F3F6)))
+            .overlay(RoundedRectangle(cornerRadius: 16)
+                .stroke(selected ? Color.moblyPrimary : Color.clear, lineWidth: 2))
         }
         .buttonStyle(.plain)
     }
@@ -2751,70 +2706,3 @@ private struct CelebrationView: View {
     }
 }
 
-/// Real annonce photos stacked like a small deck, the front one fading into
-/// the next every couple of seconds. Replaces the flat house icon on the first
-/// become-owner step so the owner sees the kind of space they could publish.
-private struct IntroPhotoDeck: View {
-    @ObservedObject private var store = ListingStore.shared
-    @State private var index = 0
-    private let tick = Timer.publish(every: 2.2, on: .main, in: .common).autoconnect()
-
-    private var photos: [Listing] {
-        Array(store.listings.filter { $0.coverUrl != nil || !$0.photos.isEmpty }.prefix(8))
-    }
-
-    var body: some View {
-        let items = photos
-        ZStack {
-            if items.isEmpty {
-                card { Color(hex: 0xDCE8FF) }
-            } else {
-                // Two resting cards behind, peeking out above and below.
-                ForEach(0..<min(2, items.count), id: \.self) { k in
-                    card { ListingCover(listing: items[(index + k + 1) % items.count]) }
-                        .offset(y: k == 0 ? -22 : 22)
-                        .scaleEffect(0.9)
-                        .opacity(0.9)
-                        .zIndex(-1)
-                }
-                // The front card is swiped away to the left, tilting as it
-                // goes, while the next one rises from the deck behind.
-                card { ListingCover(listing: items[index % items.count]) }
-                    .id(index)
-                    // Older cards stay above newer ones, so the card being
-                    // swiped away is seen whole on top of the one replacing it.
-                    .zIndex(1_000_000 - Double(index))
-                    .transition(.asymmetric(
-                        insertion: .scale(scale: 0.9).combined(with: .opacity),
-                        removal: .modifier(active: SwipeAway(progress: 1),
-                                           identity: SwipeAway(progress: 0))))
-            }
-        }
-        .animation(.spring(response: 0.6, dampingFraction: 0.85), value: index)
-        .onReceive(tick) { _ in
-            guard items.count > 1 else { return }
-            index = (index + 1) % items.count
-        }
-    }
-
-    private func card<C: View>(@ViewBuilder _ content: () -> C) -> some View {
-        content()
-            .frame(width: 290, height: 190)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(.white, lineWidth: 4))
-            .shadow(color: Color(hex: 0x1A2266).opacity(0.18), radius: 18, y: 10)
-    }
-}
-
-/// Slides a card fully off screen to the left with a slight tilt.
-private struct SwipeAway: ViewModifier {
-    let progress: CGFloat
-
-    func body(content: Content) -> some View {
-        content
-            .offset(x: -440 * progress, y: 30 * progress)
-            .rotationEffect(.degrees(-14 * progress))
-    }
-}

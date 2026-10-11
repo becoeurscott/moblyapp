@@ -30,7 +30,7 @@ export async function notifyNewListing(
       userId: u.id,
       type: 'new_listing',
       title: `Nouvelle annonce à ${where} 🏠`,
-      body: `${listing.title} — ${price}. Découvrez-la maintenant !`,
+      body: `${listing.title}, ${price}. Découvrez-la maintenant !`,
       payload: { listingId: listing.id },
     }).catch(() => {});
   }

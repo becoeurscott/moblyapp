@@ -322,7 +322,7 @@ struct ChatThreadView: View {
     /// message shows up even when the socket is not connected (offline, or the
     /// visitor signed in via a debug token that never authed the ws).
     private func performVisitAction(_ m: ChatMessage, status: String) {
-        guard let vid = m.visitId, !visitActionBusy else { return }
+        guard let vid = m.visitId, !visitActionBusy, config.can("visits.respond") else { return }
         visitActionBusy = true
         Task {
             _ = try? await MoblyAPI.shared.updateVisit(id: vid, status: status)
@@ -353,7 +353,7 @@ struct ChatThreadView: View {
                     .simultaneousGesture(TapGesture().onEnded {
                         if inputFocused { inputFocused = false }
                     })
-                if replyingTo != nil { replyPreview }
+                if replyingTo != nil && config.isEnabled("chat.reply") { replyPreview }
                 // Hidden only while recording, where the waveform takes the
                 // space. They used to vanish the moment you typed a character,
                 // which is why they seemed to have moved away from the bottom
@@ -528,7 +528,7 @@ struct ChatThreadView: View {
                     .foregroundStyle(Color.moblyTextPrimary)
                     .frame(width: 34, height: 38)
             }
-            Button { showPeerProfile = true } label: {
+            Button { if config.can("users.profile") { showPeerProfile = true } } label: {
                 HStack(spacing: 12) {
                     UserAvatar(name: thread.name, userId: thread.peerId ?? thread.id,
                                avatarUrl: thread.avatarUrl, avatarColor: thread.avatarColor,
@@ -655,6 +655,8 @@ struct ChatThreadView: View {
     private func photoGroups(in messages: [ChatMessage]) -> (groups: [String: [ChatMessage]], hidden: Set<String>) {
         var groups: [String: [ChatMessage]] = [:]
         var hidden = Set<String>()
+        // Switched off: every photo is drawn as its own bubble.
+        guard config.isEnabled("chat.photoGroups") else { return (groups, hidden) }
         func groupable(_ m: ChatMessage) -> Bool {
             // Reacted photos stay in their group: the emoji is shown on the
             // group instead of pulling the photo out of it.
@@ -839,13 +841,13 @@ struct ChatThreadView: View {
                                  t.disablesAnimations = true
                                  withTransaction(t) { galleryURLs = []; galleryMessages = [] }
                              },
-                             onReply: galleryMessages.isEmpty ? nil : { index in
+                             onReply: galleryMessages.isEmpty || !config.isEnabled("chat.reply") ? nil : { index in
                                  let msg = galleryMessages[min(index, galleryMessages.count - 1)]
                                  galleryURLs = []; galleryMessages = []
                                  replyingTo = msg
                              },
                              canDeleteForBoth: galleryMessages.first?.fromMe == true,
-                             onDelete: galleryMessages.isEmpty ? nil : { index, forBoth in
+                             onDelete: galleryMessages.isEmpty || !config.isEnabled("chat.delete") ? nil : { index, forBoth in
                                  // Drop the photo from the open viewer right away;
                                  // removing the last one empties the URLs, which
                                  // closes the cover through its binding.
@@ -1066,7 +1068,8 @@ struct ChatThreadView: View {
                 .padding(.bottom, 6)
                 .transition(.opacity)
             }
-            if let preview = linkPreview.preview, !linkPreviewDismissed {
+            if let preview = linkPreview.preview, !linkPreviewDismissed,
+               config.isEnabled("chat.linkPreviews") {
                 ComposerLinkPreview(preview: preview) {
                     linkPreviewDismissed = true
                 }
@@ -1086,6 +1089,7 @@ struct ChatThreadView: View {
         .background(Color.white)
         .onChange(of: draft) { _, newValue in
             linkPreviewDismissed = false
+            guard config.isEnabled("chat.linkPreviews") else { return }
             linkPreview.detectAndFetch(in: newValue)
         }
     }
@@ -1094,7 +1098,7 @@ struct ChatThreadView: View {
         let ready = !thread.isPending
         let canSend = ready && !draft.trimmingCharacters(in: .whitespaces).isEmpty
         return HStack(spacing: 10) {
-            Button { if ready { activeSheet = .attachments } } label: {
+            Button { if ready, config.can("chat.send") { activeSheet = .attachments } } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
@@ -1118,7 +1122,7 @@ struct ChatThreadView: View {
                 if canSend {
                     send()
                 } else {
-                    guard config.can("chat.voice") else { return }
+                    guard config.can("chat.send"), config.can("chat.voice") else { return }
                     let permission = AVAudioSession.sharedInstance().recordPermission
                     if permission == .denied {
                         showMicPermissionAlert = true
@@ -1140,7 +1144,7 @@ struct ChatThreadView: View {
             .disabled(!ready)
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.2).onEnded { _ in
-                    guard ready, !canSend, config.can("chat.voice") else { return }
+                    guard ready, !canSend, config.can("chat.send"), config.can("chat.voice") else { return }
                     withAnimation(Motion.instant) { showMicHint = false }
                     let permission = AVAudioSession.sharedInstance().recordPermission
                     guard permission == .granted else {
@@ -1277,9 +1281,10 @@ struct ChatThreadView: View {
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespaces)
         guard !thread.isPending, !text.isEmpty, let me = auth.user?.id else { return }
+        guard config.can("chat.send") else { return }
         // Capture before clearing — the reply target was previously dropped
         // here, so a quoted reply was sent as an ordinary message.
-        let replyId = replyingTo?.id
+        let replyId = config.isEnabled("chat.reply") ? replyingTo?.id : nil
         draft = ""
         replyingTo = nil
         linkPreview.clear()
@@ -1516,6 +1521,7 @@ struct ChatThreadView: View {
     /// doing anything, so "réagir" looked broken.
     private func react(_ target: ChatMessage, _ emoji: String) {
         reactionTarget = nil
+        guard config.can("chat.reactions") else { return }
         withAnimation(Motion.pop) { reactions.toggle(emoji, on: target.id) }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
@@ -1534,6 +1540,7 @@ private extension Array {
 // MARK: - Message bubble
 
 struct MessageBubble: View {
+    @ObservedObject private var config = RemoteConfigStore.shared
     let message: ChatMessage
     var onReply: () -> Void = {}
     var onReact: () -> Void = {}
@@ -1555,17 +1562,23 @@ struct MessageBubble: View {
                 .frame(maxWidth: message.kind == .image ? ChatImageSize.width : Self.maxBubbleWidth,
                        alignment: message.fromMe ? .trailing : .leading)
                 .offset(x: dragOffset)
-                .gesture(replySwipe)
+                .gesture(replySwipe, including: config.isEnabled("chat.reply") ? .all : .subviews)
                 .contextMenu {
-                    Button { onReply() } label: { Label("Répondre", systemImage: "arrowshape.turn.up.left") }
-                    Button { onReact() } label: { Label("Réagir", systemImage: "face.smiling") }
+                    if config.isEnabled("chat.reply") {
+                        Button { onReply() } label: { Label("Répondre", systemImage: "arrowshape.turn.up.left") }
+                    }
+                    if config.isEnabled("chat.reactions") {
+                        Button { onReact() } label: { Label("Réagir", systemImage: "face.smiling") }
+                    }
                     if message.kind == .text {
                         Button { UIPasteboard.general.string = message.text } label: {
                             Label("Copier", systemImage: "doc.on.doc")
                         }
                     }
-                    Button(role: .destructive) { onDelete() } label: {
-                        Label("Supprimer", systemImage: "trash")
+                    if config.isEnabled("chat.delete") {
+                        Button(role: .destructive) { onDelete() } label: {
+                            Label("Supprimer", systemImage: "trash")
+                        }
                     }
                 }
             if !message.fromMe { Spacer(minLength: 40) }
@@ -1650,7 +1663,8 @@ struct MessageBubble: View {
                     .font(.moblyBody(13.5))
                     .foregroundStyle(message.fromMe ? .white : Color.moblyTextPrimary)
                     .multilineTextAlignment(.leading)
-                if LinkPreviewService.firstURL(in: message.text) != nil {
+                if config.isEnabled("chat.linkPreviews"),
+                   LinkPreviewService.firstURL(in: message.text) != nil {
                     MessageLinkPreview(text: message.text, fromMe: message.fromMe)
                 }
             }
@@ -2714,6 +2728,7 @@ private struct UploadShimmerOverlay: View {
 /// frosted "N photos" label. Tapping opens the whole run in a paged gallery.
 /// Time and ticks are the LAST photo's, since that is when the run finished.
 struct PhotoStackBubble: View {
+    @ObservedObject private var config = RemoteConfigStore.shared
     let messages: [ChatMessage]
     /// Briefly true after a quote jumped to this group.
     var highlighted: Bool = false
@@ -2757,12 +2772,18 @@ struct PhotoStackBubble: View {
                 }
                 .padding(.bottom, groupReactions.isEmpty ? 0 : 10)
                 .offset(x: dragOffset)
-                .gesture(replySwipe)
+                .gesture(replySwipe, including: config.isEnabled("chat.reply") ? .all : .subviews)
                 .contextMenu {
-                    Button { onReply() } label: { Label("Répondre", systemImage: "arrowshape.turn.up.left") }
-                    Button { onReact() } label: { Label("Réagir", systemImage: "face.smiling") }
-                    Button(role: .destructive) { onDelete() } label: {
-                        Label("Supprimer le groupe", systemImage: "trash")
+                    if config.isEnabled("chat.reply") {
+                        Button { onReply() } label: { Label("Répondre", systemImage: "arrowshape.turn.up.left") }
+                    }
+                    if config.isEnabled("chat.reactions") {
+                        Button { onReact() } label: { Label("Réagir", systemImage: "face.smiling") }
+                    }
+                    if config.isEnabled("chat.delete") {
+                        Button(role: .destructive) { onDelete() } label: {
+                            Label("Supprimer le groupe", systemImage: "trash")
+                        }
                     }
                 }
             if !fromMe { Spacer(minLength: 30) }

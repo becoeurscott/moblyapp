@@ -118,6 +118,52 @@ export const flagsSchema = z
     'ads.banner': flag(false),
     'analytics': flag(),
     'account.delete': flag(),
+
+    // Every remaining user-facing function, so each one has its own switch.
+    // All default on: adding a key must never change what the app does.
+    'chat.reply': flag(),
+    'chat.reactions': flag(),
+    'chat.delete': flag(),
+    'chat.deleteThread': flag(),
+    'chat.linkPreviews': flag(),
+    'chat.photoGroups': flag(),
+    /// Pin, archive, mute, mark unread — local organisation of the inbox.
+    'chat.organize': flag(),
+    'listings.call': flag(),
+    'listings.similar': flag(),
+    'listings.delete': flag(),
+    'listings.availability': flag(),
+    'reviews.read': flag(),
+    'visits.hub': flag(),
+    'visits.owner': flag(),
+    /// Accept, decline, reschedule, cancel, mark done — any change to a visit.
+    'visits.respond': flag(),
+    /// Server sends visit reminders (24h, 1h, pending request). Off until the
+    /// reminder job is deployed; while off the app schedules local reminders.
+    'visits.serverReminders': flag(false),
+    'owners.dashboard': flag(),
+    'owners.stats': flag(),
+    'owners.trial': flag(),
+    'owners.payment': flag(),
+    'search.enabled': flag(),
+    'search.filters': flag(),
+    'search.nearby': flag(),
+    'home.recommended': flag(),
+    'home.popularCities': flag(),
+    'home.quickFilters': flag(),
+    'home.ownerBanner': flag(),
+    'notifications.inbox': flag(),
+    'profile.edit': flag(),
+    'profile.avatar': flag(),
+    'profile.emailChange': flag(),
+    'password.change': flag(),
+    'account.export': flag(),
+    'users.profile': flag(),
+    'users.block': flag(),
+    'settings.language': flag(),
+    /// Read by the app since the signup rework; listed so they can be switched.
+    'signup.permissionPrimers': flag(),
+    'signup.onboardingQuestions': flag(),
   })
   .default({});
 

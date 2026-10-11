@@ -64,6 +64,24 @@ struct ListingDetailView: View {
     /// all 126 real properties.
     private var ownerName: String { listing.ownerName ?? "Propriétaire" }
 
+    /// "Babeni Kouam" → "Babeni K." for names too long for the host row.
+    private var shortOwnerName: String {
+        let parts = ownerName.split(separator: " ")
+        guard parts.count > 1, let initial = parts.last?.first else { return ownerName }
+        return "\(parts[0]) \(String(initial).uppercased())."
+    }
+
+    private func ownerNameRow(_ name: String) -> some View {
+        HStack(spacing: 6) {
+            Text(name)
+                .font(.moblyHeading(16))
+                .foregroundStyle(Color.moblyTextPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if listing.ownerVerified { verifiedBadge.fixedSize() }
+        }
+    }
+
     /// Same avatar as the owner's profile. Your own listing reads from
     /// `AuthStore` so a fresh photo/colour edit shows without a refetch.
     @ViewBuilder
@@ -605,11 +623,11 @@ struct ListingDetailView: View {
                 hostAvatar
 
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(ownerName)
-                            .font(.moblyHeading(16))
-                            .foregroundStyle(Color.moblyTextPrimary)
-                        if listing.ownerVerified { verifiedBadge }
+                    // One line always: the full name when it fits, else
+                    // "Babeni K.", with the badge right after the name.
+                    ViewThatFits(in: .horizontal) {
+                        ownerNameRow(ownerName)
+                        ownerNameRow(shortOwnerName)
                     }
                     Text(listing.ownerVerified ? "Propriétaire vérifié" : "Propriétaire non vérifié")
                         .font(.moblyBody(13))
@@ -617,8 +635,10 @@ struct ListingDetailView: View {
                         // carries the brand colour rather than a generic success
                         // green that reads like a system state.
                         .foregroundStyle(listing.ownerVerified ? Color.moblyPrimary : Color(hex: 0x9A9DAC))
+                        .lineLimit(1)
                 }
-                Spacer()
+                .layoutPriority(1)
+                Spacer(minLength: 8)
                 // Same rule as the sticky bar: you are the owner, so there is
                 // no one on the other end of these.
                 if !isOwnListing && ownerContactActive {
@@ -1007,7 +1027,7 @@ struct ListingDetailView: View {
     /// SwiftUI's ShareLink so it can be presented from this fullScreenCover
     /// without fighting the sheet that is already up.
     private func shareListing() {
-        let price = listing.price.isEmpty ? "" : " — \(listing.price)"
+        let price = listing.price.isEmpty ? "" : ", \(listing.price)"
         let text = "\(listing.title)\(price)\n\(listing.location)\nSur Mobly"
         var items: [Any] = [text]
         // `src=share` lets the page that opens it credit the view to sharing.
@@ -1115,7 +1135,7 @@ struct ListingDetailView: View {
             Image(systemName: "bubble.left.slash.fill")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Color(hex: 0x6B6F80))
-            Text("Contact désactivé — ce propriétaire n'est plus disponible")
+            Text("Contact désactivé : ce propriétaire n'est plus disponible")
                 .font(.moblyBody(13, weight: .medium))
                 .foregroundStyle(Color(hex: 0x6B6F80))
                 .fixedSize(horizontal: false, vertical: true)
@@ -1197,7 +1217,7 @@ struct ListingDetailView: View {
                             .tint(Color.moblyPrimary)
                             .padding(.horizontal, 18)
                     } else {
-                        Text("Message")
+                        Text("Discuter")
                             .font(.moblyHeading(14))
                             .foregroundStyle(Color(hex: 0x3A4FF0))
                             .lineLimit(1)

@@ -173,6 +173,8 @@ struct EmailVerificationView: View {
 
     private func send() {
         guard canSend, !auth.isBusy else { return }
+        // Confirming the current address stays possible; only a new one is switchable.
+        if isChange { guard RemoteConfigStore.shared.can("profile.emailChange") else { return } }
         Task {
             if await auth.sendEmailCode(email: isChange ? trimmed : nil) {
                 otp = ""

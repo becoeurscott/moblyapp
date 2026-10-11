@@ -20,6 +20,7 @@ final class ListingStore: ObservableObject {
     /// Load "près de vous" for a position. Repeat calls for the same rounded
     /// position are skipped; a failure keeps whatever was there.
     func loadNearby(_ origin: LocationService.Approx, force: Bool = false) async {
+        guard RemoteConfigStore.shared.isEnabled("search.nearby") else { return }
         guard force || origin != nearbyOrigin else { return }
         guard let dtos = try? await MoblyAPI.shared.nearbyListings(lat: origin.lat, lng: origin.lng)
         else { return }
@@ -188,6 +189,7 @@ extension ListingDTO {
             lat: lat,
             lng: lng,
             priceUnitRaw: priceUnit,
+            minDurationMonths: minDurationMonths,
             distanceKm: distanceKm
         )
     }

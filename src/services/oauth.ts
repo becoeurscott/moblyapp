@@ -69,7 +69,10 @@ export async function verifyOAuthToken(
     const emailVerified = verifiedClaim === true || verifiedClaim === 'true';
 
     const name =
-      (typeof payload.name === 'string' && payload.name) ||
+      (typeof payload.name === 'string' && payload.name.trim()) ||
+      [payload.given_name, payload.family_name]
+        .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+        .join(' ') ||
       fallbackName ||
       undefined;
 

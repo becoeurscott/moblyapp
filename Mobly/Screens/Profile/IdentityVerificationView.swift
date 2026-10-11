@@ -148,7 +148,7 @@ struct IdentityVerificationView: View {
                         .foregroundStyle(Color.moblyTextPrimary)
                     Text(LT(store.resumeExpired
                             ? "La session précédente a expiré. Une nouvelle vérification sera lancée."
-                            : "La vérification n'a pas été finalisée. Reprenez-la pour obtenir votre badge — vous reprendrez là où vous vous êtes arrêté."))
+                            : "La vérification n'a pas été finalisée. Reprenez-la pour obtenir votre badge. Vous reprendrez là où vous vous êtes arrêté."))
                         .font(.moblyBody(12.5))
                         .foregroundStyle(Color(hex: 0x666666))
                         .fixedSize(horizontal: false, vertical: true)

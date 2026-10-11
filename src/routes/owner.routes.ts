@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
 import { requireAuth, requireOwner } from '../middleware/auth';
+import { featureGate } from '../middleware/gates';
 import { serializeListing, serializeUser } from '../lib/serialize';
 
 export const ownerRouter = Router();
@@ -25,6 +26,7 @@ ownerRouter.post(
   '/activate',
   requireAuth,
   requireOwner,
+  featureGate('owners.payment'),
   asyncHandler(async (req, res) => {
     const user = await prisma.user.update({
       where: { id: req.userId! },

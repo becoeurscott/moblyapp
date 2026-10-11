@@ -21,9 +21,14 @@ enum AdConfig {
 }
 
 struct AdBannerView: View {
+    @ObservedObject private var config = RemoteConfigStore.shared
+
+    /// Renders nothing while `ads.banner` is off; Home drops its padding too.
     var body: some View {
-        placeholder
-            .padding(.horizontal, 22)
+        if config.isEnabled("ads.banner") {
+            placeholder
+                .padding(.horizontal, 22)
+        }
     }
 
     private var placeholder: some View {

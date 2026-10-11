@@ -19,6 +19,7 @@ import { revokeAllForUser, revokeFamily } from '../../services/refresh';
 import { kickUser, emitToUsers, isOnline } from '../../realtime/hub';
 import { notifyUser } from '../../services/push';
 import { configSnapshot } from '../../services/config';
+import { sendEmailCode } from '../../services/emailCode';
 
 /**
  * Per-user controls: everything an operator can do to one account.
@@ -33,7 +34,7 @@ export const adminUsersRouter = Router();
 const userSelect = {
   id: true, fullName: true, email: true, phone: true,
   isOwner: true, isAdmin: true, adminRole: true, isActive: true,
-  verified: true, identityVerified: true, verifiedAt: true,
+  verified: true, identityVerified: true, verifiedAt: true, emailVerifiedAt: true,
   city: true, region: true, neighborhood: true, bio: true, locale: true,
   avatarUrl: true, avatarColor: true, membershipTier: true, membershipExpires: true,
   moblyScore: true, rating: true, adminNote: true,
@@ -518,6 +519,66 @@ adminUsersRouter.post(
       targetId: id,
       before: { identityVerified: before.identityVerified },
       after: { identityVerified: approved, reason: reason ?? null },
+    });
+    res.json({ user });
+  })
+);
+
+// ─────────────────────────────────────────────────────────────
+// E-mail confirmation
+// ─────────────────────────────────────────────────────────────
+
+/** POST /admin/users/:id/email/send-code — mail a fresh confirmation code to
+ *  the account's current address, through the same service (and the same
+ *  cooldown and hourly / daily caps) as the in-app "Renvoyer le code". */
+adminUsersRouter.post(
+  '/:id/email/send-code',
+  requirePermission('user.notify'),
+  asyncHandler(async (req, res) => {
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, email: true, emailVerifiedAt: true },
+    });
+    if (!user) throw new ApiError(404, 'Utilisateur introuvable', 'NOT_FOUND');
+    if (!user.email) throw new ApiError(422, "Ce compte n'a pas d'adresse e-mail.", 'VALIDATION_FAILED');
+    if (user.emailVerifiedAt) {
+      return res.json({ sent: false, alreadyVerified: true, email: user.email });
+    }
+    await sendEmailCode(user.id, user.email, 'verify');
+    await audit(req, {
+      action: 'user.email.sendCode', targetType: 'user', targetId: user.id,
+      after: { email: user.email },
+    });
+    res.json({ sent: true, email: user.email });
+  })
+);
+
+/** POST /admin/users/:id/email/verified — mark the current address confirmed
+ *  (or not) by hand, e.g. after support checked it with the user. */
+adminUsersRouter.post(
+  '/:id/email/verified',
+  requirePermission('user.edit'),
+  asyncHandler(async (req, res) => {
+    const { verified } = z.object({ verified: z.boolean().default(true) }).parse(req.body ?? {});
+    await assertCanActOnUser(req, req.params.id);
+    const before = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: { email: true, emailVerifiedAt: true },
+    });
+    if (!before) throw new ApiError(404, 'Utilisateur introuvable', 'NOT_FOUND');
+    if (verified && !before.email) {
+      throw new ApiError(422, "Ce compte n'a pas d'adresse e-mail.", 'VALIDATION_FAILED');
+    }
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { emailVerifiedAt: verified ? (before.emailVerifiedAt ?? new Date()) : null },
+      select: userSelect,
+    });
+    await audit(req, {
+      action: verified ? 'user.email.markVerified' : 'user.email.markUnverified',
+      targetType: 'user', targetId: req.params.id,
+      before: { emailVerifiedAt: before.emailVerifiedAt },
+      after: { emailVerifiedAt: user.emailVerifiedAt },
     });
     res.json({ user });
   })

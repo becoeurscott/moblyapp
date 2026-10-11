@@ -123,7 +123,23 @@ adminModerationRouter.get(
     const [items, total] = await Promise.all([
       prisma.message.findMany({
         where,
-        include: { sender: { select: { id: true, fullName: true, phone: true } } },
+        include: {
+          sender: { select: { id: true, fullName: true, phone: true, avatarColor: true } },
+          // Enough of the thread for the dashboard to open it straight from a
+          // search hit (participants, listing, freeze state).
+          thread: {
+            select: {
+              id: true, updatedAt: true, frozenAt: true, frozenReason: true,
+              listing: { select: { id: true, title: true, ownerId: true, tags: true } },
+              participants: {
+                select: {
+                  muted: true,
+                  user: { select: { id: true, fullName: true, avatarUrl: true, avatarColor: true } },
+                },
+              },
+            },
+          },
+        },
         orderBy: { createdAt: 'desc' },
         skip: page * pageSize,
         take: pageSize,

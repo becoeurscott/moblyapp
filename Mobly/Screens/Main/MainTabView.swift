@@ -66,8 +66,16 @@ struct MainTabView: View {
     }()
     @State private var selectedListing: Listing?
     @State private var showNotifications = false
+    /// The once-per-account welcome card shown on first arrival after signup.
+    @State private var welcomeBanner: WelcomeBannerContent?
+    /// Upcoming visit / pending requests reminder card.
+    @State private var visitReminder: VisitReminderContent?
+    @State private var visitReminderChecking = false
+    @Environment(\.scenePhase) private var scenePhase
     /// Set when a notification points at a visit; MessagesView opens the hub.
     @State private var showVisitsFromRoute = false
+    /// Which hub tab that visit belongs on for this user.
+    @State private var visitsRouteTab: VisitsHubView.Tab?
     /// Opened from the "Vous avez un espace à louer ?" notification.
     @State private var showBecomeOwnerFromRoute = false
     @State private var showOwnerDashboardFromRoute = false
@@ -138,18 +146,75 @@ struct MainTabView: View {
             // fetched rather than silently doing nothing.
             openListing(id: id, from: "notification")
 
-        case .visits:
+        case .visits(let visitId, let type):
+            guard config.can("visits.hub") else { return }
             withAnimation(Motion.quick) { tab = .messages }
-            showVisitsFromRoute = true
+            Task {
+                visitsRouteTab = await visitsHubTab(visitId: visitId, type: type)
+                showVisitsFromRoute = true
+            }
 
         case .becomeOwner:
             // Already an owner by the time they tap it: their dashboard.
             if Session.shared.isOwner { showOwnerDashboardFromRoute = true }
-            else { showBecomeOwnerFromRoute = true }
+            else if config.can("owners.signup") { showBecomeOwnerFromRoute = true }
 
         case .verifyEmail:
             showEmailFromRoute = true
         }
+    }
+
+    /// "Demandes reçues" when the user owns the space the visit is for,
+    /// "Mes demandes" when they asked for it. Compares the visit's owner and
+    /// visitor with the signed-in user; falls back to the notification type.
+    private func visitsHubTab(visitId: String?, type: String?) async -> VisitsHubView.Tab {
+        let store = VisitRequestStore.shared
+        let me = AuthStore.shared.user?.id
+        func lookup() -> VisitsHubView.Tab? {
+            guard let visitId, let me else { return nil }
+            let all = store.items + store.myRequests
+            guard let v = all.first(where: { $0.id == visitId }) else { return nil }
+            if v.ownerId == me { return .received }
+            if v.visitorId == me { return .mine }
+            return nil
+        }
+        if let t = lookup() { return t }
+        // Not cached yet: load both lists once, then try again.
+        await store.refreshMine(silent: true)
+        if Session.shared.isOwner { await store.refresh(silent: true) }
+        if let t = lookup() { return t }
+        switch (type ?? "").lowercased() {
+        case "visit.requested": return .received
+        case "visit.invited": return .mine
+        default: return Session.shared.isOwner ? .received : .mine
+        }
+    }
+
+    /// First arrival on Home after signup: refresh the notifications so the
+    /// bell shows the welcome as unread, then slide the welcome card in.
+    private func presentWelcomeIfNeeded() async {
+        guard WelcomeBannerGate.consume() else { return }
+        await UserDataStore.shared.loadNotifications()
+        try? await Task.sleep(nanoseconds: 600_000_000)
+        let content = WelcomeBannerContent.make(from: UserDataStore.shared.notifications)
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) { welcomeBanner = content }
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        if welcomeBanner == content {
+            withAnimation(Motion.standard) { welcomeBanner = nil }
+        }
+    }
+
+    /// Launch, foreground and every arrival on Home: show the visit reminder
+    /// card when a confirmed visit is within 24h (once per visit and window),
+    /// or once per session when an owner has requests waiting.
+    private func checkVisitReminder() async {
+        guard tab == .home, visitReminder == nil, welcomeBanner == nil,
+              !visitReminderChecking, config.isEnabled("visits.hub") else { return }
+        visitReminderChecking = true
+        defer { visitReminderChecking = false }
+        if VisitReminderCenter.isDemo { try? await Task.sleep(nanoseconds: 800_000_000) }
+        guard let content = await VisitReminderCenter.check(), tab == .home else { return }
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { visitReminder = content }
     }
 
     var body: some View {
@@ -234,7 +299,7 @@ struct MainTabView: View {
                 .allowsHitTesting(tab == .explore)
                 }
 
-                MessagesView(openVisits: $showVisitsFromRoute)
+                MessagesView(openVisits: $showVisitsFromRoute, openVisitsTab: visitsRouteTab)
                     .opacity(tab == .messages ? 1 : 0)
                     .allowsHitTesting(tab == .messages)
 
@@ -368,6 +433,46 @@ struct MainTabView: View {
             guard let id = note.object as? String else { return }
             openListing(id: id, from: "share")
         }
+        .overlay(alignment: .top) {
+            if let content = welcomeBanner {
+                WelcomeBannerView(
+                    content: content,
+                    onTap: {
+                        withAnimation(Motion.standard) { welcomeBanner = nil }
+                        showNotifications = true
+                    },
+                    onDismiss: { withAnimation(Motion.standard) { welcomeBanner = nil } }
+                )
+                .padding(.top, 4)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(10)
+            }
+        }
+        .task { await presentWelcomeIfNeeded() }
+        .overlay {
+            if let r = visitReminder {
+                VisitReminderCard(
+                    content: r,
+                    onOpen: {
+                        withAnimation(Motion.standard) { visitReminder = nil }
+                        guard config.can("visits.hub") else { return }
+                        withAnimation(Motion.quick) { tab = .messages }
+                        visitsRouteTab = r.tab
+                        showVisitsFromRoute = true
+                    },
+                    onDismiss: { withAnimation(Motion.standard) { visitReminder = nil } }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                .zIndex(20)
+            }
+        }
+        .task { await checkVisitReminder() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await checkVisitReminder() } }
+        }
+        .onChange(of: tab) { _, new in
+            if new == .home { Task { await checkVisitReminder() } }
+        }
         .fullScreenCover(isPresented: $showNotifications) {
             NotificationsView(
                 onOpen: { target in
@@ -416,6 +521,11 @@ struct MainTabView: View {
         .onChange(of: push.pendingThreadId) { _, threadId in
             guard threadId != nil, config.isEnabled("chat.enabled") else { return }
             withAnimation(Motion.quick) { tab = .messages }
+        }
+        .onChange(of: push.pendingVisitId) { _, visitId in
+            guard let visitId else { return }
+            push.pendingVisitId = nil
+            route(to: .visits(visitId: visitId, type: nil))
         }
     }
 }

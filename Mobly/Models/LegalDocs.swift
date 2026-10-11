@@ -193,14 +193,14 @@ enum LegalLibrary {
                 heading: "1. Services concernés",
                 body: ["Le « Boost » est un service de mise en avant qui remonte une annonce dans les résultats de recherche pendant une durée déterminée. Les formules et tarifs affichés dans l'application au moment de l'achat font foi."],
                 bullets: [
-                    "3 jours — 500 FCFA",
-                    "7 jours — 1 000 FCFA",
-                    "30 jours — 3 000 FCFA",
+                    "3 jours : 500 FCFA",
+                    "7 jours : 1 000 FCFA",
+                    "30 jours : 3 000 FCFA",
                     "Les prix sont exprimés en francs CFA, toutes taxes comprises le cas échéant."
                 ]
             ),
             LegalSection(
-                heading: "2. Ce que le boost garantit — et ne garantit pas",
+                heading: "2. Ce que le boost garantit (et ne garantit pas)",
                 body: ["Le Boost garantit un emplacement privilégié dans les résultats pendant la durée achetée. Il ne garantit ni un nombre de vues, ni un nombre de contacts, ni la location effective de l'espace."]
             ),
             LegalSection(
@@ -253,7 +253,7 @@ enum LegalLibrary {
                     "Identité et contact : nom, numéro de téléphone, adresse e-mail, photo de profil.",
                     "Compte : rôle (visiteur ou propriétaire), statut de vérification, langue, préférences.",
                     "Annonces : titre, description, adresse ou quartier, prix, photos, équipements.",
-                    "Communications : messages, notes vocales, journaux d'appels internes (date, durée — jamais le contenu audio d'un appel).",
+                    "Communications : messages, notes vocales, journaux d'appels internes (date et durée, jamais le contenu audio d'un appel).",
                     "Usage : pages consultées, annonces vues, favoris, recherches enregistrées.",
                     "Technique : modèle d'appareil, version du système, identifiant d'installation, adresse IP, journaux d'erreurs.",
                     "Localisation approximative, uniquement si vous l'autorisez, pour afficher les espaces proches."

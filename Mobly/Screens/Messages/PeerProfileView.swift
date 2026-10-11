@@ -16,6 +16,7 @@ struct PeerProfileView: View {
     @ObservedObject private var listingStore = ListingStore.shared
     @ObservedObject private var prefs = ThreadPrefs.shared
     @ObservedObject private var blocked = BlockedUsers.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
 
     @State private var loaded: MoblyAPI.PublicUserDTO?
     @State private var loading = true
@@ -44,7 +45,8 @@ struct PeerProfileView: View {
         // profile then advertised annonces its owner had never published.
         // `Listing.ownerId` is populated from the feed in ListingStore, so
         // the identity is available and nothing has to be inferred.
-        return listingStore.listings.filter { $0.ownerId == id }
+        // Only spaces currently on offer; the server count matches this rule.
+        return listingStore.listings.filter { $0.ownerId == id && $0.available }
     }
 
     var body: some View {
@@ -134,7 +136,10 @@ struct PeerProfileView: View {
                 divider
                 infoRow(icon: "house.fill",
                         label: "Annonces publiées",
-                        value: "\(loaded?.listingsCount ?? peerListings.count)",
+                        // The listings shown below come from the public feed (live and
+                        // available only), so the number matches them; the
+                        // server count is the fallback before they load.
+                        value: "\(peerListings.isEmpty ? (loaded?.listingsCount ?? 0) : peerListings.count)",
                         tint: Color(hex: 0x4C9BFF))
             }
             if let avg = loaded?.avgRating, avg > 0 {
@@ -188,12 +193,18 @@ struct PeerProfileView: View {
 
     private var actionRow: some View {
         HStack(spacing: 12) {
-            actionButton("phone.fill", "Appeler", Color.moblyPrimary) { onCall() }
-            actionButton("video.fill", "Vidéo", Color.moblyPrimary) { onVideo() }
-            actionButton(flags.muted ? "bell.fill" : "bell.slash.fill",
-                         flags.muted ? "Rétablir" : "Sourdine",
-                         Color(hex: 0x8B5CF6)) {
-                prefs.toggleMute(thread.id)
+            if config.isEnabled("calls.audio") {
+                actionButton("phone.fill", "Appeler", Color.moblyPrimary) { onCall() }
+            }
+            if config.isEnabled("calls.video") {
+                actionButton("video.fill", "Vidéo", Color.moblyPrimary) { onVideo() }
+            }
+            if config.isEnabled("chat.organize") {
+                actionButton(flags.muted ? "bell.fill" : "bell.slash.fill",
+                             flags.muted ? "Rétablir" : "Sourdine",
+                             Color(hex: 0x8B5CF6)) {
+                    prefs.toggleMute(thread.id)
+                }
             }
         }
         .padding(.horizontal, 18)
@@ -255,13 +266,15 @@ struct PeerProfileView: View {
             } label: {
                 dangerRow(icon: "flag.fill", label: "Signaler", tint: Color(hex: 0xE5484D))
             }
-            divider
-            Button {
-                confirmBlock = true
-            } label: {
-                dangerRow(icon: isBlocked ? "hand.raised.slash.fill" : "hand.raised.fill",
-                          label: isBlocked ? "Débloquer" : "Bloquer",
-                          tint: Color(hex: 0xE5484D))
+            if config.isEnabled("users.block") {
+                divider
+                Button {
+                    confirmBlock = true
+                } label: {
+                    dangerRow(icon: isBlocked ? "hand.raised.slash.fill" : "hand.raised.fill",
+                              label: isBlocked ? "Débloquer" : "Bloquer",
+                              tint: Color(hex: 0xE5484D))
+                }
             }
         }
         .background(RoundedRectangle(cornerRadius: 18).fill(.white))

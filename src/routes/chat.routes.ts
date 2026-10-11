@@ -319,6 +319,7 @@ chatRouter.get(
 chatRouter.delete(
   '/:id',
   requireAuth,
+  featureGate('chat.deleteThread'),
   asyncHandler(async (req, res) => {
     await assertParticipant(req.params.id, req.userId!);
     await prisma.threadParticipant.update({
@@ -384,6 +385,17 @@ chatRouter.post(
           'USER_RESTRICTED'
         );
       }
+    }
+
+    // Replies and shared positions ride on ordinary messages, so their
+    // switches are checked here rather than by a route-level gate. A position
+    // is recognised by the prefix the app writes ("📍 Ma position: …").
+    const cfg = await getConfig();
+    if (replyToId && !isFlagEnabled('chat.reply', cfg)) {
+      throw new ApiError(403, flagMessage('chat.reply', cfg), 'FEATURE_DISABLED');
+    }
+    if (kind === 'TEXT' && text.startsWith('📍 Ma position') && !isFlagEnabled('chat.location', cfg)) {
+      throw new ApiError(403, flagMessage('chat.location', cfg), 'FEATURE_DISABLED');
     }
 
     assertNotBlocked(text);
@@ -500,6 +512,7 @@ chatRouter.post(
 chatRouter.delete(
   '/:id/messages/:mid',
   requireAuth,
+  featureGate('chat.delete'),
   asyncHandler(async (req, res) => {
     await assertParticipant(req.params.id, req.userId!);
     const { mode } = z

@@ -16,10 +16,13 @@ struct VerifiedBadge: View {
     /// Blue everywhere by default. Overridden to white only where the badge
     /// sits on a dark photo, where the blue loses too much contrast to read.
     var tint: Color = .moblyPrimary
+    /// Instagram-sized: the seal reads at about three quarters of the size
+    /// callers ask for, small next to the name rather than competing with it.
+    var scale: CGFloat = 0.75
 
     var body: some View {
         Image(systemName: "checkmark.seal.fill")
-            .font(.system(size: size, weight: .semibold))
+            .font(.system(size: size * scale, weight: .semibold))
             .foregroundStyle(tint)
     }
 }
@@ -34,7 +37,7 @@ struct VerifiedAvatarBadge: View {
         ZStack {
             Circle().fill(ring).frame(width: size + 4, height: size + 4)
             Circle().fill(.white).frame(width: size * 0.62, height: size * 0.62)
-            VerifiedBadge(size: size)
+            VerifiedBadge(size: size, scale: 1)
         }
     }
 }

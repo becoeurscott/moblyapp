@@ -346,7 +346,15 @@ signupRouter.post(
       );
     }
 
-    const existing = await prisma.user.findUnique({ where: { email: identity.email } });
+    let existing = await prisma.user.findUnique({ where: { email: identity.email } });
+    // Older accounts kept the "Utilisateur Mobly" placeholder; take the
+    // provider's real name now so greetings use it.
+    if (existing && existing.fullName === 'Utilisateur Mobly' && identity.fullName) {
+      existing = await prisma.user.update({
+        where: { id: existing.id },
+        data: { fullName: identity.fullName },
+      });
+    }
     if (existing) {
       const { token, refresh } = await issueSession(existing.id, existing.phone, req);
       return res.json({

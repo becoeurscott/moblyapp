@@ -7,6 +7,7 @@ struct OwnerDashboardView: View {
     @ObservedObject private var store = OwnerListings.shared
     @ObservedObject private var visits = VisitRequestStore.shared
     @ObservedObject private var auth = AuthStore.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
     /// Aggregate figures + real 30-day deltas from /owner/overview.
     @State private var overview: MoblyAPI.OwnerOverview?
     /// Tracks the network request separately from the visible placeholder. The
@@ -82,7 +83,9 @@ struct OwnerDashboardView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            if ownerLocked {
+            if !config.isEnabled("owners.dashboard") {
+                FeatureOffView(flag: "owners.dashboard", title: "Espace propriétaire indisponible")
+            } else if ownerLocked {
                 lockedView
             } else {
                 ScrollView(showsIndicators: false) {
@@ -90,7 +93,7 @@ struct OwnerDashboardView: View {
                         if let end = trialEndsAt { trialBanner(end) }
                         else if let days = trialDaysLeft { trialBanner(days) }
                         performanceCard
-                        visitsCard
+                        if config.isEnabled("visits.owner") { visitsCard }
                         filterBar
                         LazyVStack(spacing: 16) {
                             ForEach(filtered) { annonce in
@@ -100,7 +103,7 @@ struct OwnerDashboardView: View {
                                         await store.toggleAvailabilityAsync(annonce)
                                     },
                                     onBoost: { boostAnnonce = annonce },
-                                    onStats: { statsAnnonce = annonce },
+                                    onStats: { if config.can("owners.stats") { statsAnnonce = annonce } },
                                     onEdit: { editAnnonce = annonce },
                                     onDelete: {
                                         Task {
@@ -242,7 +245,7 @@ struct OwnerDashboardView: View {
                             .contentTransition(.numericText(countsDown: true))
                     }
                     Spacer(minLength: 6)
-                    Button { showReactivate = true } label: {
+                    Button { if config.can("owners.payment") { showReactivate = true } } label: {
                         Text("Souscrire")
                             .font(.moblyHeading(12))
                             .foregroundStyle(Color.moblyPrimary)
@@ -288,7 +291,7 @@ struct OwnerDashboardView: View {
                     .font(.moblyBody(11)).foregroundStyle(.white.opacity(0.85))
             }
             Spacer(minLength: 6)
-            Button { showReactivate = true } label: {
+            Button { if config.can("owners.payment") { showReactivate = true } } label: {
                 Text("Souscrire")
                     .font(.moblyHeading(12))
                     .foregroundStyle(Color.moblyPrimary)
@@ -340,7 +343,7 @@ struct OwnerDashboardView: View {
                     .shadow(color: Color(hex: 0x14152A).opacity(0.05), radius: 12, y: 4))
                 .padding(.horizontal, 20)
 
-                Button { showReactivate = true } label: {
+                Button { if config.can("owners.payment") { showReactivate = true } } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "lock.open.fill").font(.system(size: 14, weight: .bold))
                         Text("Souscrire · 5 000 FCFA").font(.moblyHeading(14))
@@ -416,7 +419,11 @@ struct OwnerDashboardView: View {
                 // a lapsed owner could publish straight past the lock. It now
                 // routes to the payment sheet instead of the publish wizard.
                 Button {
-                    if ownerLocked { showReactivate = true } else { showAddListing = true }
+                    if ownerLocked {
+                        if config.can("owners.payment") { showReactivate = true }
+                    } else {
+                        showAddListing = true
+                    }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: ownerLocked ? "lock.fill" : "plus")
@@ -454,8 +461,7 @@ struct OwnerDashboardView: View {
 
     /// "Salut Alex" — first name only, greeting alone when we have no name.
     private var greeting: String {
-        let full = (auth.user?.fullName ?? "").trimmingCharacters(in: .whitespaces)
-        let first = full.split(separator: " ").first.map(String.init) ?? ""
+        let first = Session.greetingFirstName(auth.user?.fullName, email: auth.user?.email)
         return first.isEmpty ? "Salut" : "Salut \(first)"
     }
 
@@ -607,6 +613,7 @@ struct OwnerDashboardView: View {
         .shadow(color: Color(hex: 0x1A2266).opacity(0.35), radius: 20, y: 10)
         .contentShape(RoundedRectangle(cornerRadius: 24))
         .onTapGesture {
+            guard config.can("owners.stats") else { return }
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             showOverallStats = true
         }
@@ -802,7 +809,8 @@ private struct AnnonceCard: View {
             .stroke(Color(hex: 0xE2E4EC), lineWidth: dimmed ? 1 : 0))
         .animation(Motion.standard, value: annonce.available)
         .contextMenu {
-            if !annonce.isPublishing {
+            // Discarding a send that never reached the server is not a delete.
+            if !annonce.isPublishing && (local || config.isEnabled("listings.delete")) {
                 Button(role: .destructive, action: local ? onDiscard : onDelete) {
                     Label("Supprimer l'annonce", systemImage: "trash")
                 }
@@ -986,6 +994,7 @@ private struct AnnonceCard: View {
             .background(RoundedRectangle(cornerRadius: 11)
                 .fill(annonce.available ? Color(hex: 0xE9F9EF) : Color(hex: 0xF1F2F6)))
             Spacer()
+            if config.isEnabled("listings.availability") {
             Button {
                 guard !toggling else { return }
                 Task {
@@ -1010,6 +1019,7 @@ private struct AnnonceCard: View {
             }
             .disabled(toggling)
             .animation(Motion.quick, value: toggling)
+            }
         }
     }
 
@@ -1049,10 +1059,14 @@ private struct AnnonceCard: View {
                 if config.isEnabled("listings.edit") {
                     actionButton("Modifier", "pencil", fg: 0x3A4FF0, bg: 0xEEF0FE, action: onEdit)
                 }
-                actionButton("Stats", "chart.bar.fill", fg: 0x666F80, bg: 0xF1F2F6, action: onStats)
+                if config.isEnabled("owners.stats") {
+                    actionButton("Stats", "chart.bar.fill", fg: 0x666F80, bg: 0xF1F2F6, action: onStats)
+                }
             } else {
-                actionButton("Supprimer", "trash.fill", fg: 0xE5484D, bg: 0xFDEDED) {
-                    confirmDelete = true
+                if config.isEnabled("listings.delete") {
+                    actionButton("Supprimer", "trash.fill", fg: 0xE5484D, bg: 0xFDEDED) {
+                        confirmDelete = true
+                    }
                 }
                 if config.isEnabled("listings.edit") {
                     actionButton("Modifier", "pencil", fg: 0x3A4FF0, bg: 0xEEF0FE, action: onEdit)

@@ -7,6 +7,7 @@ struct SearchResultsView: View {
 
     @ObservedObject private var listingStore = ListingStore.shared
     @ObservedObject private var location = LocationService.shared
+    @ObservedObject private var config = RemoteConfigStore.shared
     /// The whole catalogue ranked by distance from the user, fetched from the
     /// server — the app only keeps the newest 200 locally, so "Voir tout"
     /// would otherwise stop at 200. Empty until a position is known.
@@ -40,6 +41,8 @@ struct SearchResultsView: View {
 
     private var results: [Listing] {
         var base: [Listing]
+        // Dropped, not just left unrefreshed, when proximity is switched off.
+        let allByDistance = config.isEnabled("search.nearby") ? self.allByDistance : []
         if allByDistance.isEmpty {
             base = MoblyData.results(for: activeChip)
         } else if activeChip == "Tous" {
@@ -64,6 +67,7 @@ struct SearchResultsView: View {
 
     /// Fetch every annonce, nearest first, in pages of 500 (the API's cap).
     private func loadAllByDistance(_ o: LocationService.Approx) async {
+        guard config.isEnabled("search.nearby") else { return }
         var all: [Listing] = []
         var offset = 0
         while offset < 5_000 {
@@ -86,7 +90,7 @@ struct SearchResultsView: View {
     /// Nearest annonces at the top when the position is known. Annonces with
     /// no map pin keep their order, after the located ones.
     private func nearestFirst(_ list: [Listing]) -> [Listing] {
-        guard let o = origin else { return list }
+        guard let o = origin, config.isEnabled("search.nearby") else { return list }
         func km(_ l: Listing) -> Double? {
             guard let lat = l.lat, let lng = l.lng, lat != 0 || lng != 0 else { return nil }
             let r = 6371.0, dLat = (lat - o.lat) * .pi / 180, dLng = (lng - o.lng) * .pi / 180
@@ -110,6 +114,7 @@ struct SearchResultsView: View {
         if !filters.activities.isEmpty {
             let matchesActivity = filters.activities.contains { act in
                 l.deals.contains(act) || (act == "Commercial" && l.category == "Commercial")
+                    || (act == "Court séjour" && l.isShortStay)
             }
             if !matchesActivity { return false }
         }
@@ -170,7 +175,7 @@ struct SearchResultsView: View {
             let n = Int(digits.dropLast().filter(\.isNumber)) ?? 0
             return (n, .max)
         }
-        let parts = b.components(separatedBy: "–").map { Int($0.filter(\.isNumber)) ?? 0 }
+        let parts = b.replacingOccurrences(of: " à ", with: "–").components(separatedBy: "–").map { Int($0.filter(\.isNumber)) ?? 0 }
         return parts.count == 2 ? (parts[0], parts[1]) : nil
     }
 
@@ -254,6 +259,9 @@ struct SearchResultsView: View {
                     .foregroundStyle(Color.moblyTextPrimary)
                     .focused($searchFocused)
                     .autocorrectionDisabled()
+                    // The category or city the screen opened on stays; only
+                    // typing a new search is switched off.
+                    .disabled(!config.isEnabled("search.enabled"))
                 if !query.isEmpty {
                     Button { query = "" } label: {
                         Image(systemName: "xmark.circle.fill")
@@ -261,6 +269,7 @@ struct SearchResultsView: View {
                             .foregroundStyle(Color(hex: 0xC4C7D2))
                     }
                 }
+                if config.isEnabled("search.filters") {
                 Button { showFilters = true } label: {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 15, weight: .semibold))
@@ -275,6 +284,7 @@ struct SearchResultsView: View {
                                     .offset(x: 8, y: -8)
                             }
                         }
+                }
                 }
             }
             .padding(.horizontal, 14)

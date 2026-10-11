@@ -27,8 +27,27 @@ final class Session: ObservableObject {
         didSet { UserDefaults.standard.set(userId, forKey: "userId") }
     }
 
-    var firstName: String {
-        fullName.split(separator: " ").first.map(String.init) ?? fullName
+    @MainActor var firstName: String {
+        Self.greetingFirstName(AuthStore.shared.user?.fullName ?? fullName,
+                               email: AuthStore.shared.user?.email)
+    }
+
+    /// First name to greet with, or "" when there is no real name. Never
+    /// derived from the e-mail: an address, its local part or the server's
+    /// "Utilisateur Mobly" placeholder all give "" so the copy falls back to a
+    /// plain "Bonjour" / "Bienvenue".
+    static func greetingFirstName(_ fullName: String?, email: String? = nil) -> String {
+        let full = (fullName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if full.isEmpty || full.contains("@") || full == "Utilisateur Mobly" { return "" }
+        if let local = email?.split(separator: "@").first,
+           full.lowercased() == local.lowercased() { return "" }
+        return full.split(separator: " ").first.map(String.init) ?? ""
+    }
+
+    /// Full name for headers, or nil when there is no real name.
+    static func realFullName(_ fullName: String?, email: String? = nil) -> String? {
+        greetingFirstName(fullName, email: email).isEmpty
+            ? nil : fullName?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private init() {

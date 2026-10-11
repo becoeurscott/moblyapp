@@ -122,7 +122,7 @@ extension SavedSearchItem {
         if filters.priceBucket != "Toutes" && !filters.priceBucket.isEmpty {
             bits.append(filters.priceBucket + " FCFA")
         } else if !filters.minPrice.isEmpty || !filters.maxPrice.isEmpty {
-            let range = "\(filters.minPrice.isEmpty ? "0" : filters.minPrice) – \(filters.maxPrice.isEmpty ? "∞" : filters.maxPrice) FCFA"
+            let range = "\(filters.minPrice.isEmpty ? "0" : filters.minPrice) à \(filters.maxPrice.isEmpty ? "∞" : filters.maxPrice) FCFA"
             bits.append(range)
         }
         if bits.isEmpty { return query.isEmpty ? "Toutes les annonces" : query }

@@ -541,8 +541,8 @@ struct FilterPanelView: View {
     private func buckets(from prices: [Int]) -> [String] {
         guard prices.count >= 3 else {
             // Not enough data to compute — fall back to coarse defaults.
-            return ["< 20 000", "20 000 – 50 000", "50 000 – 100 000",
-                    "100 000 – 250 000", "250 000+"]
+            return ["< 20 000", "20 000 à 50 000", "50 000 à 100 000",
+                    "100 000 à 250 000", "250 000+"]
         }
         let q = [0.20, 0.40, 0.60, 0.80].map { p -> Int in
             let idx = Int(Double(prices.count - 1) * p)
@@ -550,9 +550,9 @@ struct FilterPanelView: View {
         }
         return [
             "< \(format(q[0]))",
-            "\(format(q[0])) – \(format(q[1]))",
-            "\(format(q[1])) – \(format(q[2]))",
-            "\(format(q[2])) – \(format(q[3]))",
+            "\(format(q[0])) à \(format(q[1]))",
+            "\(format(q[1])) à \(format(q[2]))",
+            "\(format(q[2])) à \(format(q[3]))",
             "\(format(q[3]))+",
         ]
     }
@@ -584,7 +584,7 @@ struct FilterPanelView: View {
             let n = Int(digits.dropLast().filter(\.isNumber)) ?? 0
             return (n, .max)
         }
-        let parts = b.components(separatedBy: "–").map {
+        let parts = b.replacingOccurrences(of: " à ", with: "–").components(separatedBy: "–").map {
             Int($0.filter(\.isNumber)) ?? 0
         }
         if parts.count == 2 { return (parts[0], parts[1]) }

@@ -139,7 +139,7 @@ private struct WelcomeCard: View {
                 .lineSpacing(1)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("Chambres, bureaux, boutiques et plus — près de vous.")
+            Text("Chambres, bureaux, boutiques et plus, près de vous.")
                 .font(.moblyBody(13))
                 .foregroundStyle(Color(hex: 0x9A9DAC))
                 .multilineTextAlignment(.center)

@@ -207,7 +207,7 @@ struct LegalDocumentView: View {
                 Text("Une question sur ce document ?")
                     .font(.moblyHeading(13.5))
                     .foregroundStyle(Color.moblyTextPrimary)
-                Text("Écrivez-nous à \(LegalCompany.email) — nous répondons sous 30 jours au plus tard.")
+                Text("Écrivez-nous à \(LegalCompany.email), nous répondons sous 30 jours au plus tard.")
                     .font(.moblyBody(12))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
                     .fixedSize(horizontal: false, vertical: true)

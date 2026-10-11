@@ -19,7 +19,7 @@ struct OnboardingSlide2ListingView: View {
             Spacer(minLength: 8)
 
             VStack(alignment: .leading, spacing: 0) {
-                PageIndicator(count: 3, current: 2)
+                PageIndicator(count: 2, current: 1)
                     .padding(.bottom, 22)
 
                 Text("Publiez et boostez vos annonces")
@@ -28,7 +28,7 @@ struct OnboardingSlide2ListingView: View {
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Mettez votre espace en ligne gratuitement, puis boostez-le pour passer en tête et toucher jusqu'à 3× plus de locataires — dès 500 FCFA.")
+                Text("Mettez votre espace en ligne gratuitement, puis boostez-le pour passer en tête et toucher jusqu'à 3× plus de locataires, dès 500 FCFA.")
                     .font(.moblyBody(14))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
                     .lineSpacing(3)

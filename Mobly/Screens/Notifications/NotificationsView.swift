@@ -4,7 +4,9 @@ import SwiftUI
 enum NotificationTarget: Equatable {
     case thread(String)
     case listing(String)
-    case visits
+    /// The visits hub. `visitId` and the server `type` let the router pick
+    /// "Demandes reçues" (owner) or "Mes demandes" (requester).
+    case visits(visitId: String? = nil, type: String? = nil)
     /// Start the become-owner flow (the "Vous avez un espace à louer ?" invite).
     case becomeOwner
     /// Open the e-mail confirmation screen.
@@ -98,9 +100,14 @@ struct MoblyNotification: Identifiable {
         case "verify_email": return .verifyEmail
         default: break
         }
+        // A visit notification opens the visits hub on the right tab, even
+        // when it also carries a thread or a listing.
+        if let v = payload["visitId"], !v.isEmpty {
+            return .visits(visitId: v, type: payload["_type"])
+        }
         if let t = payload["threadId"], !t.isEmpty { return .thread(t) }
         if let l = payload["listingId"], !l.isEmpty { return .listing(l) }
-        if payload["visitId"] != nil || kind == .visit { return .visits }
+        if kind == .visit { return .visits(visitId: nil, type: payload["_type"]) }
         return nil
     }
 
@@ -110,7 +117,7 @@ struct MoblyNotification: Identifiable {
     static func from(_ dto: NotificationDTO) -> MoblyNotification {
         let k: Kind
         switch (dto.type ?? "").uppercased() {
-        case "VISIT", "VISIT_REQUEST", "VISIT_CONFIRMED":  k = .visit
+        case let t where t.hasPrefix("VISIT"):              k = .visit
         case "MATCH", "SAVED_SEARCH":                       k = .match
         case "PRICE_DROP":                                  k = .priceDrop
         case "VERIFIED":                                    k = .verified
@@ -130,7 +137,9 @@ struct MoblyNotification: Identifiable {
             time: Self.relative(dto.createdAt),
             createdAt: dto.createdAt,
             unread: !dto.read,
-            payload: dto.payload ?? [:]
+            // Keep the server type next to the payload: the visit router
+            // reads it to tell a received request from one the user sent.
+            payload: (dto.payload ?? [:]).merging(["_type": dto.type ?? ""]) { a, _ in a }
         )
     }
 

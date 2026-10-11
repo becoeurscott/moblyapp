@@ -41,7 +41,9 @@ struct ProfileView: View {
     /// green "Vérifié" next to it — directly contradicting the red "Identité
     /// non vérifiée" badge on the card a few points above it.
     private var account: [MenuItem] { [
-        MenuItem(label: "Modifier le profil", icon: "square.and.pencil", iconBg: 0xEEF0FE, iconColor: 0x3A4FF0, route: .editProfile),
+        config.isEnabled("profile.edit")
+            ? MenuItem(label: "Modifier le profil", icon: "square.and.pencil", iconBg: 0xEEF0FE, iconColor: 0x3A4FF0, route: .editProfile)
+            : nil,
         !identityVerified && !config.isEnabled("identity.verification") ? nil : MenuItem(label: "Vérification d'identité",
                  icon: identityVerified ? "checkmark.shield.fill" : "exclamationmark.shield.fill",
                  iconBg: identityVerified ? 0xE9F9EF : 0xFFF4E5,
@@ -61,7 +63,7 @@ struct ProfileView: View {
     /// The row is gated rather than deleted: the String Catalog and the
     /// locale wiring are still there, so re-enabling is a one-line change.
     private var prefs: [MenuItem] { [
-        AppLang.selectionEnabled
+        AppLang.selectionEnabled && config.isEnabled("settings.language")
             ? MenuItem(label: "Langue", icon: "globe", iconBg: 0xEAF3FF, iconColor: 0x4C9BFF,
                        value: lang.code == "en" ? "English" : "Français", route: .language)
             : nil,
@@ -239,7 +241,9 @@ struct ProfileView: View {
     // session has actually been checked. While the check is in flight the card
     // stays deliberately neutral rather than asserting either way.
     private var displayName: String {
-        if let name = auth.user?.fullName { return name }
+        if let u = auth.user {
+            return Session.realFullName(u.fullName, email: u.email) ?? "Mon compte"
+        }
         return auth.isRestoringSession ? "…" : "Invité"
     }
     private var displayCity: String {
@@ -410,11 +414,13 @@ struct ProfileView: View {
                     Text(LT(title))
                         .font(.moblyHeading(15.5))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                     Text(LT(subtitle))
                         .font(.moblyBody(11.5))
                         .foregroundStyle(.white.opacity(0.6))
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
 
                 Spacer(minLength: 4)
@@ -608,8 +614,7 @@ struct ProfileView: View {
     /// First name for the farewell — falls back to a neutral greeting when
     /// the account has no name (or the user was browsing as a guest).
     private var firstName: String {
-        let full = AuthStore.shared.user?.fullName ?? Session.shared.fullName
-        let first = full.split(separator: " ").first.map(String.init) ?? ""
+        let first = Session.shared.firstName
         return first.isEmpty ? "et à très vite" : first
     }
 }

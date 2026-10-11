@@ -19,6 +19,8 @@ final class PushService: NSObject, ObservableObject {
 
     /// Thread to open, set when a notification is tapped.
     @Published var pendingThreadId: String?
+    /// Visit to show in the visits hub, set when a visit notification is tapped.
+    @Published var pendingVisitId: String?
 
     private var deviceToken: String?
     private let askedKey = "pushPromptShown"
@@ -137,7 +139,10 @@ extension PushService: UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse
     ) async {
         let info = response.notification.request.content.userInfo
-        if let threadId = info["threadId"] as? String {
+        if let visitId = info["visitId"] as? String, !visitId.isEmpty {
+            // Visit pushes open "Mes demandes" or "Demandes reçues", not the chat.
+            await MainActor.run { PushService.shared.pendingVisitId = visitId }
+        } else if let threadId = info["threadId"] as? String {
             await MainActor.run { PushService.shared.pendingThreadId = threadId }
         }
     }

@@ -61,3 +61,40 @@ export function activeOwnerRelationWhere() {
     ],
   };
 }
+
+/**
+ * Where an owner stands with the trial, as the admin dashboard filters it:
+ * - `trial`: unpaid, trial started and still running
+ * - `locked`: unpaid, trial ended — listings hidden until payment
+ * - `paid`: inscription fee paid
+ * - `grandfathered`: unpaid with no trial start (owner from before the trial)
+ */
+export const OWNER_STATUSES = ['trial', 'locked', 'paid', 'grandfathered'] as const;
+export type OwnerStatus = (typeof OWNER_STATUSES)[number];
+
+/**
+ * Prisma `User` filter for one owner status. Same cutoff as
+ * `activeOwnerRelationWhere`, and the same care with NULLs: every branch names
+ * `ownerTrialStartedAt` explicitly instead of negating a comparison.
+ */
+export function ownerStatusWhere(status: OwnerStatus) {
+  const cutoff = new Date(Date.now() - OWNER_TRIAL_DAYS * DAY_MS);
+  switch (status) {
+    case 'paid':
+      return { isOwner: true, ownerPaid: true };
+    case 'grandfathered':
+      return { isOwner: true, ownerPaid: false, ownerTrialStartedAt: null };
+    case 'trial':
+      return { isOwner: true, ownerPaid: false, ownerTrialStartedAt: { gte: cutoff } };
+    case 'locked':
+      return { isOwner: true, ownerPaid: false, ownerTrialStartedAt: { lt: cutoff } };
+  }
+}
+
+/** Status of one owner (null for non-owners). */
+export function ownerStatusOf(u: OwnerFields): OwnerStatus | null {
+  if (!u.isOwner) return null;
+  if (u.ownerPaid) return 'paid';
+  if (!u.ownerTrialStartedAt) return 'grandfathered';
+  return ownerTrialEndsAt(u.ownerTrialStartedAt)!.getTime() > Date.now() ? 'trial' : 'locked';
+}

@@ -2,6 +2,7 @@ import Foundation
 import CoreLocation
 import Combine
 import UIKit
+import SwiftUI
 
 /// Device location → city name, plus an approximate position for "près de
 /// vous".
@@ -79,18 +80,17 @@ final class LocationService: NSObject, ObservableObject {
     // MARK: - Tracking
 
     /// Start following the position — called on launch and every return to the
-    /// foreground. Asks for permission the first time unless `prompt` is false;
-    /// safe to call repeatedly.
+    /// foreground. Safe to call repeatedly.
     ///
-    /// Signed-out launches pass `prompt: false`: the signup flow ends on an
-    /// explainer screen that asks for location itself, and a system dialog
-    /// popping over the onboarding slides would spend iOS's one prompt
-    /// before the user knows what it's for.
-    func startTracking(prompt: Bool = true) {
+    /// Never asks for permission. The iOS dialog only ever appears after the
+    /// user taps the button on one of Mobly's own location screens
+    /// (`askForPermission`, `askThroughPrimer`): asked out of the blue, it
+    /// spends iOS's one prompt before the user knows what it's for.
+    func startTracking() {
         authorization = manager.authorizationStatus
         switch authorization {
         case .notDetermined:
-            if prompt { manager.requestWhenInUseAuthorization() }
+            break
         case .denied, .restricted:
             status = .denied
         case .authorizedWhenInUse, .authorizedAlways:
@@ -122,17 +122,72 @@ final class LocationService: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Mobly's own location screen
+
+    private let grantedBeforeKey = "location.grantedBefore"
+    private let reofferSnoozeKey = "location.reofferSnoozedUntil"
+
+    /// Granted at some point, yet iOS can ask again: the user picked "Allow
+    /// Once" last time (a "While Using" answer would have stuck). They said
+    /// yes once, so Mobly offers its location screen again before Home —
+    /// unless they said "Plus tard" to it within the last day.
+    var shouldReofferAtLaunch: Bool {
+        guard manager.authorizationStatus == .notDetermined,
+              UserDefaults.standard.bool(forKey: grantedBeforeKey) else { return false }
+        let until = UserDefaults.standard.double(forKey: reofferSnoozeKey)
+        return Date().timeIntervalSince1970 >= until
+    }
+
+    func snoozeReoffer() {
+        UserDefaults.standard.set(Date().addingTimeInterval(24 * 3600).timeIntervalSince1970,
+                                  forKey: reofferSnoozeKey)
+    }
+
+    private var primerContinuation: CheckedContinuation<Bool, Never>?
+
+    /// For actions that need the position (share it in chat, centre the map,
+    /// pin a listing): when iOS hasn't been asked yet, show Mobly's location
+    /// screen first and let the user decide there. Returns whether location
+    /// is allowed afterwards.
+    func askThroughPrimer() async -> Bool {
+        authorization = manager.authorizationStatus
+        guard authorization == .notDetermined else { return isAuthorized }
+        guard primerContinuation == nil, let top = Self.topViewController() else { return false }
+        return await withCheckedContinuation { cont in
+            primerContinuation = cont
+            let host = UIHostingController(rootView: LocationPrimerScreen(context: .action) { [weak self] granted in
+                top.presentedViewController?.dismiss(animated: true)
+                self?.primerContinuation?.resume(returning: granted)
+                self?.primerContinuation = nil
+            }
+            .environment(\.locale, Locale(identifier: AppLang.shared.code)))
+            host.modalPresentationStyle = .fullScreen
+            top.present(host, animated: true)
+        }
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        var top = scene?.windows.first { $0.isKeyWindow }?.rootViewController
+        while let next = top?.presentedViewController, !next.isBeingDismissed { top = next }
+        return top
+    }
+
     // MARK: - One-shot precise fix
 
     /// Fetch a fresh, precise coordinate for sharing in chat. Not persisted.
     /// Returns nil when permission is denied or no fix is available.
     func requestOneShotCoordinate() async -> CLLocationCoordinate2D? {
-        await withCheckedContinuation { cont in
+        if manager.authorizationStatus == .notDetermined {
+            guard await askThroughPrimer() else { return nil }
+        }
+        return await withCheckedContinuation { cont in
             switch manager.authorizationStatus {
             case .denied, .restricted:
                 cont.resume(returning: nil)
             case .notDetermined:
-                manager.requestWhenInUseAuthorization()
                 cont.resume(returning: nil)
             case .authorizedWhenInUse, .authorizedAlways:
                 oneShotWaiters.append { cont.resume(returning: $0) }
@@ -221,6 +276,7 @@ extension LocationService: CLLocationManagerDelegate {
             self.authorization = manager.authorizationStatus
             switch manager.authorizationStatus {
             case .authorizedWhenInUse, .authorizedAlways:
+                UserDefaults.standard.set(true, forKey: self.grantedBeforeKey)
                 // Granted (first time, or back from Réglages): follow now —
                 // unless the app is in the background, where we don't track.
                 if UIApplication.shared.applicationState != .background { self.startTracking() }

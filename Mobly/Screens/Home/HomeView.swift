@@ -41,6 +41,8 @@ struct HomeView: View {
     @State private var showBecomeOwner = false
     @State private var showOwnerDashboard = false
     @State private var carouselSetIndex = 0
+    /// The "for you" picks from the onboarding answers, shown once.
+    @State private var onboardingPicks: OnboardingSuggestions.Result?
     /// Mirrors `searching` through an explicit animation. Keyboard focus
     /// changes don't carry an animation transaction, so driving the panel
     /// straight from focus made it pop in and out.
@@ -57,17 +59,59 @@ struct HomeView: View {
 
     private var searching: Bool { searchActive || !searchText.isEmpty }
 
+    /// Three seconds after a new user first lands here — time to take in the
+    /// feed — offer three spaces that match their onboarding answers. Once:
+    /// the flag is cleared whether or not anything matched.
+    private func offerOnboardingPicksIfPending() async {
+        // "Je propose un espace" at signup: they came to publish, so take
+        // them into "Devenez propriétaire" as soon as Home has settled,
+        // rather than showing spaces to rent.
+        let ownerKey = OnboardingAnswers.becomeOwnerPendingKey
+        if UserDefaults.standard.bool(forKey: ownerKey) {
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled else { return }
+            UserDefaults.standard.removeObject(forKey: ownerKey)
+            guard !session.isOwner else { return }
+            SessionTracker.shared.log("onboarding.becomeOwner.opened")
+            showBecomeOwner = true
+            return
+        }
+        let key = OnboardingAnswers.suggestionsPendingKey
+        guard UserDefaults.standard.bool(forKey: key),
+              let answers = OnboardingAnswers.load() else { return }
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        guard !Task.isCancelled else { return }
+        UserDefaults.standard.removeObject(forKey: key)
+        guard let result = await OnboardingSuggestions.find(for: answers) else {
+            SessionTracker.shared.log("onboarding.picks.none")
+            return
+        }
+        SessionTracker.shared.log("onboarding.picks.shown", ["count": result.listings.count])
+        AppChrome.shared.hideTabBar = true
+        onboardingPicks = result
+    }
+
+    private func closeOnboardingPicks(action: String) {
+        SessionTracker.shared.log("onboarding.picks.\(action)")
+        onboardingPicks = nil
+        AppChrome.shared.hideTabBar = false
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
                 .padding(.horizontal, 22)
                 .padding(.top, 8)
 
-            searchBar
-                .padding(.horizontal, 22)
-                .padding(.top, 16)
-                .padding(.bottom, 14)
-                .zIndex(1)
+            if config.isEnabled("search.enabled") {
+                searchBar
+                    .padding(.horizontal, 22)
+                    .padding(.top, 16)
+                    .padding(.bottom, 14)
+                    .zIndex(1)
+            } else {
+                Color.clear.frame(height: 14)
+            }
 
             ZStack(alignment: .top) {
                 ScrollView(showsIndicators: false) {
@@ -81,7 +125,7 @@ struct HomeView: View {
                 }
                 .refreshable {
                     await store.refresh()
-                    if let origin = location.approximate {
+                    if let origin = location.approximate, config.isEnabled("search.nearby") {
                         await store.loadNearby(origin, force: true)
                     }
                     await UserDataStore.shared.loadFavorites()
@@ -105,12 +149,33 @@ struct HomeView: View {
             .onChange(of: searchText) { _, t in if searching { panelText = t } }
             // "Recommandé" ranks by distance once the device position is known.
             .task(id: location.approximate) {
-                if let origin = location.approximate { await store.loadNearby(origin) }
+                if let origin = location.approximate, config.isEnabled("search.nearby") {
+                    await store.loadNearby(origin)
+                }
             }
         }
         .background(Color.white)
         .opacity(appeared ? 1 : 0)
         .onAppear { withAnimation(Motion.standard) { appeared = true } }
+        .task { await offerOnboardingPicksIfPending() }
+        .overlay {
+            if let picks = onboardingPicks {
+                OnboardingSuggestionsPopup(
+                    firstName: greetingName,
+                    result: picks,
+                    onOpen: { listing in
+                        closeOnboardingPicks(action: "opened")
+                        onOpenListing(listing)
+                    },
+                    onSeeMore: {
+                        closeOnboardingPicks(action: "seeMore")
+                        let types = OnboardingAnswers.load()?.spaceTypes ?? []
+                        onOpenCategory(types.count == 1 ? types[0] : nil)
+                    },
+                    onDismiss: { closeOnboardingPicks(action: "dismissed") }
+                )
+            }
+        }
         .onReceive(carouselRotation) { _ in
             let count = carouselSets.count
             guard count > 1 else { return }
@@ -241,52 +306,64 @@ struct HomeView: View {
                     .padding(.bottom, 24)
             }
 
-            if config.isEnabled("maps") {
-                sectionHeader(L("Villes populaires"), actionLabel: "Explorer plus",
-                              action: { onOpenCityMap("") })
-                    .padding(.horizontal, 22)
-                    .padding(.bottom, 14)
-            } else {
-                sectionHeader(L("Villes populaires"), action: { onOpenCity("") })
-                    .padding(.horizontal, 22)
-                    .padding(.bottom, 14)
+            if config.isEnabled("home.popularCities") {
+                if config.isEnabled("maps") {
+                    sectionHeader(L("Villes populaires"), actionLabel: "Explorer plus",
+                                  action: { onOpenCityMap("") })
+                        .padding(.horizontal, 22)
+                        .padding(.bottom, 14)
+                } else {
+                    sectionHeader(L("Villes populaires"), action: { onOpenCity("") })
+                        .padding(.horizontal, 22)
+                        .padding(.bottom, 14)
+                }
+                popularRow
+                    .padding(.bottom, 24)
             }
-            popularRow
-                .padding(.bottom, 24)
 
-            if session.isOwner || config.isEnabled("owners.signup") {
+            if config.isEnabled("home.ownerBanner"),
+               session.isOwner || config.isEnabled("owners.signup") {
                 promoBanner
                     .padding(.horizontal, 22)
                     .padding(.bottom, 24)
             }
 
-            sectionHeader(L("Recommandé"), action: { onOpenCategory("Tous") })
-                .padding(.horizontal, 22)
-                .padding(.bottom, 14)
-
-            if (location.canAskPermission || location.isDenied) && !locationPromptDismissed {
-                locationPrompt
+            if config.isEnabled("home.recommended") {
+                sectionHeader(L("Recommandé"), action: { onOpenCategory("Tous") })
                     .padding(.horizontal, 22)
-                    .padding(.bottom, 16)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .padding(.bottom, 14)
+
+                // Location only serves the nearest-first ranking; with it
+                // switched off there is nothing to ask permission for.
+                if config.isEnabled("search.nearby"),
+                   (location.canAskPermission || location.isDenied) && !locationPromptDismissed {
+                    locationPrompt
+                        .padding(.horizontal, 22)
+                        .padding(.bottom, 16)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                quickFilters
+                    .padding(.bottom, 22)
+
+                recommendedRow
+                    .padding(.bottom, 24)
             }
 
-            quickFilters
-                .padding(.bottom, 22)
+            if config.isEnabled("ads.banner") {
+                AdBannerView()
+                    .padding(.bottom, 24)
+            }
 
-            recommendedRow
-                .padding(.bottom, 24)
-
-            AdBannerView()
-                .padding(.bottom, 24)
-
-            Text(L("Filtre rapide"))
-                .font(.moblyHeading(17))
-                .foregroundStyle(Color.moblyTextPrimary)
-                .padding(.horizontal, 22)
-                .padding(.bottom, 14)
-            categoriesRow
-                .padding(.bottom, 24)
+            if config.isEnabled("home.quickFilters") {
+                Text(L("Filtre rapide"))
+                    .font(.moblyHeading(17))
+                    .foregroundStyle(Color.moblyTextPrimary)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 14)
+                categoriesRow
+                    .padding(.bottom, 24)
+            }
         }
     }
 
@@ -373,7 +450,7 @@ struct HomeView: View {
                 if !spaces.isEmpty {
                     sectionLabel("Espaces")
                     ForEach(spaces) { l in
-                        suggestionRow(l.title, "\(l.location) · \(l.price)", icon: "house.fill", action: {
+                        suggestionRow(l.title, "\(l.location) · \(l.price)\(LT(l.priceUnit))", icon: "house.fill", action: {
                             dismissSearch()
                             savedSearches.addListing(l)
                             (onPickSpace ?? onOpenListing)(l)
@@ -500,6 +577,7 @@ struct HomeView: View {
                     .foregroundStyle(Color(hex: 0x9A9DAC))
             }
             Spacer()
+            if config.isEnabled("notifications.inbox") {
             Button(action: onNotifications) {
                 ZStack(alignment: .topTrailing) {
                     Circle().fill(Color(hex: 0xF4F5F8)).frame(width: 42, height: 42)
@@ -517,6 +595,7 @@ struct HomeView: View {
                 }
             }
             .buttonStyle(.plain)
+            }
         }
     }
 
@@ -828,8 +907,20 @@ struct HomeView: View {
     /// server ranks the whole catalogue. A quick-filter chip narrows that same
     /// ranking; only when it leaves nothing (or there is no position yet) does
     /// the row fall back to the city-based ordering below.
+    /// The row, narrowed to the stay chosen at onboarding (long = monthly,
+    /// court = daily) while no chip is picked — a chip is an explicit choice
+    /// and wins. Falls back to the full row rather than showing nothing.
     private var filteredRecommended: [Listing] {
-        if !store.nearby.isEmpty && isInCameroon {
+        let items = unfilteredRecommended
+        guard selectedQuickFilter == nil,
+              let answers = OnboardingAnswers.load(), let stay = answers.stay else { return items }
+        let months = stay == "long" ? answers.minDuration : nil
+        let matching = items.filter { $0.matchesStay(stay, minDuration: months) }
+        return matching.isEmpty ? items : matching
+    }
+
+    private var unfilteredRecommended: [Listing] {
+        if !store.nearby.isEmpty && isInCameroon && config.isEnabled("search.nearby") {
             let near: [Listing]
             if let filter = selectedQuickFilter {
                 near = filter.hasPrefix("cat:")

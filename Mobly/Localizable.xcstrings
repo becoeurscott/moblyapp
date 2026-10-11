@@ -4,6 +4,9 @@
     "" : {
 
     },
+    " · %@" : {
+
+    },
     "-%lld%%" : {
 
     },
@@ -11,6 +14,9 @@
 
     },
     "·" : {
+
+    },
+    "· %@" : {
 
     },
     "· %lld avis" : {
@@ -117,6 +123,12 @@
       }
     },
     "%@ FCFA" : {
+
+    },
+    "%@, nous avons trouvé des espaces pour vous" : {
+
+    },
+    "%@, une dernière chose" : {
 
     },
     "%@%@" : {
@@ -251,6 +263,16 @@
     },
     "+%lld" : {
 
+    },
+    "+%lld %@" : {
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "+%1$lld %2$@"
+          }
+        }
+      }
     },
     "+237" : {
 
@@ -688,6 +710,9 @@
         }
       }
     },
+    "Activer" : {
+
+    },
     "Actives" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -728,6 +753,9 @@
     "Adresse non confirmée" : {
 
     },
+    "Afficher les %lld notifications" : {
+
+    },
     "Ajouter d'autres photos" : {
 
     },
@@ -765,19 +793,19 @@
         }
       }
     },
-    "Ajoutez des photos de votre espace. La première sera la couverture — vous pourrez la changer ensuite." : {
+    "Ajoutez des photos de votre espace. La première sera la couverture, vous pourrez la changer ensuite." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Add photos of your space. The first one will be the cover — you can change it later."
+            "value" : "Add photos of your space. The first one will be the cover, you can change it later."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ajoutez des photos de votre espace. La première sera la couverture — vous pourrez la changer ensuite."
+            "value" : "Ajoutez des photos de votre espace. La première sera la couverture, vous pourrez la changer ensuite."
           }
         }
       }
@@ -957,6 +985,9 @@
           }
         }
       }
+    },
+    "Annuler la modification" : {
+
     },
     "Aperçu" : {
       "extractionState" : "manual",
@@ -1427,6 +1458,9 @@
         }
       }
     },
+    "Aucune demande « %@ »" : {
+
+    },
     "Aucune demande en attente" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1549,6 +1583,9 @@
         }
       }
     },
+    "Aucune visite « %@ »" : {
+
+    },
     "Aucune vue enregistrée sur les 7 derniers jours." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1604,6 +1641,9 @@
       }
     },
     "Autorisez l'accès au microphone dans Réglages pour enregistrer des notes vocales." : {
+
+    },
+    "Autorisez la localisation pour recevoir les espaces les plus proches de vous, mis à jour quand vous vous déplacez." : {
 
     },
     "Autre" : {
@@ -1719,6 +1759,9 @@
           }
         }
       }
+    },
+    "Bienvenue, %@" : {
+
     },
     "Bienvenue, %@ 👋" : {
 
@@ -2314,19 +2357,19 @@
         }
       }
     },
-    "Chambres, bureaux, boutiques et plus — près de vous." : {
+    "Chambres, bureaux, boutiques et plus, près de vous." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Rooms, offices, shops and more — near you."
+            "value" : "Rooms, offices, shops and more, near you."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Chambres, bureaux, boutiques et plus — près de vous."
+            "value" : "Chambres, bureaux, boutiques et plus, près de vous."
           }
         }
       }
@@ -2473,6 +2516,9 @@
     "Chat support" : {
 
     },
+    "Chez %@" : {
+
+    },
     "Chiffres indisponibles" : {
 
     },
@@ -2533,22 +2579,15 @@
         }
       }
     },
+    "Choisissez-en autant que vous voulez." : {
+
+    },
     "Code à %lld chiffres envoyé %@." : {
       "localizations" : {
         "fr" : {
           "stringUnit" : {
             "state" : "new",
             "value" : "Code à %1$lld chiffres envoyé %2$@."
-          }
-        }
-      }
-    },
-    "Code à %lld chiffres envoyé à %@. Il sert aussi à récupérer votre compte si vous oubliez votre mot de passe." : {
-      "localizations" : {
-        "fr" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Code à %1$lld chiffres envoyé à %2$@. Il sert aussi à récupérer votre compte si vous oubliez votre mot de passe."
           }
         }
       }
@@ -2562,6 +2601,9 @@
           }
         }
       }
+    },
+    "Code envoyé par e-mail %@" : {
+
     },
     "Code envoyé par SMS %@" : {
 
@@ -2669,6 +2711,9 @@
       }
     },
     "Comment vous appelez-vous ?" : {
+
+    },
+    "Compris" : {
 
     },
     "COMPTE" : {
@@ -2833,6 +2878,9 @@
         }
       }
     },
+    "Confirmer la nouvelle adresse" : {
+
+    },
     "Confirmer le mot de passe" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2849,9 +2897,6 @@
           }
         }
       }
-    },
-    "Confirmez votre e-mail" : {
-
     },
     "Connectez-vous" : {
 
@@ -3052,7 +3097,7 @@
     "Contact" : {
 
     },
-    "Contact désactivé — ce propriétaire n'est plus disponible" : {
+    "Contact désactivé : ce propriétaire n'est plus disponible" : {
 
     },
     "Contacter le support" : {
@@ -3072,19 +3117,19 @@
         }
       }
     },
-    "Contactez le propriétaire, convenez d'une visite et gardez votre numéro privé — tout se passe dans Mobly." : {
+    "Contactez le propriétaire, convenez d'une visite et gardez votre numéro privé : tout se passe dans Mobly." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Contact the owner, arrange a viewing and keep your number private — it all happens in Mobly."
+            "value" : "Contact the owner, arrange a viewing and keep your number private: it all happens in Mobly."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Contactez le propriétaire, convenez d'une visite et gardez votre numéro privé — tout se passe dans Mobly."
+            "value" : "Contactez le propriétaire, convenez d'une visite et gardez votre numéro privé : tout se passe dans Mobly."
           }
         }
       }
@@ -3327,6 +3372,9 @@
         }
       }
     },
+    "Cuisine" : {
+
+    },
     "Cuisine / Cafétéria" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3377,6 +3425,12 @@
           }
         }
       }
+    },
+    "Dans quelle région ?" : {
+
+    },
+    "Dans quelle région se trouve votre espace ?" : {
+
     },
     "Date et heure" : {
       "extractionState" : "manual",
@@ -3547,6 +3601,9 @@
         }
       }
     },
+    "Demande de visite" : {
+
+    },
     "Demande envoyée" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3704,6 +3761,9 @@
         }
       }
     },
+    "Devenez propriétaire sur Mobly" : {
+
+    },
     "Discuter" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3758,6 +3818,9 @@
     "Disponible" : {
 
     },
+    "Disposition" : {
+
+    },
     "Documents légaux" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3774,6 +3837,9 @@
           }
         }
       }
+    },
+    "Douche" : {
+
     },
     "Durée indéterminée" : {
 
@@ -3866,7 +3932,7 @@
         }
       }
     },
-    "Écrivez-nous à %@ — nous répondons sous 30 jours au plus tard." : {
+    "Écrivez-nous à %@, nous répondons sous 30 jours au plus tard." : {
 
     },
     "Effacer" : {
@@ -4805,6 +4871,9 @@
     "G" : {
 
     },
+    "Gérer mes annonces" : {
+
+    },
     "Gérer utilisateurs, annonces et signalements" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4910,19 +4979,19 @@
         }
       }
     },
-    "Home, Explore, carte — dès la publication." : {
+    "Home, Explore et carte, dès la publication." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Home, Explore, map — the moment you publish."
+            "value" : "Home, Explore and map, the moment you publish."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Home, Explore, carte — dès la publication."
+            "value" : "Home, Explore et carte, dès la publication."
           }
         }
       }
@@ -5265,6 +5334,12 @@
         }
       }
     },
+    "Je cherche un espace" : {
+
+    },
+    "Je propose un espace" : {
+
+    },
     "Je suis sur place" : {
 
     },
@@ -5297,6 +5372,9 @@
           }
         }
       }
+    },
+    "L’adresse e-mail peut être remplacée, mais pas supprimée." : {
+
     },
     "L’annonce est indisponible ou n’a pas pu être chargée. Réessayez dans un instant." : {
 
@@ -5340,6 +5418,18 @@
           }
         }
       }
+    },
+    "La dernière fois, vous l'aviez autorisée une seule fois. Autorisez-la pendant l'utilisation pour retrouver les annonces les plus proches à chaque visite. Votre position exacte n'est jamais partagée avec les propriétaires." : {
+
+    },
+    "La localisation est désactivée pour Mobly. Activez-la dans Réglages pour des recommandations autour de vous." : {
+
+    },
+    "Là où vous voulez vous installer." : {
+
+    },
+    "La première photo que vous sélectionnez sera la photo de couverture de votre espace. Vous pouvez ajouter autant de photos que vous voulez, et changer la couverture en touchant une autre photo." : {
+
     },
     "La première photo sera la couverture. Touchez la croix pour retirer une photo." : {
 
@@ -5455,6 +5545,9 @@
         }
       }
     },
+    "Le propriétaire vous attend demain à 10 h." : {
+
+    },
     "Le visiteur pourra accepter ou refuser directement dans la conversation." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5472,7 +5565,26 @@
         }
       }
     },
+    "Les %@ %@ partent vite. On vous prévient dès qu'un propriétaire vous répond ou confirme votre visite, rien d'autre." : {
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Les %1$@ %2$@ partent vite. On vous prévient dès qu'un propriétaire vous répond ou confirme votre visite, rien d'autre."
+          }
+        }
+      }
+    },
     "Les appels sont temporairement indisponibles. Cette fonctionnalité sera bientôt de retour." : {
+
+    },
+    "Les bons espaces partent vite. On vous prévient dès qu'un propriétaire vous répond ou confirme votre visite, rien d'autre." : {
+
+    },
+    "Les espaces les plus proches en premier." : {
+
+    },
+    "Les locataires de cette région verront votre annonce en premier." : {
 
     },
     "Les prix sont-ils négociables ?" : {
@@ -5491,6 +5603,9 @@
           }
         }
       }
+    },
+    "Les propriétaires répondent plus vite aux numéros vérifiés. Saisissez le code à %lld chiffres reçu par SMS." : {
+
     },
     "Les statistiques me disent exactement quelles annonces travailler. Plus de devinettes." : {
       "extractionState" : "manual",
@@ -5596,6 +5711,12 @@
           }
         }
       }
+    },
+    "Louer une chambre, un studio, un bureau…" : {
+
+    },
+    "Louez votre espace avec Mobly" : {
+
     },
     "Ma position" : {
       "extractionState" : "manual",
@@ -5870,19 +5991,19 @@
     "Message…" : {
 
     },
-    "Mettez votre espace en ligne gratuitement, puis boostez-le pour passer en tête et toucher jusqu'à 3× plus de locataires — dès 500 FCFA." : {
+    "Mettez votre espace en ligne gratuitement, puis boostez-le pour passer en tête et toucher jusqu'à 3× plus de locataires, dès 500 FCFA." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Put your space online for free, then boost it to move to the top and reach up to 3× more renters — from 500 FCFA."
+            "value" : "Put your space online for free, then boost it to move to the top and reach up to 3× more renters, from 500 FCFA."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Mettez votre espace en ligne gratuitement, puis boostez-le pour passer en tête et toucher jusqu'à 3× plus de locataires — dès 500 FCFA."
+            "value" : "Mettez votre espace en ligne gratuitement, puis boostez-le pour passer en tête et toucher jusqu'à 3× plus de locataires, dès 500 FCFA."
           }
         }
       }
@@ -6031,6 +6152,12 @@
 
     },
     "Mobly · Votre espace, à portée de main." : {
+
+    },
+    "Mobly a besoin de votre position pour cette action. Votre position exacte n'est jamais partagée avec les propriétaires." : {
+
+    },
+    "Mobly classe les annonces selon la distance. Votre position exacte n'est jamais partagée avec les propriétaires." : {
 
     },
     "Mobly v1.0.0 · Trouvez votre espace." : {
@@ -6300,6 +6427,12 @@
     "Moyen de paiement" : {
 
     },
+    "Ne ratez aucun locataire" : {
+
+    },
+    "Ne ratez aucune réponse" : {
+
+    },
     "Nom complet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6483,6 +6616,9 @@
       }
     },
     "Notifications" : {
+
+    },
+    "Nous avons trouvé des espaces pour vous" : {
 
     },
     "Nous confirmons votre numéro de téléphone." : {
@@ -6697,6 +6833,15 @@
       }
     },
     "OK" : {
+
+    },
+    "On adapte l'application à ce que vous voulez faire." : {
+
+    },
+    "On garde les espaces près de vous ?" : {
+
+    },
+    "On vous prévient dès qu'un locataire vous écrit ou demande une visite, rien d'autre." : {
 
     },
     "Origine des vues" : {
@@ -7171,6 +7316,9 @@
     "Photo" : {
 
     },
+    "Photo de couverture" : {
+
+    },
     "Photo expirée" : {
 
     },
@@ -7447,10 +7595,19 @@
     "Pour la sécurité de tous, vérifiez\nvotre identité avant de publier." : {
 
     },
+    "Pour ne vous montrer que ce qui vous convient. Vous pourrez le changer à tout moment." : {
+
+    },
     "Pour plus de précision" : {
 
     },
     "Pour publier un espace sur Mobly, votre pièce d'identité doit d'abord être vérifiée. Cela protège les visiteurs et rassure vos futurs locataires." : {
+
+    },
+    "Pour utiliser %@, confirmez-la avec le code que nous allons y envoyer. Votre adresse actuelle reste active d’ici là." : {
+
+    },
+    "Pour vous" : {
 
     },
     "PRÉFÉRENCES" : {
@@ -7503,6 +7660,12 @@
           }
         }
       }
+    },
+    "Près de vous" : {
+
+    },
+    "Presque fini, %@" : {
+
     },
     "Prêt à vivre, équipé" : {
       "extractionState" : "manual",
@@ -7986,6 +8149,9 @@
         }
       }
     },
+    "Publier une annonce et recevoir des demandes" : {
+
+    },
     "Publiez et boostez vos annonces" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8020,6 +8186,9 @@
         }
       }
     },
+    "Publiez votre annonce en quelques minutes et recevez les demandes de visite de locataires vérifiés, partout au Cameroun." : {
+
+    },
     "Publiez votre espace en quelques minutes\net touchez des locataires vérifiés\npartout au Cameroun." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8036,6 +8205,9 @@
           }
         }
       }
+    },
+    "Qu'est-ce qui vous amène sur Mobly ?" : {
+
     },
     "Quai de chargement" : {
       "extractionState" : "manual",
@@ -8105,6 +8277,12 @@
         }
       }
     },
+    "Quel espace proposez-vous ?" : {
+
+    },
+    "Quel espace recherchez-vous ?" : {
+
+    },
     "Quel est le prix total ?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8121,6 +8299,9 @@
           }
         }
       }
+    },
+    "Quel est votre budget par mois ?" : {
+
     },
     "Quel type d'espace ?" : {
       "extractionState" : "manual",
@@ -8394,6 +8575,9 @@
           }
         }
       }
+    },
+    "Réduire" : {
+
     },
     "Réduire l'appel" : {
 
@@ -9065,6 +9249,9 @@
         }
       }
     },
+    "Sécurisez votre compte" : {
+
+    },
     "Sécurité" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9117,6 +9304,9 @@
       }
     },
     "Série" : {
+
+    },
+    "Si vous oubliez votre mot de passe, c'est cette adresse qui vous permettra de récupérer votre compte." : {
 
     },
     "Signaler" : {
@@ -9342,6 +9532,9 @@
     "Supprimer ce message ?" : {
 
     },
+    "Supprimer ces %lld photos ?" : {
+
+    },
     "Supprimer cette conversation ?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9358,6 +9551,12 @@
           }
         }
       }
+    },
+    "Supprimer cette photo" : {
+
+    },
+    "Supprimer cette photo ?" : {
+
     },
     "Supprimer définitivement ce compte ?" : {
       "extractionState" : "manual",
@@ -9412,6 +9611,9 @@
           }
         }
       }
+    },
+    "Supprimer le groupe" : {
+
     },
     "Supprimer mon compte" : {
       "extractionState" : "manual",
@@ -10020,19 +10222,19 @@
         }
       }
     },
-    "Trouvez votre espace idéal à Douala — chambres, bureaux, boutiques et plus, près de vous." : {
+    "Trouvez votre espace idéal à Douala : chambres, bureaux, boutiques et plus, près de vous." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Find your ideal space in Douala — rooms, offices, shops and more, near you."
+            "value" : "Find your ideal space in Douala: rooms, offices, shops and more, near you."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Trouvez votre espace idéal à Douala — chambres, bureaux, boutiques et plus, près de vous."
+            "value" : "Trouvez votre espace idéal à Douala : chambres, bureaux, boutiques et plus, près de vous."
           }
         }
       }
@@ -10175,6 +10377,9 @@
           }
         }
       }
+    },
+    "Un locataire veut visiter votre studio." : {
+
     },
     "Un titre clair et une description honnête attirent plus de contacts." : {
       "extractionState" : "manual",
@@ -10426,6 +10631,9 @@
         }
       }
     },
+    "Vérifier le nouvel e-mail" : {
+
+    },
     "Vérifier maintenant" : {
 
     },
@@ -10516,6 +10724,9 @@
           }
         }
       }
+    },
+    "Vérifions que c'est bien vous" : {
+
     },
     "Version %@" : {
 
@@ -10757,6 +10968,9 @@
         }
       }
     },
+    "Visiteur : %@" : {
+
+    },
     "Visitez en toute confiance" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10824,6 +11038,12 @@
           }
         }
       }
+    },
+    "Voir la photo en plein écran" : {
+
+    },
+    "Voir les espaces près de vous" : {
+
     },
     "Voir tout" : {
       "extractionState" : "manual",
@@ -11132,6 +11352,9 @@
         }
       }
     },
+    "Votre position" : {
+
+    },
     "Votre profil affiche le badge vérifié.\nCela renforce la confiance des hôtes." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11331,6 +11554,9 @@
         }
       }
     },
+    "Voyez d'abord ce qui est près de vous" : {
+
+    },
     "Vu récemment" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11368,19 +11594,19 @@
     "Vues totales" : {
 
     },
-    "Vues, contacts, taux — au jour le jour." : {
+    "Vues, contacts et taux, au jour le jour." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Views, contacts, rates — day by day."
+            "value" : "Views, contacts and rates, day by day."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Vues, contacts, taux — au jour le jour."
+            "value" : "Vues, contacts et taux, au jour le jour."
           }
         }
       }

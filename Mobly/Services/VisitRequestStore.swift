@@ -71,6 +71,9 @@ final class VisitRequestStore: ObservableObject {
     }
 
     func update(id: String, status: String? = nil, scheduledAt: Date? = nil) async {
+        // Every accept / decline / reschedule goes through here, so this one
+        // check covers the hub, the owner screen and their buttons.
+        guard RemoteConfigStore.shared.can("visits.respond") else { return }
         do {
             let updated = try await MoblyAPI.shared.updateVisit(
                 id: id, status: status, scheduledAt: scheduledAt

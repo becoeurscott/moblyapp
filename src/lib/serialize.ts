@@ -49,6 +49,7 @@ export function serializeListing(
     // The detail page shows these as a facts row. `sizeSqm` stays out until
     // something populates it — it is null on every row today.
     bathrooms: l.bathrooms,
+    minDurationMonths: l.minDurationMonths,
     // Category-specific counts from the publish wizard (Cuisines, Salon,
     // Vitrine…). Only string values go out: the column is JSON and older rows
     // may hold anything.

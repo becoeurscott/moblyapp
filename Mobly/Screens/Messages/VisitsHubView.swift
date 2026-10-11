@@ -15,6 +15,8 @@ struct VisitsHubView: View {
     var onClose: () -> Void = {}
     /// Fallback when no conversation exists for the space yet.
     var onOpenListing: (String) -> Void = { _ in }
+    /// Tab to open on (set when arriving from a visit notification).
+    var initialTab: Tab? = nil
 
     @ObservedObject private var store = VisitRequestStore.shared
     @ObservedObject private var session = Session.shared
@@ -94,16 +96,20 @@ struct VisitsHubView: View {
                 .animation(Motion.content, value: store.items.count)
                 .animation(Motion.content, value: store.myRequests.count)
             }
+            // Only the list pulls to refresh. On the whole screen it also
+            // attached to the chip bar's horizontal scroll, which then moved
+            // up and down.
+            .refreshable {
+                await store.refreshMine()
+                if isOwner { await store.refresh() }
+            }
         }
         .background(Color.moblySurface)
         .task {
-            tab = isOwner ? .received : .mine
+            if let initialTab { tab = (initialTab == .received && isOwner) ? .received : .mine }
+            else { tab = isOwner ? .received : .mine }
             await store.refreshMine(silent: !store.myRequests.isEmpty)
             if isOwner { await store.refresh(silent: !store.items.isEmpty) }
-        }
-        .refreshable {
-            await store.refreshMine()
-            if isOwner { await store.refresh() }
         }
     }
 
@@ -214,6 +220,8 @@ struct VisitsHubView: View {
             }
             .padding(.horizontal, 20)
         }
+        .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.top, 10)
     }
 

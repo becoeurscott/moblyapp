@@ -100,7 +100,9 @@ struct LocationPinPicker: View {
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .task {
-            here.request()
+            // Already allowed: centre on the owner. Otherwise wait for them to
+            // tap the locate button, which goes through Mobly's own screen.
+            if LocationService.shared.isAuthorized { here.request() }
             if existing == nil, let q = searchQuery,
                !q.trimmingCharacters(in: .whitespaces).isEmpty {
                 await centerOnQuery(q)
@@ -141,7 +143,9 @@ struct LocationPinPicker: View {
                             pin = c
                             recentreTick += 1
                         } else {
-                            here.request()
+                            Task {
+                                if await LocationService.shared.askThroughPrimer() { here.request() }
+                            }
                         }
                         dismissTip()
                     } label: {
@@ -278,7 +282,9 @@ struct LocationPinPicker: View {
                             pin = c
                             recentreTick += 1
                         } else {
-                            here.request()
+                            Task {
+                                if await LocationService.shared.askThroughPrimer() { here.request() }
+                            }
                         }
                     }
                     controlButton(icon: "building.2.fill", label: "Ville") {

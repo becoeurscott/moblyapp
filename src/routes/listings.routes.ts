@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { regionWhere } from '../lib/regions';
 import { Prisma, DealType, ListingStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
@@ -94,7 +95,9 @@ listingsRouter.get(
         },
       };
       if (q.category && q.category !== 'Tous') where.category = q.category;
-      if (q.region) where.region = q.region;
+      // Every spelling of the région (see lib/regions). Under AND so the
+      // free-text `OR` below can't overwrite it.
+      if (q.region) where.AND = [regionWhere(q.region)];
       if (q.city) where.city = { contains: q.city, mode: 'insensitive' };
       if (q.deal) where.deal = q.deal;
       if (q.furnished) where.furnished = q.furnished === 'true';
@@ -315,6 +318,7 @@ listingsRouter.patch(
   '/:id/availability',
   requireAuth,
   requireOwner,
+  featureGate('listings.availability'),
   restrictionGate('LISTING_EDIT'),
   asyncHandler(async (req, res) => {
     await assertOwnership(req.params.id, req.userId!);
@@ -334,6 +338,7 @@ listingsRouter.delete(
   '/:id',
   requireAuth,
   requireOwner,
+  featureGate('listings.delete'),
   asyncHandler(async (req, res) => {
     await assertOwnership(req.params.id, req.userId!);
     // Cascades to the annonce's view / contact / favorite events, so the

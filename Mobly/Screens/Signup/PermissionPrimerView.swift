@@ -59,6 +59,10 @@ enum PrimerArt {
     case notifications, location
     /// Signup's code screens: the SMS on its way, the e-mail in the inbox.
     case sms, email
+    /// "Devenez propriétaire": a tenant asking to visit the owner's space.
+    case owner
+    /// An owner's notification screen: the alert they'd get for that request.
+    case ownerNotifications
 }
 
 /// A phone rising out of a soft disc with a card floating across it — the
@@ -147,10 +151,11 @@ struct PrimerIllustration: View {
 
     private var icon: String {
         switch art {
-        case .notifications: return "bell.fill"
+        case .notifications, .ownerNotifications: return "bell.fill"
         case .location:      return "location.fill"
         case .sms:           return "message.fill"
         case .email:         return "envelope.fill"
+        case .owner:         return "key.fill"
         }
     }
 
@@ -210,13 +215,19 @@ struct PrimerIllustration: View {
     }
 
     private var cardTitle: LocalizedStringKey {
-        art == .notifications ? "Visite confirmée" : "Près de vous"
+        switch art {
+        case .notifications: return "Demande de visite"
+        case .owner, .ownerNotifications: return "Demande de visite"
+        default:             return "Près de vous"
+        }
     }
 
     private var cardSubtitle: LocalizedStringKey {
-        art == .notifications
-            ? "Le propriétaire vous attend demain à 10 h."
-            : "Les espaces les plus proches en premier."
+        switch art {
+        case .notifications: return "Votre demande a été confirmée."
+        case .owner, .ownerNotifications: return "Un utilisateur désire visiter votre espace."
+        default:             return "Les espaces les plus proches en premier."
+        }
     }
 }
 

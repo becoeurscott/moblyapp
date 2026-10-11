@@ -1,5 +1,7 @@
-import { notifyUser } from './push';
+import { notifyUser, pushToUser } from './push';
+import { prisma } from '../lib/prisma';
 import { OWNER_TRIAL_DAYS } from '../lib/ownerTrial';
+import { greetingFirstName } from '../lib/displayName';
 
 /**
  * A new account's first notifications, created right after the account row
@@ -21,8 +23,8 @@ export function sendWelcomeNotifications(user: {
   email?: string | null;
   emailVerifiedAt?: Date | null;
 }): void {
-  const first = (user.fullName ?? '').trim().split(/\s+/)[0];
-  const name = first && first !== 'Utilisateur' ? ` ${first}` : '';
+  const first = greetingFirstName(user.fullName, user.email);
+  const name = first ? ` ${first}` : '';
 
   (async () => {
     // Sequential, oldest first: the list is newest-first, and the welcome
@@ -59,4 +61,39 @@ export function sendWelcomeNotifications(user: {
         'et publiez votre propre espace quand vous voulez.',
     });
   })().catch((err) => console.error('[welcome] notifications failed', { userId: user.id, err: String(err) }));
+}
+
+const LATE_WELCOME_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * Pushes the WELCOME notification once a device token exists, for accounts
+ * created in the last 10 minutes. Idempotent: the notification's payload is
+ * stamped `latePushed` with a compare-and-set update, so concurrent or
+ * repeated registrations (the app re-registers on every launch) push it at
+ * most once.
+ */
+export async function resendWelcomePushOnFirstDevice(userId: string): Promise<void> {
+  const since = new Date(Date.now() - LATE_WELCOME_WINDOW_MS);
+  const n = await prisma.notification.findFirst({
+    where: { userId, type: 'WELCOME', read: false, createdAt: { gte: since } },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!n) return;
+  const payload = (n.payload && typeof n.payload === 'object' && !Array.isArray(n.payload)
+    ? (n.payload as Record<string, string>)
+    : {}) as Record<string, string>;
+  if (payload.latePushed) return;
+  // A device registered before the notification already got the original push.
+  const earlier = await prisma.device.count({
+    where: { userId, pushToken: { not: null }, createdAt: { lt: n.createdAt } },
+  });
+  if (earlier > 0) return;
+
+  const claimed = await prisma.notification.updateMany({
+    where: { id: n.id, payload: { equals: n.payload ?? {} } },
+    data: { payload: { ...payload, latePushed: '1' } },
+  });
+  if (claimed.count !== 1) return; // another registration got there first
+
+  await pushToUser(userId, { title: n.title, body: n.body ?? '', data: payload });
 }

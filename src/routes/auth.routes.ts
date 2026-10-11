@@ -411,6 +411,74 @@ authRouter.patch(
   })
 );
 
+/** The 10 régions, spelled as listings and the app spell them. */
+const CAMEROON_REGIONS = [
+  'Littoral', 'Centre', 'Ouest', 'Sud-Ouest', 'Nord-Ouest',
+  'Sud', 'Est', 'Adamaoua', 'Nord', 'Extrême-Nord',
+] as const;
+
+function serializePreference(p: {
+  intent: string | null; spaceTypes: string[]; region: string | null;
+  stay: string | null; minDuration: number | null;
+  budgetMin: number | null; budgetMax: number | null; updatedAt: Date;
+} | null) {
+  if (!p) return null;
+  return {
+    intent: p.intent,
+    spaceTypes: p.spaceTypes,
+    region: p.region,
+    stay: p.stay,
+    minDuration: p.minDuration,
+    budgetMin: p.budgetMin,
+    budgetMax: p.budgetMax,
+    updatedAt: p.updatedAt,
+  };
+}
+
+/** GET /api/auth/me/preferences — the onboarding answers, or null. */
+authRouter.get(
+  '/me/preferences',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const pref = await prisma.searchPreference.findUnique({ where: { userId: req.userId! } });
+    res.json({ preferences: serializePreference(pref) });
+  })
+);
+
+/**
+ * PUT /api/auth/me/preferences — what the user said they want right after
+ * signup. Replaces the whole row: a skipped question is sent as null/empty
+ * and clears what was there.
+ */
+authRouter.put(
+  '/me/preferences',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const body = z
+      .object({
+        intent: z.enum(['SEEKING', 'OFFERING']).nullable().default(null),
+        spaceTypes: z.array(z.string().trim().min(1).max(40)).max(12).default([]),
+        region: z.enum(CAMEROON_REGIONS).nullable().default(null),
+        stay: z.enum(['long', 'court']).nullable().default(null),
+        minDuration: z.number().int().min(1).max(365).nullable().default(null),
+        budgetMin: z.number().int().min(0).max(1_000_000_000).nullable().default(null),
+        budgetMax: z.number().int().min(0).max(1_000_000_000).nullable().default(null),
+      })
+      .refine((b) => b.budgetMin == null || b.budgetMax == null || b.budgetMin <= b.budgetMax, {
+        message: 'Budget invalide',
+      })
+      .parse(req.body);
+
+    const data = { ...body, spaceTypes: [...new Set(body.spaceTypes)] };
+    const pref = await prisma.searchPreference.upsert({
+      where: { userId: req.userId! },
+      create: { userId: req.userId!, ...data },
+      update: data,
+    });
+    res.json({ preferences: serializePreference(pref) });
+  })
+);
+
 /**
  * Password reset, in two calls:
  *   1. POST /auth/password/forgot — resolve the account, send a code by SMS or

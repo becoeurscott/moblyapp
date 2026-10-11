@@ -43,6 +43,7 @@ async function bootApp() {
     const { primeConfig } = await import('./services/config');
     bootStage = 'loading boost service';
     const { startBoostExpiry } = await import('./services/boostExpiry');
+    const { startVisitReminders } = await import('./services/visitReminders');
 
     bootStage = 'creating app';
     const app = createApp();
@@ -56,6 +57,7 @@ async function bootApp() {
 
     primeConfig().catch((err) => console.error('[config] prime failed:', err));
     startBoostExpiry();
+    startVisitReminders();
   } catch (err) {
     bootError = err instanceof Error ? err.message : String(err);
     bootStage = 'failed';

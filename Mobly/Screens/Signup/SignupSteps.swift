@@ -439,7 +439,7 @@ struct SignupWelcomeStep: View {
                 .multilineTextAlignment(.center)
                 .padding(.bottom, 8)
 
-            Text("Trouvez votre espace idéal à Douala — chambres, bureaux, boutiques et plus, près de vous.")
+            Text("Trouvez votre espace idéal à Douala : chambres, bureaux, boutiques et plus, près de vous.")
                 .font(.moblyBody(14))
                 .foregroundStyle(Color(hex: 0x9A9DAC))
                 .multilineTextAlignment(.center)

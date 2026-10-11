@@ -68,10 +68,10 @@ oauthRouter.post(
       }
       // Accounts created before Google's name was read carry the placeholder;
       // fill in the real name so greetings stop falling back.
-      if (user.fullName === 'Utilisateur Mobly' && claims.name) {
+      if (user.fullName === 'Utilisateur Mobly' && parsed.data.fullName) {
         user = await prisma.user.update({
           where: { id: user.id },
-          data: { fullName: claims.name },
+          data: { fullName: parsed.data.fullName },
         });
       }
     } else {

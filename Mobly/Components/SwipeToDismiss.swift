@@ -13,17 +13,20 @@ import UIKit
 struct SwipeToDismissContainer<Content: View>: UIViewControllerRepresentable {
     let onDismiss: () -> Void
     var ignoreTopSafeArea: Bool = false
+    var allowDownSwipe: Bool = true
     @ViewBuilder let content: () -> Content
 
     func makeUIViewController(context: Context) -> SwipeDismissHostController<Content> {
         let vc = SwipeDismissHostController(rootView: content(), onDismiss: onDismiss)
         vc.ignoreTopSafeArea = ignoreTopSafeArea
+        vc.allowDownSwipe = allowDownSwipe
         return vc
     }
 
     func updateUIViewController(_ vc: SwipeDismissHostController<Content>, context: Context) {
         vc.updateContent(content())
         vc.onDismiss = onDismiss
+        vc.allowDownSwipe = allowDownSwipe
     }
 }
 
@@ -32,6 +35,7 @@ final class SwipeDismissHostController<Content: View>: UIViewController,
     private let hostingController: UIHostingController<Content>
     var onDismiss: () -> Void
     var ignoreTopSafeArea = false
+    var allowDownSwipe = true
     private var edgeGesture: UIScreenEdgePanGestureRecognizer!
     private var downGesture: UIPanGestureRecognizer!
     private var isDismissing = false
@@ -170,6 +174,7 @@ final class SwipeDismissHostController<Content: View>: UIViewController,
             return !EdgeSwipeAnchorView.claimsEdge(within: hostingController.view)
         }
         guard gestureRecognizer === downGesture else { return true }
+        guard allowDownSwipe else { return false }
         let vel = downGesture.velocity(in: view)
         return vel.y > 0 && abs(vel.y) > abs(vel.x) * 1.5
     }
@@ -306,13 +311,15 @@ final class SwipeDismissHostController<Content: View>: UIViewController,
 }
 
 extension View {
-    func swipeToDismiss(onDismiss: @escaping () -> Void, ignoreTopSafeArea: Bool = false) -> some View {
+    func swipeToDismiss(onDismiss: @escaping () -> Void, ignoreTopSafeArea: Bool = false,
+                        allowDownSwipe: Bool = true) -> some View {
         // The container always spans the whole screen. Its hosting controller
         // still hands the window's insets to the page (unless
         // ignoreTopSafeArea), so content stays clear of the notch and home
         // indicator while page backgrounds reach the edges — stopping at the
         // safe area left white bands over and under every cover.
-        SwipeToDismissContainer(onDismiss: onDismiss, ignoreTopSafeArea: ignoreTopSafeArea) { self }
+        SwipeToDismissContainer(onDismiss: onDismiss, ignoreTopSafeArea: ignoreTopSafeArea,
+                                allowDownSwipe: allowDownSwipe) { self }
             .ignoresSafeArea()
     }
 }

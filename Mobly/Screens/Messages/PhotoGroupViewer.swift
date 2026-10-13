@@ -79,20 +79,19 @@ struct PhotoGroupViewer: View {
                             isPresented: Binding(
                                 get: { pendingDelete != nil },
                                 set: { if !$0 { pendingDelete = nil } }),
-                            titleVisibility: .visible) {
-            Button("Supprimer pour moi", role: .destructive) { confirmDelete(forBoth: false) }
+                            titleVisibility: .visible, presenting: pendingDelete) { index in
+            Button("Supprimer pour moi", role: .destructive) { confirmDelete(index: index, forBoth: false) }
             if canDeleteForBoth {
-                Button("Supprimer pour tout le monde", role: .destructive) { confirmDelete(forBoth: true) }
+                Button("Supprimer pour tout le monde", role: .destructive) { confirmDelete(index: index, forBoth: true) }
             }
             Button("Annuler", role: .cancel) { pendingDelete = nil }
         }
     }
 
-    private func confirmDelete(forBoth: Bool) {
-        guard let i = pendingDelete else { return }
+    private func confirmDelete(index: Int, forBoth: Bool) {
         pendingDelete = nil
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        onDelete?(i, forBoth)
+        onDelete?(index, forBoth)
     }
 
     private var header: some View {

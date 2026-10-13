@@ -18,6 +18,7 @@ final class PushService: NSObject, ObservableObject {
     @Published var pendingThreadId: String?
     /// Visit to show in the visits hub, set when a visit notification is tapped.
     @Published var pendingVisitId: String?
+    @Published var pendingHome = false
 
     private var deviceToken: String?
     private let askedKey = "pushPromptShown"
@@ -141,6 +142,8 @@ extension PushService: UNUserNotificationCenterDelegate {
             await MainActor.run { PushService.shared.pendingVisitId = visitId }
         } else if let threadId = info["threadId"] as? String {
             await MainActor.run { PushService.shared.pendingThreadId = threadId }
+        } else if info["screen"] as? String == "home" {
+            await MainActor.run { PushService.shared.pendingHome = true }
         }
     }
 }

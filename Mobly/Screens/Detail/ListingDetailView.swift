@@ -211,13 +211,6 @@ struct ListingDetailView: View {
                     heroGallery
                     heroButtons
                 }
-                // The gallery is deliberately taller by the top inset so it
-                // can run behind the status area. Let this layer extend to
-                // the screen edge; otherwise its origin stays below the
-                // Dynamic Island while its height still includes that inset,
-                // pushing the controls and image out of alignment.
-                .ignoresSafeArea(edges: .top)
-
                 ScrollView(showsIndicators: false) {
                     content
                         .padding(.horizontal, 22)
@@ -225,6 +218,10 @@ struct ListingDetailView: View {
                         .padding(.bottom, 120)
                 }
             }
+            // Extend the entire image-and-content column to the top edge so
+            // the white content follows the gallery in the same layout.
+            // Hero controls retain their explicit top safe-area padding.
+            .ignoresSafeArea(edges: .top)
 
             VStack(spacing: 0) {
                 if !isAvailable { unavailableBanner }
@@ -280,6 +277,7 @@ struct ListingDetailView: View {
             }
             listenForReviews()
         }
+        .swipeToDismiss(onDismiss: onClose, allowDownSwipe: false)
         .fullScreenCover(isPresented: $showViewer) {
             // Edge to edge: without ignoring the safe area the swipe wrapper
             // left white bands above and below the black viewer.

@@ -91,6 +91,7 @@ final class ChatStore: ObservableObject {
     /// local cache is empty — a warm cache renders instantly, no spinner.
     @Published private(set) var loadingMessagesFor: Set<String> = []
     @Published private(set) var isOffline = false
+    @Published var messageDeletionError: String?
 
     /// Photos that have been sent but whose upload is still running.
     ///
@@ -544,6 +545,7 @@ final class ChatStore: ObservableObject {
     func deleteMessages(threadId: String, messageIds: [String], forBoth: Bool) async {
         let ids = Set(messageIds)
         guard !ids.isEmpty else { return }
+        messageDeletionError = nil
         let previousMessages = messages[threadId] ?? []
         messages[threadId]?.removeAll { ids.contains($0.id) }
         saveToDisk()
@@ -561,6 +563,7 @@ final class ChatStore: ObservableObject {
             return first
         }
         if let error = failure {
+            messageDeletionError = (error as? MoblyAPI.APIError)?.message ?? "Impossible de supprimer ce message. Réessayez."
             isOffline = (error as? MoblyAPI.APIError)?.isOffline ?? false
             // The optimistic removal is only final after the server confirms
             // it. Restore the deleted rows if the request fails, while keeping

@@ -483,19 +483,25 @@ struct ChatThreadView: View {
         } message: {
             Text(voiceSendError ?? "")
         }
+        .alert("Message non supprimé", isPresented: Binding(
+            get: { chat.messageDeletionError != nil },
+            set: { if !$0 { chat.messageDeletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { chat.messageDeletionError = nil }
+        } message: {
+            Text(chat.messageDeletionError ?? "")
+        }
         .confirmationDialog("Supprimer ce message ?",
                             isPresented: Binding(
                                 get: { deleteTarget != nil },
                                 set: { if !$0 { deleteTarget = nil } }),
-                            titleVisibility: .visible) {
+                            titleVisibility: .visible, presenting: deleteTarget) { m in
             Button("Supprimer pour moi", role: .destructive) {
-                guard let m = deleteTarget else { return }
                 deleteTarget = nil
                 Task { await chat.deleteMessage(threadId: thread.id, messageId: m.id, forBoth: false) }
             }
-            if let target = deleteTarget, canDeleteForBoth(target) {
+            if canDeleteForBoth(m) {
                 Button("Supprimer pour tout le monde", role: .destructive) {
-                    guard let m = deleteTarget else { return }
                     deleteTarget = nil
                     Task { await chat.deleteMessage(threadId: thread.id, messageId: m.id, forBoth: true) }
                 }
@@ -506,17 +512,15 @@ struct ChatThreadView: View {
                             isPresented: Binding(
                                 get: { deleteGroupTarget != nil },
                                 set: { if !$0 { deleteGroupTarget = nil } }),
-                            titleVisibility: .visible) {
+                            titleVisibility: .visible, presenting: deleteGroupTarget) { group in
             Button("Supprimer pour moi", role: .destructive) {
-                guard let group = deleteGroupTarget else { return }
                 deleteGroupTarget = nil
                 Task { await chat.deleteMessages(threadId: thread.id, messageIds: group.map(\.id), forBoth: false) }
             }
-            // A group is always one sender's run, so the first photo speaks for all.
-            if let group = deleteGroupTarget, !group.isEmpty,
+            // Every photo must still be within the four-hour window.
+            if !group.isEmpty,
                group.allSatisfy({ canDeleteForBoth($0) }) {
                 Button("Supprimer pour tout le monde", role: .destructive) {
-                    guard let group = deleteGroupTarget else { return }
                     deleteGroupTarget = nil
                     Task { await chat.deleteMessages(threadId: thread.id, messageIds: group.map(\.id), forBoth: true) }
                 }

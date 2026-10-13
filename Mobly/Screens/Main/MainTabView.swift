@@ -548,6 +548,11 @@ struct MainTabView: View {
         .onChange(of: MoblyTab.visible(config)) { _, visible in
             if !visible.contains(tab) { tab = .home }
         }
+        .onChange(of: push.pendingHome) { _, pending in
+            guard pending else { return }
+            push.pendingHome = false
+            withAnimation(Motion.quick) { tab = .home }
+        }
         .onChange(of: push.pendingThreadId) { _, threadId in
             guard threadId != nil, config.isEnabled("chat.enabled") else { return }
             withAnimation(Motion.quick) { tab = .messages }

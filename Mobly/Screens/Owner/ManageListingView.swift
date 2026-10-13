@@ -100,7 +100,9 @@ struct ManageListingView: View {
         }
         .sheet(item: $editingField) { field in
             editor(for: field)
-                .presentationDetents(field == .photos ? [.large] : [.medium, .large])
+                // Equipment options were being opened in a half-height sheet,
+                // which made the picker look like part of the list was missing.
+                .presentationDetents(field == .photos || field == .tags ? [.large] : [.medium, .large])
                 .presentationDragIndicator(.visible)
         }
         .alert("Modifications non enregistrées",
@@ -582,9 +584,41 @@ private struct LocationTextEditor: View {
 private struct TagsEditor: View {
     @Binding var listing: Listing
     var done: () -> Void
-    private let all = ["Wifi","Climatisation","Parking","Sécurité 24/7","Eau chaude",
-                       "Eau courante","Électricité","Cuisine équipée","Réfrigérateur",
-                       "Télévision","Groupe électrogène","Balcon","Terrasse","Ménage inclus"]
+
+    /// Match the publish form's equipment choices for this listing type and
+    /// furnishing state. The previous generic list omitted options such as
+    /// office, shop and coworking equipment, making existing choices hard to
+    /// review or change when editing an annonce.
+    private var standardOptions: [String] {
+        switch listing.category {
+        case "Bureaux":
+            return ["Wifi", "Climatisation", "Ascenseur", "Parking", "Sécurité 24/7",
+                    "Groupe électrogène", "Imprimante", "Salle d'attente", "Accès handicapé", "Interphone"]
+        case "Boutiques":
+            return ["Wifi", "Climatisation", "Parking", "Sécurité 24/7", "Groupe électrogène",
+                    "Enseigne extérieure", "Rideau métallique", "Comptoir", "Accès handicapé"]
+        case "Commercial":
+            return ["Wifi", "Climatisation", "Parking", "Sécurité 24/7", "Groupe électrogène",
+                    "Quai de chargement", "Enseigne extérieure", "Rideau métallique", "Accès handicapé"]
+        case "Coworking":
+            return ["Wifi haut débit", "Climatisation", "Imprimante", "Parking", "Sécurité 24/7",
+                    "Groupe électrogène", "Cuisine / Cafétéria", "Casiers", "Accès handicapé", "Salle de pause"]
+        default:
+            if listing.deals.contains("Non meublé") {
+                return ["Eau courante", "Électricité", "Carrelage", "Parking", "Sécurité 24/7",
+                        "Balcon", "Cour", "Groupe électrogène", "Forage"]
+            }
+            return ["Wifi", "Climatisation", "Télévision", "Réfrigérateur", "Cuisine équipée",
+                    "Eau chaude", "Lit(s)", "Ménage inclus", "Parking", "Sécurité 24/7", "Groupe électrogène"]
+        }
+    }
+
+    /// Retain and show legacy/custom tags too, so editing never hides a value
+    /// that is already saved on the listing.
+    private var all: [String] {
+        standardOptions + listing.tags.filter { !standardOptions.contains($0) }.sorted()
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {

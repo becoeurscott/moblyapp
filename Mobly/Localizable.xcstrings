@@ -58,6 +58,9 @@
         }
       }
     },
+    "/ %@" : {
+
+    },
     "/jour" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -202,6 +205,16 @@
     },
     "%lld en attente" : {
 
+    },
+    "%lld étoile%@" : {
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld étoile%2$@"
+          }
+        }
+      }
     },
     "%lld j restants" : {
 
@@ -918,6 +931,9 @@
     "Annonces de %@" : {
 
     },
+    "Annonces illimitées, badge vérifié, demandes de visite et statistiques." : {
+
+    },
     "Annonces publiées" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1261,6 +1277,9 @@
           }
         }
       }
+    },
+    "Aucun paiement aujourd'hui. À la fin des 7 jours d'essai, payez 5 000 FCFA pour garder votre compte propriétaire actif. En continuant, vous acceptez les Conditions d'utilisation de Mobly." : {
+
     },
     "Aucun pays trouvé" : {
       "extractionState" : "manual",
@@ -2357,6 +2376,9 @@
         }
       }
     },
+    "Chambres, appartements, bureaux et boutiques vérifiés partout au Cameroun. Trouvez, visitez et réservez en toute confiance." : {
+
+    },
     "Chambres, bureaux, boutiques et plus, près de vous." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2624,6 +2646,12 @@
           }
         }
       }
+    },
+    "Combien de jours comptez-vous rester au moins ?" : {
+
+    },
+    "Combien de mois comptez-vous rester au moins ?" : {
+
     },
     "Commencer" : {
       "extractionState" : "manual",
@@ -3841,6 +3869,16 @@
     "Douche" : {
 
     },
+    "Du %@ au %@" : {
+      "localizations" : {
+        "fr" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Du %1$@ au %2$@"
+          }
+        }
+      }
+    },
     "Durée indéterminée" : {
 
     },
@@ -4270,6 +4308,9 @@
         }
       }
     },
+    "Envoyer" : {
+
+    },
     "Envoyer la demande" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4562,9 +4603,6 @@
 
     },
     "Essai gratuit 7 jours" : {
-
-    },
-    "Essayez 7 jours gratuitement,\nou payez une fois pour tout activer." : {
 
     },
     "Essayez un autre quartier ou une ville." : {
@@ -5545,9 +5583,6 @@
         }
       }
     },
-    "Le propriétaire vous attend demain à 10 h." : {
-
-    },
     "Le visiteur pourra accepter ou refuser directement dans la conversation." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5695,6 +5730,12 @@
         }
       }
     },
+    "Location à la journée, pour quelques jours" : {
+
+    },
+    "Location au mois, pour s'installer" : {
+
+    },
     "Long séjour" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5711,6 +5752,9 @@
           }
         }
       }
+    },
+    "Long séjour ou court séjour ?" : {
+
     },
     "Louer une chambre, un studio, un bureau…" : {
 
@@ -5753,6 +5797,9 @@
       }
     },
     "Maintenance en cours" : {
+
+    },
+    "maintenant" : {
 
     },
     "Maison" : {
@@ -5915,6 +5962,9 @@
       }
     },
     "Merci de votre patience." : {
+
+    },
+    "Merci pour votre avis !" : {
 
     },
     "Mes annonces" : {
@@ -6149,6 +6199,9 @@
 
     },
     "mobly" : {
+
+    },
+    "MOBLY" : {
 
     },
     "Mobly · Votre espace, à portée de main." : {
@@ -6427,7 +6480,7 @@
     "Moyen de paiement" : {
 
     },
-    "Ne ratez aucun locataire" : {
+    "Ne ratez aucune demande" : {
 
     },
     "Ne ratez aucune réponse" : {
@@ -6841,7 +6894,7 @@
     "On garde les espaces près de vous ?" : {
 
     },
-    "On vous prévient dès qu'un locataire vous écrit ou demande une visite, rien d'autre." : {
+    "On vous prévient dès qu'un utilisateur vous écrit ou demande une visite." : {
 
     },
     "Origine des vues" : {
@@ -7078,6 +7131,9 @@
       }
     },
     "Paiement sécurisé. Vous confirmerez sur votre téléphone." : {
+
+    },
+    "Paiement unique de 5 000 FCFA par Mobile Money. Votre compte propriétaire est activé dès la confirmation du paiement. En continuant, vous acceptez les Conditions d'utilisation de Mobly." : {
 
     },
     "Paiement unique. Aucun abonnement ni frais mensuel par la suite." : {
@@ -7608,6 +7664,9 @@
 
     },
     "Pour vous" : {
+
+    },
+    "Pour vous montrer les bons prix, au mois ou à la journée." : {
 
     },
     "PRÉFÉRENCES" : {
@@ -8299,6 +8358,9 @@
           }
         }
       }
+    },
+    "Quel est votre budget par jour ?" : {
+
     },
     "Quel est votre budget par mois ?" : {
 
@@ -9426,6 +9488,9 @@
         }
       }
     },
+    "Statistiques du boost" : {
+
+    },
     "Statistiques globales" : {
 
     },
@@ -10378,9 +10443,6 @@
         }
       }
     },
-    "Un locataire veut visiter votre studio." : {
-
-    },
     "Un titre clair et une description honnête attirent plus de contacts." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10397,6 +10459,9 @@
           }
         }
       }
+    },
+    "Un utilisateur désire visiter votre espace." : {
+
     },
     "Une adresse confirmée vous permet de réinitialiser votre mot de passe par e-mail si vous n’avez plus accès à votre numéro." : {
 
@@ -11022,6 +11087,9 @@
         }
       }
     },
+    "Voir" : {
+
+    },
     "Voir détails" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11040,6 +11108,9 @@
       }
     },
     "Voir la photo en plein écran" : {
+
+    },
+    "Voir la visite" : {
 
     },
     "Voir les espaces près de vous" : {
@@ -11258,6 +11329,9 @@
         }
       }
     },
+    "Votre demande a été confirmée." : {
+
+    },
     "Votre espace" : {
 
     },
@@ -11332,6 +11406,9 @@
         }
       }
     },
+    "Votre note nous aide à améliorer l’application." : {
+
+    },
     "Votre numéro" : {
 
     },
@@ -11353,6 +11430,9 @@
       }
     },
     "Votre position" : {
+
+    },
+    "Votre prochain espace\nvous attend" : {
 
     },
     "Votre profil affiche le badge vérifié.\nCela renforce la confiance des hôtes." : {
@@ -11427,6 +11507,9 @@
       }
     },
     "Vous" : {
+
+    },
+    "Vous aimez Mobly ?" : {
 
     },
     "Vous choisissez qui rencontrer. Vous décidez." : {

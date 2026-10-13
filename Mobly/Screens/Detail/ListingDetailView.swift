@@ -211,6 +211,12 @@ struct ListingDetailView: View {
                     heroGallery
                     heroButtons
                 }
+                // The gallery is deliberately taller by the top inset so it
+                // can run behind the status area. Let this layer extend to
+                // the screen edge; otherwise its origin stays below the
+                // Dynamic Island while its height still includes that inset,
+                // pushing the controls and image out of alignment.
+                .ignoresSafeArea(edges: .top)
 
                 ScrollView(showsIndicators: false) {
                     content
@@ -225,7 +231,6 @@ struct ListingDetailView: View {
                 stickyBar
             }
         }
-        .swipeToDismiss(onDismiss: onClose, ignoreTopSafeArea: true)
         .onAppear {
             // Once per open. `.onAppear` re-fires on every return from the
             // photo viewer, the grid or a chat — re-fetching the page, the avis

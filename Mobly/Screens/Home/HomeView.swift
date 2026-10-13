@@ -205,11 +205,11 @@ struct HomeView: View {
     private var featuredListings: [Listing] {
         let sets = carouselSets
         guard !sets.isEmpty else { return [] }
-        return sets[carouselSetIndex % sets.count]
+        return sets[min(carouselSetIndex, sets.count - 1)]
     }
 
     /// Three sets of 6 the carousel rotates through:
-    ///   0 – Boostées : every boosted space, any region, first — then top-rated
+    ///   0 – Boostées près de vous, then top-rated local results
     ///   1 – Mieux notées : best rated, one per category for variety
     ///   2 – Près de vous : best rated in the user's city
     /// Boosted spaces are what owners pay for, so they lead set 0 and are
@@ -219,11 +219,29 @@ struct HomeView: View {
         let all = liveListings
         guard !all.isEmpty else { return [] }
         let boosted = all.filter { $0.boosted }
+        let localListings: [Listing]
+        if !store.nearby.isEmpty && isInCameroon && config.isEnabled("search.nearby") {
+            let nearIds = Set(store.nearby.map(\.id))
+            localListings = all.filter { nearIds.contains($0.id) }
+        } else if let city = userCity, isInCameroon {
+            let local = all.filter {
+                $0.location.folding(options: .diacriticInsensitive, locale: .current)
+                    .lowercased().contains(city)
+            }
+            localListings = local.isEmpty ? all : local
+        } else {
+            localListings = all
+        }
+        let localBoosted = localListings.filter { $0.boosted }
+        let remainingBoosted = boosted.filter { b in !localBoosted.contains(where: { $0.id == b.id }) }
         let topRated = all.sorted { score($0) > score($1) }
         var sets: [[Listing]] = []
 
         // --- Set 0: Boostées ---
-        var set0 = Array(boosted.prefix(6))
+        var set0 = Array(localBoosted.prefix(6))
+        if set0.count < 6 {
+            for l in remainingBoosted where set0.count < 6 { set0.append(l) }
+        }
         for l in topRated where set0.count < 6 && !set0.contains(where: { $0.id == l.id }) {
             set0.append(l)
         }
@@ -301,7 +319,9 @@ struct HomeView: View {
                     .padding(.top, 4)
                     .padding(.bottom, 24)
             } else {
-                FeaturedHeroCarousel(listings: featuredListings, onOpen: onOpenListing)
+                FeaturedHeroCarousel(listings: featuredListings) { listing in
+                    onOpenListing(listing)
+                }
                     .padding(.top, 4)
                     .padding(.bottom, 24)
             }

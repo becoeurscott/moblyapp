@@ -115,7 +115,7 @@ export const flagsSchema = z
     'share': flag(),
     'search.savedSearches': flag(),
     'home.carousel': flag(),
-    'ads.banner': flag(false),
+    'ads.banner': flag(true),
     'analytics': flag(),
     'account.delete': flag(),
 

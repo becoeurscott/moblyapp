@@ -250,7 +250,7 @@ ownerRouter.get(
     const [
       viewsAll, contactsAll, favoritesAll, visitsAll,
       viewsThis, viewsPrev, contactsThis, contactsPrev, favsThis, favsPrev,
-      viewsByDay, sources,
+      viewsByDay, sources, activeBoost, boostViews, boostContacts, boostFavorites,
     ] = await Promise.all([
       prisma.viewEvent.count({ where: { listingId: listing.id } }),
       prisma.contactEvent.count({ where: { listingId: listing.id } }),
@@ -277,6 +277,22 @@ ownerRouter.get(
         by: ['source'],
         where: { listingId: listing.id, createdAt: { gte: sevenAgo } },
         _count: { _all: true },
+      }),
+      prisma.boost.findFirst({
+        where: { listingId: listing.id, expiresAt: { gt: now } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.viewEvent.count({
+        where: { listingId: listing.id, source: 'boost',
+          ...(listing.boostExpiresAt ? { createdAt: { gte: listing.boostExpiresAt } } : {}) },
+      }),
+      prisma.contactEvent.count({
+        where: { listingId: listing.id,
+          ...(listing.boostExpiresAt ? { createdAt: { gte: listing.boostExpiresAt } } : {}) },
+      }),
+      prisma.favorite.count({
+        where: { listingId: listing.id,
+          ...(listing.boostExpiresAt ? { createdAt: { gte: listing.boostExpiresAt } } : {}) },
       }),
     ]);
 
@@ -340,6 +356,15 @@ ownerRouter.get(
           favorites: pct(favsThis, favsPrev),
         },
       },
+      boost: activeBoost ? {
+        startsAt: activeBoost.createdAt,
+        expiresAt: activeBoost.expiresAt,
+        days: activeBoost.days,
+        impressions: boostViews,
+        clicks: boostViews,
+        contacts: boostContacts,
+        favorites: boostFavorites,
+      } : null,
       daily,
       sources: sourceBreakdown,
       generatedAt: now.toISOString(),

@@ -43,6 +43,7 @@ struct OwnerStatsView: View {
                     summaryCard
                     statGrid
                     viewsChart
+                    boostStatsCard
                     if annonce.isBoosted { boostCard }
                     sourcesCard
                 }
@@ -175,11 +176,44 @@ struct OwnerStatsView: View {
         let rate = String(format: "%.1f%%", contactRate * 100)
         let d = stats?.metrics.deltas7d
         return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-            statCard("eye.fill", 0x3A4FF0, 0xEEF0FE, totalViews.formattedGrouped, "Vues totales", d?.views)
+            statCard("eye.fill", 0x3A4FF0, 0xEEF0FE, totalViews.formattedGrouped, "Impressions", d?.views)
+            statCard("arrow.up.right", 0x4C9BFF, 0xEAF3FF, totalViews.formattedGrouped, "Clics · ouvertures de l'annonce", d?.views)
+            statCard("heart.fill", 0x4C9BFF, 0xEAF3FF, "\(totalFavorites)", "Favoris", d?.favorites)
             statCard("bubble.left.fill", 0x1F8A5B, 0xE9F9EF, "\(totalContacts)", "Contacts", d?.contacts)
-            statCard("heart.fill", 0x4C9BFF, 0xEAF3FF, "\(totalFavorites)", "Ajouts en préférés", d?.favorites)
-            statCard("chart.line.uptrend.xyaxis", 0x6B5BF5, 0xEDEBFE, rate, "Taux de contact", nil)
         }
+    }
+
+    @ViewBuilder
+    private var boostStatsCard: some View {
+        if let boost = stats?.boost {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Statistiques du boost")
+                    .font(.moblyHeading(16)).foregroundStyle(Color.moblyTextPrimary)
+                HStack(spacing: 8) {
+                    boostMetric("eye.fill", boost.impressions, "Impressions")
+                    boostMetric("arrow.up.right", boost.clicks, "Clics")
+                    boostMetric("heart.fill", boost.favorites, "Favoris")
+                    boostMetric("bubble.left.fill", boost.contacts, "Contacts")
+                }
+                Text("Du \(boost.startsAt.formatted(date: .abbreviated, time: .omitted)) au \(boost.expiresAt.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.moblyBody(11)).foregroundStyle(Color(hex: 0x777A88))
+            }
+            .padding(16)
+            .background(RoundedRectangle(cornerRadius: 18).fill(.white)
+                .shadow(color: Color(hex: 0x14152A).opacity(0.05), radius: 9, y: 3))
+        }
+    }
+
+    private func boostMetric(_ icon: String, _ value: Int, _ title: String) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: icon).foregroundStyle(Color.moblyPrimary)
+            Text(value.formattedGrouped).font(.moblyHeading(15)).foregroundStyle(Color.moblyTextPrimary)
+            Text(title).font(.moblyBody(9.5)).foregroundStyle(Color(hex: 0x777A88))
+                .lineLimit(1).minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(hex: 0xF5F6FA)))
     }
 
     private func statCard(_ icon: String, _ fg: UInt32, _ bg: UInt32, _ value: String, _ label: String, _ deltaPct: Int?) -> some View {

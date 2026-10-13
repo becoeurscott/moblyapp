@@ -20,6 +20,7 @@ final class UserDataStore: ObservableObject {
     // Notifications
     @Published private(set) var notifications: [NotificationDTO] = []
     @Published private(set) var unreadNotifications = 0
+    @Published private(set) var unreadMessages = 0
 
     // Owner
     @Published private(set) var myListings: [ListingDTO] = []
@@ -27,6 +28,10 @@ final class UserDataStore: ObservableObject {
     @Published private(set) var isOffline = false
 
     private let api = MoblyAPI.shared
+
+    func setUnreadMessages(_ count: Int) {
+        unreadMessages = max(0, count)
+    }
 
     private init() {
         // Paint the owner dashboard from the last known annonces before the
@@ -85,6 +90,7 @@ final class UserDataStore: ObservableObject {
         favoriteIds = []
         notifications = []
         unreadNotifications = 0
+        unreadMessages = 0
         myListings = []
         clearDisk()
     }

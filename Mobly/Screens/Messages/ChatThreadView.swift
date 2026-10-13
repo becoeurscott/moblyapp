@@ -129,6 +129,12 @@ struct ChatThreadView: View {
         }
     }
 
+    /// Senders may unsend for everyone for four hours after sending. Keep this
+    /// check in the UI for clear choices; the API independently enforces it.
+    private func canDeleteForBoth(_ message: ChatMessage) -> Bool {
+        message.fromMe && message.createdAt > Date().addingTimeInterval(-4 * 60 * 60)
+    }
+
     /// Voice + location travel as text placeholders today (no upload endpoint
     /// on the server), so infer kind from the payload when the DTO says TEXT.
     private static func inferKind(dtoKind: String, text: String, hasVisit: Bool) -> MessageKind {
@@ -487,7 +493,7 @@ struct ChatThreadView: View {
                 deleteTarget = nil
                 Task { await chat.deleteMessage(threadId: thread.id, messageId: m.id, forBoth: false) }
             }
-            if deleteTarget?.fromMe == true {
+            if let target = deleteTarget, canDeleteForBoth(target) {
                 Button("Supprimer pour tout le monde", role: .destructive) {
                     guard let m = deleteTarget else { return }
                     deleteTarget = nil
@@ -507,7 +513,8 @@ struct ChatThreadView: View {
                 Task { await chat.deleteMessages(threadId: thread.id, messageIds: group.map(\.id), forBoth: false) }
             }
             // A group is always one sender's run, so the first photo speaks for all.
-            if deleteGroupTarget?.first?.fromMe == true {
+            if let group = deleteGroupTarget, !group.isEmpty,
+               group.allSatisfy({ canDeleteForBoth($0) }) {
                 Button("Supprimer pour tout le monde", role: .destructive) {
                     guard let group = deleteGroupTarget else { return }
                     deleteGroupTarget = nil
@@ -846,7 +853,7 @@ struct ChatThreadView: View {
                                  galleryURLs = []; galleryMessages = []
                                  replyingTo = msg
                              },
-                             canDeleteForBoth: galleryMessages.first?.fromMe == true,
+                             canDeleteForBoth: !galleryMessages.isEmpty && galleryMessages.allSatisfy({ canDeleteForBoth($0) }),
                              onDelete: galleryMessages.isEmpty || !config.isEnabled("chat.delete") ? nil : { index, forBoth in
                                  // Drop the photo from the open viewer right away;
                                  // removing the last one empties the URLs, which

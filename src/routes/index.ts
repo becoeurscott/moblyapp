@@ -17,6 +17,7 @@ import { adminRouter } from './admin.routes';
 import { cronRouter } from './cron.routes';
 import { verificationRouter } from './verification.routes';
 import { maintenanceRouter } from './maintenance.routes';
+import { appRatingRouter } from './appRating.routes';
 import { configRouter } from './config.routes';
 import { reportsRouter } from './reports.routes';
 import { supportRouter } from './support.routes';
@@ -59,6 +60,7 @@ api.use('/favorites', favoritesRouter);
 api.use('/threads', chatRouter);
 api.use('/devices', devicesRouter);
 api.use('/notifications', notificationsRouter);
+api.use('/app-rating', appRatingRouter);
 api.use('/users', usersRouter);
 api.use('/cron', cronRouter);
 api.use('/verification', verificationRouter); // Didit KYC: session, status, webhook

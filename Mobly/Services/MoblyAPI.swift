@@ -905,6 +905,15 @@ final class MoblyAPI {
                 let favorites: Int?
             }
         }
+        struct Boost: Codable {
+            let startsAt: Date
+            let expiresAt: Date
+            let days: Int
+            let impressions: Int
+            let clicks: Int
+            let contacts: Int
+            let favorites: Int
+        }
         struct DailyPoint: Codable {
             let date: String
             let label: String
@@ -917,6 +926,7 @@ final class MoblyAPI {
         }
         let listing: ListingDTO
         let metrics: Metrics
+        let boost: Boost?
         let daily: [DailyPoint]
         let sources: [SourceBucket]
         let generatedAt: String

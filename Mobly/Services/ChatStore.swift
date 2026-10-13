@@ -162,6 +162,9 @@ final class ChatStore: ObservableObject {
     var activeThreadId: String?
 
     var isConnected: Bool { socket.state == .connected }
+    /// Number of unread messages across conversations, used by the app icon
+    /// and the Messages tab badge.
+    var totalUnreadMessages: Int { threads.reduce(0) { $0 + max(0, $1.unread) } }
     let socket = ChatSocket()
 
     private let api = MoblyAPI.shared
@@ -311,6 +314,7 @@ final class ChatStore: ObservableObject {
             } else {
                 threads = fresh
             }
+            UserDataStore.shared.setUnreadMessages(totalUnreadMessages)
             saveToDisk()
         } catch let e as MoblyAPI.APIError {
             // Cached threads stay on screen; only the banner changes.
@@ -540,6 +544,7 @@ final class ChatStore: ObservableObject {
     func deleteMessages(threadId: String, messageIds: [String], forBoth: Bool) async {
         let ids = Set(messageIds)
         guard !ids.isEmpty else { return }
+        let previousMessages = messages[threadId] ?? []
         messages[threadId]?.removeAll { ids.contains($0.id) }
         saveToDisk()
         let api = self.api
@@ -557,6 +562,13 @@ final class ChatStore: ObservableObject {
         }
         if let error = failure {
             isOffline = (error as? MoblyAPI.APIError)?.isOffline ?? false
+            // The optimistic removal is only final after the server confirms
+            // it. Restore the deleted rows if the request fails, while keeping
+            // any messages that arrived in the meantime.
+            var restored = Dictionary(uniqueKeysWithValues: previousMessages.map { ($0.id, $0) })
+            for message in messages[threadId] ?? [] { restored[message.id] = message }
+            messages[threadId] = restored.values.sorted { $0.createdAt < $1.createdAt }
+            saveToDisk()
         }
     }
 
@@ -585,6 +597,7 @@ final class ChatStore: ObservableObject {
         if let i = threads.firstIndex(where: { $0.id == threadId }) {
             threads[i].unread = 0
         }
+        UserDataStore.shared.setUnreadMessages(totalUnreadMessages)
         Task {
             _ = try? await api.request(
                 "threads/\(threadId)/read", method: "POST", authorized: true
@@ -631,6 +644,7 @@ final class ChatStore: ObservableObject {
                 // First message of a thread we haven't loaded yet.
                 Task { await loadThreads() }
             }
+            UserDataStore.shared.setUnreadMessages(totalUnreadMessages)
             // If a message arrives while the user has the thread open, ack
             // it as read immediately so the server counters agree with the UI.
             if viewing && !mine {

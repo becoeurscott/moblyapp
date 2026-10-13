@@ -212,6 +212,7 @@ model User {
   reviewsReceived  Review[]               @relation("ReviewSubject")
   messages         Message[]
   notifications    Notification[]
+  appRating        AppRating?
   threads          ThreadParticipant[]
   refreshTokens    RefreshToken[]
   emailCodes       EmailCode[]
@@ -550,6 +551,21 @@ model Review {
   @@index([listingId])
 }
 
+/// Latest in-app experience rating. Separate from listing reviews and never
+/// treated as an App Store review.
+model AppRating {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  rating        Int?
+  comment       String?
+  promptAgain   Boolean  @default(false)
+  submittedAt   DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([rating, submittedAt])
+}
+
 // ─────────────────────────────────────────────────────────────
 // Conversation (the 2026 pivot: Mobly owns the funnel)
 // ─────────────────────────────────────────────────────────────
@@ -589,6 +605,8 @@ model ThreadParticipant {
   /// moment is hidden from them (messages + inbox row), so writing again starts
   /// from scratch — while the other participant keeps the full conversation.
   clearedAt   DateTime?
+  /// Message ids hidden only for this participant after "delete for me".
+  hiddenMessageIds String[] @default([])
 
   thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)

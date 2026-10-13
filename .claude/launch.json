@@ -4,14 +4,45 @@
     {
       "name": "admin",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "/Users/annybabeni/Developer/mobly app/admin", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "/Users/annybabeni/Developer/mobly app/admin",
+        "run",
+        "dev"
+      ],
       "port": 3001
     },
     {
       "name": "admin-trial",
       "runtimeExecutable": "env",
-      "runtimeArgs": ["API_URL=http://127.0.0.1:4011/api/v1", "npm", "--prefix", "/Users/annybabeni/Developer/mobly app/admin", "exec", "--", "next", "dev", "/Users/annybabeni/Developer/mobly app/admin", "--port", "3002"],
+      "runtimeArgs": [
+        "API_URL=http://127.0.0.1:4011/api/v1",
+        "npm",
+        "--prefix",
+        "/Users/annybabeni/Developer/mobly app/admin",
+        "exec",
+        "--",
+        "next",
+        "dev",
+        "/Users/annybabeni/Developer/mobly app/admin",
+        "--port",
+        "3002"
+      ],
       "port": 3002
+    },
+    {
+      "name": "mobly-site",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "-y",
+        "http-server",
+        "/Users/annybabeni/websites/mobly",
+        "-p",
+        "8765",
+        "-c-1",
+        "--silent"
+      ],
+      "port": 8765
     }
   ]
 }

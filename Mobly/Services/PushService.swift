@@ -5,11 +5,8 @@ import Combine
 
 /// Push notifications: permission, APNs token registration, and taps.
 ///
-/// Permission is **not** requested at launch. iOS gives an app exactly one
-/// chance at the system prompt — refuse it and the only way back is Settings,
-/// which almost nobody does. So the ask is deferred until the user has done
-/// something that makes notifications obviously useful (sending their first
-/// message), where the yes-rate is far higher.
+/// Permission is requested from the signup primer or on an explicitly useful
+/// action, so all notification categories can reach the device.
 @MainActor
 final class PushService: NSObject, ObservableObject {
     static let shared = PushService()

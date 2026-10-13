@@ -66,6 +66,7 @@ struct MainTabView: View {
     }()
     @State private var selectedListing: Listing?
     @State private var showNotifications = false
+    @State private var showAppRatingPrompt = false
     /// The once-per-account welcome card shown on first arrival after signup.
     @State private var welcomeBanner: WelcomeBannerContent?
     /// Upcoming visit / pending requests reminder card.
@@ -103,6 +104,20 @@ struct MainTabView: View {
     @State private var visitedTabs: Set<MoblyTab> = []
 
     private func mounted(_ t: MoblyTab) -> Bool { tab == t || visitedTabs.contains(t) }
+
+    private func checkAppRatingPrompt() async {
+        guard AuthStore.shared.isSignedIn, !showAppRatingPrompt else { return }
+        let cooldown = UserDefaults.standard.object(forKey: "appRatingNextPromptAt") as? Date
+        struct Status: Decodable { let shouldPrompt: Bool; let adminRequested: Bool? }
+        guard let status = try? await MoblyAPI.shared.request(
+            "app-rating/status", authorized: true
+        ) as Status else { return }
+        guard status.shouldPrompt,
+              status.adminRequested == true || cooldown == nil || cooldown! <= Date() else { return }
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+            showAppRatingPrompt = true
+        }
+    }
 
     /// Where the open came from, reported with the view so the owner's
     /// "Origine des vues" can tell Home, Explore, a boost, a shared link… apart.
@@ -406,7 +421,9 @@ struct MainTabView: View {
         .onAppear { SessionTracker.shared.log("screen.view", ["screen": "\(tab)"]) }
         .onChange(of: tab) { _, new in
             SessionTracker.shared.log("screen.view", ["screen": "\(new)"])
+            if new == .home { Task { await checkAppRatingPrompt() } }
         }
+        .task { await checkAppRatingPrompt() }
         .fullScreenCover(isPresented: $showBecomeOwnerFromRoute) {
             BecomeOwnerView(
                 onClose: { showBecomeOwnerFromRoute = false },
@@ -467,6 +484,19 @@ struct MainTabView: View {
             }
         }
         .task { await checkVisitReminder() }
+        .overlay {
+            if showAppRatingPrompt {
+                AppRatingPrompt {
+                    let next = UserDefaults.standard.object(forKey: "appRatingNextPromptAt") as? Date
+                    if next == nil || next! <= Date() {
+                        UserDefaults.standard.set(Date().addingTimeInterval(30 * 24 * 60 * 60),
+                                                  forKey: "appRatingNextPromptAt")
+                    }
+                    withAnimation(.easeOut(duration: 0.2)) { showAppRatingPrompt = false }
+                }
+                .zIndex(100)
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await checkVisitReminder() } }
         }
@@ -537,10 +567,7 @@ struct MoblyTabBar: View {
     @Namespace private var pillNS
 
     private var unreadCount: Int {
-        // Conversations with something unread, not messages: 20 messages from
-        // one person is one badge. Support lives outside the inbox, so it
-        // doesn't count here either.
-        chat.threads.filter { $0.unread > 0 && $0.participants.first?.isSupport != true }.count
+        chat.totalUnreadMessages
     }
 
     var body: some View {

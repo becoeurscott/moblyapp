@@ -65,10 +65,16 @@
 			);
 			name = Mobly;
 			packageProductDependencies = (
+				AA00000000000000000000D2 /* GoogleMobileAds */,
 			);
 			productName = Mobly;
 			productReference = AA000000000000000000000C /* Mobly.app */;
 			productType = "com.apple.product-type.application";
+		};
+		AA00000000000000000000D2 /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA00000000000000000000D1 /* GoogleMobileAds */;
+			productName = GoogleMobileAds;
 		};
 /* End PBXNativeTarget section */
 
@@ -96,12 +102,20 @@
 			mainGroup = AA000000000000000000000E;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			packageReferences = (
+				AA00000000000000000000D1 /* GoogleMobileAds */,
+			);
 			productRefGroup = AA000000000000000000000D /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				AA000000000000000000000B /* Mobly */,
 			);
+		};
+		AA00000000000000000000D1 /* GoogleMobileAds */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads";
+			requirement = { kind = upToNextMajorVersion; minimumVersion = 12.0.0; };
 		};
 /* End PBXProject section */
 

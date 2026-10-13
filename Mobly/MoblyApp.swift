@@ -1,4 +1,7 @@
 import SwiftUI
+import UIKit
+import Combine
+import GoogleMobileAds
 
 /// When the inbox was last synced on a foreground. `scenePhase` turns
 /// `.active` at launch and after every Control Center pull, Face ID prompt
@@ -10,6 +13,7 @@ struct MoblyApp: App {
     // APNs callbacks only reach a UIApplicationDelegate.
     @UIApplicationDelegateAdaptor(MoblyAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var badgeSync = AppIconBadgeSync()
 
     init() {
         MoblyFonts.registerBundledFonts()
@@ -19,6 +23,7 @@ struct MoblyApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .environmentObject(badgeSync)
                 .dismissKeyboardOnTap()
                 .scrollDismissesKeyboard(.immediately)
                 .preferredColorScheme(.light)
@@ -65,6 +70,7 @@ struct MoblyApp: App {
                     // still supported. Fetched before the UI settles so a
                     // disabled control is never briefly offered.
                     await RemoteConfigStore.shared.checkAtLaunch()
+                    await MobileAds.shared.start()
                     // Fetch listings early so the onboarding slides can render
                     // real properties from the DB instead of the bundled
                     // sample cards. Detached so it doesn't get cancelled with
@@ -123,5 +129,23 @@ struct MoblyApp: App {
                     }
                 }
         }
+    }
+}
+
+/// Mirrors unread conversations onto the iOS app icon. Keep the app badge
+/// synchronized with the in-app Messages badge and clear it on read/sign-out.
+@MainActor
+final class AppIconBadgeSync: ObservableObject {
+    private var cancellables = Set<AnyCancellable>()
+
+    init() {
+        UserDataStore.shared.$unreadMessages
+            .combineLatest(AuthStore.shared.$user)
+            .receive(on: DispatchQueue.main)
+            .sink { unreadMessages, user in
+                let unread = user != nil ? unreadMessages : 0
+                UNUserNotificationCenter.current().setBadgeCount(unread)
+            }
+            .store(in: &cancellables)
     }
 }

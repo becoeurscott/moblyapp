@@ -1137,7 +1137,9 @@ struct AddListingView: View {
     private func publish() {
         var deals = [stay == .court ? "Court séjour" : "À louer"]
         deals.append(furnished ? "Meublé" : "Non meublé")
-        var tags = Array(amenities.sorted().prefix(3))
+        // Keep every selected amenity in the server record. The old three-tag
+        // cap made equipment disappear from the published listing and editor.
+        var tags = Array(amenities.sorted())
         if tags.isEmpty { tags = [furnished ? "Meublé" : "Non meublé"] }
         var subParts = [furnished ? "Meublé" : "Non meublé"]
         if isApartment {

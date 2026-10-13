@@ -162,11 +162,30 @@ final class SwipeDismissHostController<Content: View>: UIViewController,
         // A flow inside with a step to go back to (`stepSwipeBack`) gets the
         // edge swipe: going back one step, not closing the whole screen.
         if gestureRecognizer === edgeGesture {
+            // A NavigationStack hosted inside this full-screen cover owns
+            // the edge gesture whenever it has pushed a destination. If the
+            // cover handler also begins, a stats/detail swipe closes the
+            // entire dashboard and lands back on the underlying profile.
+            if hasPushedNavigationDestination { return false }
             return !EdgeSwipeAnchorView.claimsEdge(within: hostingController.view)
         }
         guard gestureRecognizer === downGesture else { return true }
         let vel = downGesture.velocity(in: view)
         return vel.y > 0 && abs(vel.y) > abs(vel.x) * 1.5
+    }
+
+    /// SwiftUI's NavigationStack installs a UINavigationController below the
+    /// hosting controller. Walk its controller subtree so the cover gesture
+    /// can yield to UIKit's interactive-pop gesture while a page is pushed.
+    private var hasPushedNavigationDestination: Bool {
+        func containsPushedStack(_ controller: UIViewController) -> Bool {
+            if let navigation = controller as? UINavigationController,
+               navigation.viewControllers.count > 1 {
+                return true
+            }
+            return controller.children.contains(where: containsPushedStack)
+        }
+        return containsPushedStack(hostingController)
     }
 
     func gestureRecognizer(

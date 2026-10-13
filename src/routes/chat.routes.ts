@@ -74,7 +74,12 @@ chatRouter.get(
       .map((p) => {
         const t = p.thread;
         const others = t.participants.filter((x) => x.userId !== req.userId!).map((x) => x.user);
-        const last = t.messages[0];
+        const candidateLast = t.messages[0];
+        // The inbox only fetched its newest message. If this participant hid
+        // it, keep it out of their preview as well as the transcript.
+        const last = candidateLast && !p.hiddenMessageIds.includes(candidateLast.id)
+          ? candidateLast
+          : null;
         return {
           id: t.id,
           listing: t.listing,
@@ -292,6 +297,7 @@ chatRouter.get(
       where: {
         threadId: req.params.id,
         deletedAt: null,
+        ...(me.hiddenMessageIds.length > 0 ? { id: { notIn: me.hiddenMessageIds } } : {}),
         ...(createdAt.lt || createdAt.gt ? { createdAt } : {}),
       },
       orderBy: { createdAt: 'desc' },
@@ -507,7 +513,7 @@ chatRouter.post(
  * - "forMe"   — client-side only: the server confirms and the app removes the
  *               bubble locally. The other participant still sees the message.
  * - "forBoth" — soft-deletes the message row (`deletedAt`) so it disappears
- *               from both sides. Only the original sender may use this mode.
+ *               from both sides. The original sender may use this for four hours.
  */
 chatRouter.delete(
   '/:id/messages/:mid',
@@ -521,7 +527,7 @@ chatRouter.delete(
 
     const message = await prisma.message.findUnique({
       where: { id: req.params.mid },
-      select: { id: true, threadId: true, senderId: true, deletedAt: true },
+      select: { id: true, threadId: true, senderId: true, deletedAt: true, createdAt: true },
     });
     if (!message || message.threadId !== req.params.id) {
       throw new ApiError(404, 'Message introuvable', 'NOT_FOUND');
@@ -532,6 +538,10 @@ chatRouter.delete(
       if (message.senderId !== req.userId!) {
         throw new ApiError(403, 'Vous ne pouvez supprimer que vos propres messages pour les deux', 'FORBIDDEN');
       }
+      const unsendDeadline = message.createdAt.getTime() + 4 * 60 * 60 * 1000;
+      if (Date.now() > unsendDeadline) {
+        throw new ApiError(403, 'Le délai de suppression pour tout le monde est dépassé. Vous pouvez supprimer ce message pour vous.', 'FORBIDDEN');
+      }
       await prisma.message.update({
         where: { id: message.id },
         data: { deletedAt: new Date(), deletedBy: req.userId! },
@@ -539,9 +549,14 @@ chatRouter.delete(
       const ids = await threadParticipantIds(message.threadId);
       emitToUsers(ids, { type: 'message:deleted', threadId: message.threadId, messageId: message.id });
     }
-    // "forMe" needs no server-side persistence — the client removes the bubble
-    // from its local cache and the message reappears on a fresh login (same as
-    // every other chat app's "delete for me" behaviour).
+    if (mode === 'forMe') {
+      // Persist per participant so the message stays hidden after reloads and
+      // when this account is used on another device.
+      await prisma.threadParticipant.update({
+        where: { threadId_userId: { threadId: message.threadId, userId: req.userId! } },
+        data: { hiddenMessageIds: { push: message.id } },
+      });
+    }
 
     res.json({ ok: true });
   })

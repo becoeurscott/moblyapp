@@ -41,6 +41,39 @@ adminRouter.use('/support', adminSupportRouter);
 adminRouter.use('/users', adminUsersRouter);
 adminRouter.use('/restrictions', adminUsersRouter);
 
+/** Latest in-app ratings submitted by users. */
+adminRouter.get('/app-ratings', asyncHandler(async (_req, res) => {
+  const [items, total, average] = await Promise.all([
+    prisma.appRating.findMany({
+      orderBy: { submittedAt: 'desc' },
+      take: 500,
+      include: { user: { select: { id: true, fullName: true, phone: true, email: true, city: true } } },
+    }),
+    prisma.appRating.count(),
+    prisma.appRating.aggregate({ _avg: { rating: true } }),
+  ]);
+  res.json({ total, average: average._avg.rating ?? 0, items });
+}));
+
+/** Ask a user to rate Mobly again on their next Home visit. */
+adminRouter.post('/app-ratings/:userId/request-again', asyncHandler(async (req, res) => {
+  const user = await prisma.user.findUnique({ where: { id: req.params.userId }, select: { id: true } });
+  if (!user) throw new ApiError(404, 'Utilisateur introuvable', 'NOT_FOUND');
+  await prisma.appRating.upsert({
+    where: { userId: user.id },
+    create: { userId: user.id, rating: null, promptAgain: true },
+    update: { promptAgain: true },
+  });
+  await notifyUser({
+    userId: user.id,
+    type: 'APP_RATING_REQUEST',
+    title: 'Votre avis compte',
+    body: 'Dites-nous comment améliorer Mobly.',
+    payload: { action: 'app_rating' },
+  });
+  res.json({ ok: true });
+}));
+
 // ═════════════════════════════════════════════════════════════
 // Overview + analytics
 // ═════════════════════════════════════════════════════════════

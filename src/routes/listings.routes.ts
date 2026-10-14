@@ -166,14 +166,36 @@ listingsRouter.get(
       throw new ApiError(404, 'Annonce introuvable', 'NOT_FOUND');
     }
     if (req.query.track !== 'false' && listing.ownerId !== req.userId) {
-      await prisma.$transaction([
-        prisma.viewEvent.create({ data: { listingId: listing.id, userId: req.userId ?? null, source } }),
-        prisma.listing.update({ where: { id: listing.id }, data: { views: { increment: 1 } } }),
-      ]);
+      await recordClick(listing.id, req.userId ?? null, source);
     }
     res.json({ listing: serializeListing(listing) });
   })
 );
+
+/** A click (the detail screen opened) always counts as an impression too: an
+ *  annonce can't be opened without having been on screen. Unless this viewer
+ *  already has an impression left over from the last 30 minutes (the card
+ *  they just tapped), the click brings its own — opens from old app builds,
+ *  shared links, notifications or chat had none, which is how clicks ended up
+ *  above impressions. Anonymous viewers can't be matched, so theirs always do. */
+const CLICK_IMPRESSION_WINDOW_MS = 30 * 60 * 1000;
+async function recordClick(listingId: string, userId: string | null, source: string | null) {
+  let needsImpression = true;
+  if (userId) {
+    const since = new Date(Date.now() - CLICK_IMPRESSION_WINDOW_MS);
+    const [impressions, clicks] = await Promise.all([
+      prisma.impressionEvent.count({ where: { listingId, userId, createdAt: { gte: since } } }),
+      prisma.viewEvent.count({ where: { listingId, userId, createdAt: { gte: since } } }),
+    ]);
+    needsImpression = impressions <= clicks;
+  }
+  const data = { listingId, userId, source };
+  await prisma.$transaction([
+    ...(needsImpression ? [prisma.impressionEvent.create({ data })] : []),
+    prisma.viewEvent.create({ data }),
+    prisma.listing.update({ where: { id: listingId }, data: { views: { increment: 1 } } }),
+  ]);
+}
 
 const listingMetricBody = z.object({ source: z.string().min(1).max(32).optional() });
 
@@ -191,10 +213,7 @@ async function recordListingMetric(req: any, res: any, type: 'impression' | 'cli
     if (type === 'impression') {
       await prisma.impressionEvent.create({ data });
     } else {
-      await prisma.$transaction([
-        prisma.viewEvent.create({ data }),
-        prisma.listing.update({ where: { id: listing.id }, data: { views: { increment: 1 } } }),
-      ]);
+      await recordClick(data.listingId, data.userId, data.source);
     }
     emitToUsers([listing.ownerId], { type: 'owner:stats' });
   }

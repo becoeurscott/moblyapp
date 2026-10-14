@@ -33,12 +33,16 @@ favoritesRouter.post(
   restrictionGate('FAVORITE'),
   asyncHandler(async (req, res) => {
     const { listingId } = req.params;
-    await prisma.favorite.upsert({
-      where: { userId_listingId: { userId: req.userId!, listingId } },
-      create: { userId: req.userId!, listingId },
-      update: {},
-    });
-    await prisma.listing.update({ where: { id: listingId }, data: { favorites: { increment: 1 } } }).catch(() => {});
+    // Count only a new favourite: repeating the POST used to inflate it.
+    const created = await prisma.favorite
+      .create({ data: { userId: req.userId!, listingId } })
+      .catch((err) => {
+        if (err?.code === 'P2002') return null; // already a favourite
+        throw err;
+      });
+    if (created) {
+      await prisma.listing.update({ where: { id: listingId }, data: { favorites: { increment: 1 } } }).catch(() => {});
+    }
     res.json({ favorited: true });
   })
 );

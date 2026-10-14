@@ -20,5 +20,11 @@ export function signToken(payload: JwtPayload): string {
 }
 
 export function verifyToken(token: string): JwtPayload {
-  return jwt.verify(token, env.jwtSecret) as JwtPayload;
+  const payload = jwt.verify(token, env.jwtSecret) as JwtPayload & { purpose?: unknown };
+  // Purpose tokens (password reset…) share the signing key but must never
+  // open a session: a reset token is handed out before any code is checked.
+  if (payload.purpose !== undefined) {
+    throw new jwt.JsonWebTokenError('not an access token');
+  }
+  return payload;
 }

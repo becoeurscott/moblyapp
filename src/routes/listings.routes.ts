@@ -341,9 +341,17 @@ listingsRouter.patch(
     const body = listingBody.partial().parse(req.body);
     assertNotBlocked(body.title);
     assertNotBlocked(body.about);
+    // A lower price is remembered so people who saved the annonce hear about it.
+    let priceDrop = {};
+    if (body.priceFcfa !== undefined) {
+      const before = await prisma.listing.findUnique({ where: { id: req.params.id }, select: { priceFcfa: true } });
+      if (before && body.priceFcfa < before.priceFcfa) {
+        priceDrop = { previousPriceFcfa: before.priceFcfa, priceDroppedAt: new Date() };
+      }
+    }
     const listing = await prisma.listing.update({
       where: { id: req.params.id },
-      data: body,
+      data: { ...body, ...priceDrop },
       include: ownerSelect,
     });
     cacheBust(LIST_CACHE);

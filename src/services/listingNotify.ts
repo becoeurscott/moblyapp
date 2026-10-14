@@ -10,7 +10,10 @@ export async function notifyNewListing(
   listing: { id: string; title: string; city: string; neighborhood?: string | null; priceFcfa: number },
   ownerId: string,
 ) {
-  if (!pushConfigured()) return;
+  // Replaced by the personalised once-a-day "Nous avons trouvé un espace
+  // pour vous" in services/automations.ts: this pushed every new annonce to
+  // every user in the city, with no cap.
+  if (process.env.INSTANT_NEW_LISTING_PUSH !== '1' || !pushConfigured()) return;
 
   const price = new Intl.NumberFormat('fr-FR').format(listing.priceFcfa) + ' FCFA';
   const where = listing.neighborhood ? `${listing.neighborhood}, ${listing.city}` : listing.city;

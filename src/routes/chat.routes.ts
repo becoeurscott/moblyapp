@@ -355,7 +355,9 @@ chatRouter.post(
       .object({
         text: z.string().min(1).max(configSnapshot().limits.messageMaxLength),
         clientId: z.string().min(1).max(64).optional(),
-        kind: z.enum(['TEXT', 'IMAGE', 'VOICE', 'SYSTEM']).default('TEXT'),
+        // SYSTEM rows (visit updates, call logs) are written by the server
+        // only; a client could otherwise post fake "official" messages.
+        kind: z.enum(['TEXT', 'IMAGE', 'VOICE']).default('TEXT'),
         mediaUrl: z.string().url().optional(),
         durationSec: z.number().int().positive().optional(),
         replyToId: z.string().optional(),
@@ -405,6 +407,11 @@ chatRouter.post(
     }
 
     assertNotBlocked(text);
+
+    if (replyToId) {
+      const quoted = await prisma.message.findFirst({ where: { id: replyToId, threadId: req.params.id }, select: { id: true } });
+      if (!quoted) throw new ApiError(400, 'Message cité introuvable', 'VALIDATION_FAILED');
+    }
 
     // A retry after a timeout must resolve to the message already stored,
     // rather than posting it a second time.

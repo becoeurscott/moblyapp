@@ -352,6 +352,9 @@ model Listing {
   // Price
   priceFcfa  Int
   priceUnit  PriceUnit @default(PER_MONTH)
+  /// Set when an owner lowers the price, so favourites can be told.
+  previousPriceFcfa Int?
+  priceDroppedAt    DateTime?
   currency   String    @default("XAF")
   negotiable Boolean   @default(false)
 
@@ -460,6 +463,20 @@ model Favorite {
 /// for a space or offering one, which kinds, in which of the 10 régions, and
 /// a monthly budget. One row per user; every field is optional because each
 /// question can be skipped.
+/// One row per automated notification sent, keyed so each fires once
+/// (`trial:2d:<start>`, `matches:2026-10-14`…). `promo` rows count toward the
+/// per-user daily / weekly cap on non-essential nudges.
+model AutomationLog {
+  id        String   @id @default(cuid())
+  userId    String
+  key       String
+  promo     Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, key])
+  @@index([userId, createdAt])
+}
+
 model SearchPreference {
   id         String   @id @default(cuid())
   userId     String   @unique
@@ -850,6 +867,8 @@ model Report {
   targetId   String // listingId / userId / messageId / reviewId
   reason     String
   details    String?
+  /// Proof photos the reporter attached (uploaded image URLs).
+  evidence   String[]     @default([])
   status     ReportStatus @default(OPEN)
   resolution String?
   resolvedAt DateTime?

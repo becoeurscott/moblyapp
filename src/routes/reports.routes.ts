@@ -18,12 +18,19 @@ import { cacheBust } from '../lib/cache';
  */
 export const reportsRouter = Router();
 
-const body = z.object({
-  target: z.enum(['LISTING', 'USER', 'MESSAGE', 'REVIEW']),
-  targetId: z.string().min(1).max(64),
-  reason: z.string().min(3).max(120),
-  details: z.string().max(1000).optional(),
-});
+const body = z
+  .object({
+    target: z.enum(['LISTING', 'USER', 'MESSAGE', 'REVIEW']),
+    targetId: z.string().min(1).max(64),
+    reason: z.string().min(3).max(120),
+    details: z.string().trim().max(1000).optional(),
+    // Proof photos, already uploaded through /uploads/chat-image.
+    evidence: z.array(z.string().url().startsWith('https://')).max(5).default([]),
+  })
+  // A reason alone is not enough to act on: explain it or show it.
+  .refine((b) => (b.details?.length ?? 0) > 0 || b.evidence.length > 0, {
+    message: 'Expliquez le problème ou ajoutez une preuve',
+  });
 
 reportsRouter.post(
   '/',
@@ -71,7 +78,8 @@ reportsRouter.post(
         target: input.target,
         targetId: input.targetId,
         reason: input.reason,
-        details: input.details ?? null,
+        details: input.details || null,
+        evidence: input.evidence,
       },
       select: { id: true, status: true, createdAt: true },
     });

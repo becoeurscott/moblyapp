@@ -57,7 +57,7 @@ adminRouter.get('/app-ratings', asyncHandler(async (_req, res) => {
 }));
 
 /** Ask a user to rate Mobly again on their next Home visit. */
-adminRouter.post('/app-ratings/:userId/request-again', asyncHandler(async (req, res) => {
+adminRouter.post('/app-ratings/:userId/request-again', requirePermission('user.notify'), asyncHandler(async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.params.userId }, select: { id: true } });
   if (!user) throw new ApiError(404, 'Utilisateur introuvable', 'NOT_FOUND');
   await prisma.appRating.upsert({
@@ -739,6 +739,7 @@ adminRouter.get(
 /** PATCH /api/admin/reports/:id — action or dismiss. */
 adminRouter.patch(
   '/reports/:id',
+  requirePermission('report.triage'),
   asyncHandler(async (req, res) => {
     const body = z
       .object({
@@ -1298,6 +1299,7 @@ adminRouter.get(
 /** POST /api/admin/notifications/user/:id — send to one user (for testing). */
 adminRouter.post(
   '/notifications/user/:id',
+  requirePermission('user.notify'),
   asyncHandler(async (req, res) => {
     const b = broadcastBody.parse(req.body);
     const u = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true } });
@@ -1349,6 +1351,7 @@ adminRouter.get(
 /** PUT /api/admin/maintenance — open, adjust or lift the window. */
 adminRouter.put(
   '/maintenance',
+  requirePermission('maintenance.write'),
   asyncHandler(async (req, res) => {
     const b = maintenanceBody.parse(req.body);
     const { setMaintenance, serializeMaintenance } = await import('../services/maintenance');

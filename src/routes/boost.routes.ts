@@ -62,12 +62,17 @@ boostRouter.post(
 
     const listing = await prisma.listing.findUnique({
       where: { id: req.params.listingId },
-      select: { ownerId: true, available: true },
+      select: { ownerId: true, available: true, status: true },
     });
     if (!listing) throw new ApiError(404, 'Annonce introuvable', 'NOT_FOUND');
     if (listing.ownerId !== req.userId!) throw new ApiError(403, 'Non autorisé', 'FORBIDDEN');
     if (!listing.available)
       throw new ApiError(400, 'Une annonce indisponible ne peut pas être boostée', 'CONFLICT');
+    // Only a live annonce can be boosted. Boosting set BOOSTED on anything,
+    // and expiry then turned it ACTIVE — so a pending, rejected or paused
+    // annonce could skip moderation.
+    if (listing.status !== 'ACTIVE' && listing.status !== 'BOOSTED')
+      throw new ApiError(400, 'Seule une annonce en ligne peut être boostée', 'CONFLICT');
 
     const expiresAt = new Date(Date.now() + plan.days * 24 * 60 * 60 * 1000);
     await prisma.boost.create({

@@ -390,9 +390,16 @@ authRouter.patch(
       }
     }
 
-    // First time becoming an owner starts the 7-day free trial. `ownerPaid`
-    // stays false until they pay the one-time inscription fee.
-    const startingOwnerTrial = body.isOwner === true && !req.user?.isOwner;
+    // First time becoming an owner starts the 7-day free trial. Only the
+    // first time: switching owner off and on again used to restart the trial
+    // (and reset a paid owner to unpaid).
+    let startingOwnerTrial = false;
+    if (body.isOwner === true && !req.user?.isOwner) {
+      const me = await prisma.user.findUnique({
+        where: { id: req.userId! }, select: { ownerTrialStartedAt: true, ownerPaid: true },
+      });
+      startingOwnerTrial = !!me && me.ownerTrialStartedAt === null && !me.ownerPaid;
+    }
 
     const user = await prisma.user.update({
       where: { id: req.userId! },

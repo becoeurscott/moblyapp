@@ -85,13 +85,13 @@ final class MaintenanceStore: ObservableObject {
         // Debug hook: `MAINTENANCE_DEMO=<seconds>` forces the screen on with a
         // synthetic countdown so it can be screenshotted without opening a real
         // window on the server. `0` = indefinite. Dev-only, like START_AT.
-        if let raw = ProcessInfo.processInfo.environment["MAINTENANCE_DEMO"],
+        if let raw = DevSwitch["MAINTENANCE_DEMO"],
            let secs = TimeInterval(raw) {
             let ends = secs > 0
                 ? ISO8601DateFormatter().string(from: Date().addingTimeInterval(secs))
                 : nil
             apply(enabled: true,
-                  message: ProcessInfo.processInfo.environment["MAINTENANCE_MSG"],
+                  message: DevSwitch["MAINTENANCE_MSG"],
                   endsAtRaw: ends,
                   serverTimeRaw: nil)
             return

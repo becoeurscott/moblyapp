@@ -19,6 +19,16 @@ struct OwnerOverallStatsView: View {
     @State private var loadingToken = UUID()
     @State private var pollTimer: Timer?
     @State private var statsAnnonce: OwnerAnnonce?
+    /// Period of the "Évolution" chart and its data, fetched per period.
+    @State private var range: TrendRange = .d30
+    @State private var series: [TrendRange: MoblyAPI.OwnerSeries] = [:]
+
+    enum TrendRange: String, CaseIterable {
+        case h24 = "24h", d7 = "7d", d30 = "30d", d90 = "90d"
+        var label: String {
+            switch self { case .h24: "24 h"; case .d7: "7 jours"; case .d30: "30 jours"; case .d90: "90 jours" }
+        }
+    }
 
     init(initial: MoblyAPI.OwnerOverview? = nil) {
         self.initial = initial
@@ -238,6 +248,15 @@ struct OwnerOverallStatsView: View {
     }
 
     private var points: [Point] {
+        if let s = series[range] {
+            return s.points.flatMap { p in
+                [Point(date: p.start, value: p.impressions, series: "Impressions"),
+                 Point(date: p.start, value: p.clicks, series: "Clics"),
+                 Point(date: p.start, value: p.contacts, series: "Contacts")]
+            }
+        }
+        // Until the period loads, 30 days can come from the overview.
+        guard range == .d30 else { return [] }
         let parser = DateFormatter()
         parser.dateFormat = "yyyy-MM-dd"
         parser.timeZone = TimeZone(identifier: "UTC")
@@ -249,14 +268,38 @@ struct OwnerOverallStatsView: View {
         }
     }
 
+    private var rangePicker: some View {
+        HStack(spacing: 6) {
+            ForEach(TrendRange.allCases, id: \.self) { r in
+                Button {
+                    withAnimation(Motion.quick) { range = r }
+                    UISelectionFeedbackGenerator().selectionChanged()
+                } label: {
+                    Text(r.label)
+                        .font(.moblyBody(12, weight: .semibold))
+                        .foregroundStyle(range == r ? .white : Color(hex: 0x6B6F80))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(range == r ? Color.moblyPrimary : Color(hex: 0xF1F2F6)))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @MainActor
+    private func loadSeries(_ r: TrendRange) async {
+        guard let s = try? await MoblyAPI.shared.ownerSeries(range: r.rawValue) else { return }
+        withAnimation(Motion.content) { series[r] = s }
+    }
+
     private var trendChart: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("Évolution").font(.moblyHeading(16)).foregroundStyle(Color.moblyTextPrimary)
                 Spacer()
-                Text("30 derniers jours").font(.moblyBody(12, weight: .medium))
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
             }
+            rangePicker
             Chart(points) { p in
                 LineMark(x: .value("Jour", p.date), y: .value("Nombre", p.value))
                     .foregroundStyle(by: .value("Série", p.series))
@@ -273,13 +316,30 @@ struct OwnerOverallStatsView: View {
                                         "Clics": Color(hex: 0xF5B301),
                                         "Contacts": Color(hex: 0x1F8A5B)])
             .chartXAxis {
-                AxisMarks(values: .stride(by: .day, count: 7)) { _ in
-                    AxisValueLabel(format: .dateTime.day().month(.abbreviated))
+                switch range {
+                case .h24:
+                    AxisMarks(values: .stride(by: .hour, count: 6)) { _ in
+                        AxisValueLabel(format: .dateTime.hour())
+                    }
+                case .d7:
+                    AxisMarks(values: .stride(by: .day, count: 1)) { _ in
+                        AxisValueLabel(format: .dateTime.weekday(.abbreviated))
+                    }
+                case .d30:
+                    AxisMarks(values: .stride(by: .day, count: 7)) { _ in
+                        AxisValueLabel(format: .dateTime.day().month(.abbreviated))
+                    }
+                case .d90:
+                    AxisMarks(values: .stride(by: .day, count: 30)) { _ in
+                        AxisValueLabel(format: .dateTime.day().month(.abbreviated))
+                    }
                 }
             }
             .chartLegend(position: .top, alignment: .leading)
             .frame(height: 190)
+            .animation(Motion.content, value: range)
         }
+        .task(id: range) { await loadSeries(range) }
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 18).fill(.white)
             .shadow(color: Color(hex: 0x14152A).opacity(0.05), radius: 9, y: 3))
@@ -347,7 +407,7 @@ struct OwnerOverallStatsView: View {
         case "favorites":      return "Favoris"
         case "detail-similar": return "Annonces similaires"
         case "profile":        return "Profil hôte"
-        case "detail":         return "Depuis une annonce"
+        case "detail":       return "Autres écrans"
         default:               return key.capitalized
         }
     }

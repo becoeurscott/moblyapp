@@ -241,7 +241,7 @@ struct MessagesView: View {
             // Debug: auto-open the first thread whose last message is a visit
             // system message — for screenshotting the visit card. Runs even
             // when auth isn't ready yet — wait for bootstrap then load.
-            let wantsVisit = ProcessInfo.processInfo.environment["OPEN_VISIT_THREAD"] == "1"
+            let wantsVisit = DevSwitch["OPEN_VISIT_THREAD"] == "1"
             if wantsVisit {
                 for _ in 0..<20 {
                     if auth.isSignedIn { break }

@@ -16,7 +16,7 @@ enum WelcomeBannerGate {
         UserDefaults.standard.set(true, forKey: pendingKey(uid))
     }
 
-    static var isDemo: Bool { ProcessInfo.processInfo.environment["WELCOME_DEMO"] == "1" }
+    static var isDemo: Bool { DevSwitch["WELCOME_DEMO"] == "1" }
 
     /// True at most once per account: consumes the pending flag.
     @MainActor static func consume() -> Bool {

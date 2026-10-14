@@ -1080,11 +1080,9 @@ private struct SupportOpeningView: View {
 // MARK: - Privacy & security
 
 struct PrivacySecurityView: View {
-    // Settings persist to UserDefaults so they survive relaunches. When the
-    // backend grows dedicated fields (call-masking, 2FA), swap the read /
-    // write path here without touching the UI.
-    @AppStorage("privacy.maskNumber") private var maskNumber: Bool = true
-    @AppStorage("privacy.twoFA")      private var twoFA: Bool = false
+    // Number masking and 2FA toggles were removed: they only wrote to
+    // UserDefaults and the backend has no support for either, so they gave
+    // users a false sense of protection. Re-add once the server enforces them.
     @ObservedObject private var blocked = BlockedUsers.shared
     @ObservedObject private var config = RemoteConfigStore.shared
     @State private var showChangePassword = false
@@ -1106,11 +1104,8 @@ struct PrivacySecurityView: View {
                             }.buttonStyle(.plain)
                             Divider().padding(.leading, 46)
                         }
-                        toggle("Numéro masqué lors des appels", "phone.badge.waveform.fill", $maskNumber)
-                        Divider().padding(.leading, 46)
-                        toggle("Authentification à deux facteurs", "lock.shield.fill", $twoFA)
                         if config.isEnabled("users.block") {
-                            Divider().padding(.leading, 46)
+                            if config.isEnabled("password.change") { Divider().padding(.leading, 46) }
                             Button { showBlocked = true } label: {
                                 navRow("Utilisateurs bloqués (\(blocked.ids.count))", "hand.raised.fill")
                             }.buttonStyle(.plain)
@@ -1316,12 +1311,15 @@ private struct ChangePasswordSheet: View {
         .presentationDetents([.height(360)])
     }
 
-    private var canSave: Bool { newPass.count >= 6 && newPass == confirm }
+    private var canSave: Bool { newPass.count >= PasswordRules.minLength && newPass == confirm }
 
     private func save() async {
         saving = true; errorMsg = nil; doneMsg = nil
         defer { saving = false }
-        await AuthStore.shared.setPassword(newPass)
+        guard await AuthStore.shared.setPassword(newPass) else {
+            errorMsg = "Impossible de mettre à jour le mot de passe. Réessayez."
+            return
+        }
         doneMsg = "Mot de passe mis à jour."
         try? await Task.sleep(nanoseconds: 900_000_000)
         await MainActor.run { dismiss() }
@@ -1387,21 +1385,30 @@ extension URL: @retroactive Identifiable { public var id: String { absoluteStrin
 
 // MARK: - About
 
-/// App Store identity.
-/// ⚠️ À COMPLÉTER : remplacer `appID` par l'identifiant Apple réel dès la
-/// première fiche créée dans App Store Connect, sinon « Noter Mobly » ouvre
-/// une page introuvable.
+/// App Store identity. `appID` is a placeholder until the App Store Connect
+/// record exists; while it is, `writeReviewURL` is nil and the « Noter
+/// Mobly » row is hidden rather than opening a page that doesn't exist.
 enum MoblyAppStore {
     static let appID = "0000000000"
 
     /// Ouvre directement le formulaire d'avis sur la fiche App Store.
     static var writeReviewURL: URL? {
-        URL(string: "https://apps.apple.com/app/id\(appID)?action=write-review")
+        guard appID != "0000000000" else { return nil }
+        return URL(string: "https://apps.apple.com/app/id\(appID)?action=write-review")
     }
 }
 
 struct AboutView: View {
     @Environment(\.openURL) private var openURL
+
+    /// "1.2.0 (42)" straight from the bundle so the screen never drifts from
+    /// the shipped build.
+    private static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        guard let build = info?["CFBundleVersion"] as? String else { return short }
+        return "\(short) (\(build))"
+    }
 
     var body: some View {
         ProfileScaffold(title: "À propos de Mobly") {
@@ -1410,7 +1417,7 @@ struct AboutView: View {
                     Text("mobly").font(.moblyWordmark(size: 40)).foregroundStyle(Color.moblyPrimary)
                     Text("Votre espace, à portée de main.")
                         .font(.moblyBody(13)).foregroundStyle(Color(hex: 0x9A9DAC))
-                    Text("Version 1.0.0").font(.moblyBody(12)).foregroundStyle(Color(hex: 0xC4C7D2))
+                    Text("Version \(Self.appVersion)").font(.moblyBody(12)).foregroundStyle(Color(hex: 0xC4C7D2))
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 20)
 
@@ -1423,13 +1430,15 @@ struct AboutView: View {
                         NavigationLink { LegalDocumentView(doc: LegalLibrary.mentionsLegales) } label: {
                             aboutRow("Mentions légales")
                         }.buttonStyle(.plain)
-                        Divider()
-                        Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            if let url = MoblyAppStore.writeReviewURL { openURL(url) }
-                        } label: {
-                            aboutRow("Noter Mobly sur l'App Store ⭐️")
-                        }.buttonStyle(.plain)
+                        if let reviewURL = MoblyAppStore.writeReviewURL {
+                            Divider()
+                            Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                openURL(reviewURL)
+                            } label: {
+                                aboutRow("Noter Mobly sur l'App Store ⭐️")
+                            }.buttonStyle(.plain)
+                        }
                         Divider(); aboutRow("Site web · mobly.cm")
                     }
                 }
@@ -1468,7 +1477,7 @@ struct BecomeOwnerView: View {
     @ObservedObject private var auth = AuthStore.shared
 
     @State private var step: Int = {
-        if let s = ProcessInfo.processInfo.environment["BECOME_OWNER_STEP"], let i = Int(s) {
+        if let s = DevSwitch["BECOME_OWNER_STEP"], let i = Int(s) {
             return max(0, min(i, 4))
         }
         return 0

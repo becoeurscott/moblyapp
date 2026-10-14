@@ -8,7 +8,7 @@ struct OnboardingView: View {
     var onBackToIntro: () -> Void = {}
 
     @State private var index: Int = {
-        if let raw = ProcessInfo.processInfo.environment["ONBOARDING_START"],
+        if let raw = DevSwitch["ONBOARDING_START"],
            let i = Int(raw), (0..<2).contains(i) {
             return i
         }

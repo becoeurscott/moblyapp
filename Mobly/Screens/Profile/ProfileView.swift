@@ -139,7 +139,7 @@ struct ProfileView: View {
         .fullScreenCover(isPresented: $goToOwnerDashboard) { OwnerDashboardCover() }
 
         .onAppear {
-            if ProcessInfo.processInfo.environment["OPEN_BECOME_OWNER"] == "1" {
+            if DevSwitch["OPEN_BECOME_OWNER"] == "1" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                     showBecomeOwner = true
                 }

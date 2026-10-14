@@ -19,7 +19,7 @@ struct VisitReminderContent: Equatable, Identifiable {
 /// notifications in step with the user's confirmed visits.
 @MainActor
 enum VisitReminderCenter {
-    static var isDemo: Bool { ProcessInfo.processInfo.environment["VISIT_REMINDER_DEMO"] == "1" }
+    static var isDemo: Bool { DevSwitch["VISIT_REMINDER_DEMO"] == "1" }
 
     private static let shownKey = "visitReminder.shown"
     private static var pendingShownThisSession = false

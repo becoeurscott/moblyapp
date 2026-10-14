@@ -38,22 +38,22 @@ struct ConnexionView: View {
     @State private var mode: AuthMode
     @State private var phase: AuthPhase = {
         // Debug hook to screenshot a specific phase directly.
-        if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "code" { return .code }
-        if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "emailcode" { return .emailCode }
-        if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "welcome" { return .welcome }
-        if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "name" { return .chooseName }
-        if ProcessInfo.processInfo.environment["AUTH_PHASE"] == "avatar" { return .chooseAvatar }
-        if ["onboarding", "permissions"].contains(ProcessInfo.processInfo.environment["AUTH_PHASE"]) { return .onboarding }
+        if DevSwitch["AUTH_PHASE"] == "code" { return .code }
+        if DevSwitch["AUTH_PHASE"] == "emailcode" { return .emailCode }
+        if DevSwitch["AUTH_PHASE"] == "welcome" { return .welcome }
+        if DevSwitch["AUTH_PHASE"] == "name" { return .chooseName }
+        if DevSwitch["AUTH_PHASE"] == "avatar" { return .chooseAvatar }
+        if ["onboarding", "permissions"].contains(DevSwitch["AUTH_PHASE"]) { return .onboarding }
         return .form
     }()
 
     // Fields
     @State private var identifier = ""     // sign-in
-    @State private var fullName: String = ProcessInfo.processInfo.environment["PREFILL_NAME"] ?? ""
-    @State private var phone: String = ProcessInfo.processInfo.environment["PREFILL_PHONE"] ?? ""
+    @State private var fullName: String = DevSwitch["PREFILL_NAME"] ?? ""
+    @State private var phone: String = DevSwitch["PREFILL_PHONE"] ?? ""
     @State private var country: Country = .deviceDefault
-    @State private var email: String = ProcessInfo.processInfo.environment["PREFILL_EMAIL"] ?? ""
-    @State private var password: String = ProcessInfo.processInfo.environment["PREFILL_PASSWORD"] ?? ""
+    @State private var email: String = DevSwitch["PREFILL_EMAIL"] ?? ""
+    @State private var password: String = DevSwitch["PREFILL_PASSWORD"] ?? ""
     @State private var otp = ""
     /// Name the provider gave us, used when the account is finally created.
     @State private var oauthName: String?
@@ -74,8 +74,8 @@ struct ConnexionView: View {
         self.onExit = onExit
         self.onFinish = onFinish
         _mode = State(initialValue: {
-            if ProcessInfo.processInfo.environment["AUTH_MODE"] == "signup" { return .signup }
-            if ProcessInfo.processInfo.environment["AUTH_MODE"] == "signin" { return .signin }
+            if DevSwitch["AUTH_MODE"] == "signup" { return .signup }
+            if DevSwitch["AUTH_MODE"] == "signin" { return .signin }
             return initialMode
         }())
     }

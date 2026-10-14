@@ -12,7 +12,7 @@ import UIKit
 /// Apple's own signal to drop blur.
 enum DeviceTier {
     static let reducedEffects: Bool = {
-        if let forced = ProcessInfo.processInfo.environment["MOBLY_REDUCED_EFFECTS"] {
+        if let forced = DevSwitch["MOBLY_REDUCED_EFFECTS"] {
             return forced == "1"
         }
         if UIAccessibility.isReduceTransparencyEnabled { return true }

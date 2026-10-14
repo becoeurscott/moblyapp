@@ -23,6 +23,10 @@ struct CappedScroll<Content: View>: View {
                 )
         }
         .scrollBounceBehavior(.basedOnSize)
+        // The app closes the keyboard on any scroll. Search dropdowns live
+        // only while their field is focused, so scrolling one would close
+        // the keyboard and fade the list away under the finger.
+        .scrollDismissesKeyboard(.never)
         .frame(height: min(contentHeight, maxHeight))
         .clipped()
         // Grow/shrink smoothly as rows arrive or leave, including the first

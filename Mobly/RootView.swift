@@ -43,70 +43,70 @@ struct RootView: View {
     @State private var wordmarkDestination: WordmarkFlight.Destination = .onboarding
     @State private var route: AppRoute = {
         // Allow launch arg to skip splash for screenshotting: -skipSplash 1
-        if ProcessInfo.processInfo.environment["START_AT"] == "intro" {
+        if DevSwitch["START_AT"] == "intro" {
             return .intro
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "welcome" {
+        if DevSwitch["START_AT"] == "welcome" {
             return .welcome
         }
         // Onboarding is first-launch-only and signed-out-only, so on any device
         // that has already been through it the slides are unreachable — you
         // cannot review a design change without wiping the app and the keychain.
-        if ProcessInfo.processInfo.environment["START_AT"] == "onboarding" {
+        if DevSwitch["START_AT"] == "onboarding" {
             return .onboarding
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "signup" {
+        if DevSwitch["START_AT"] == "signup" {
             return .signup
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "connexion" {
+        if DevSwitch["START_AT"] == "connexion" {
             return .connexion
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "locationprimer" {
+        if DevSwitch["START_AT"] == "locationprimer" {
             return .locationPrimer
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "home" {
+        if DevSwitch["START_AT"] == "home" {
             return .placeholder
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "detail" {
+        if DevSwitch["START_AT"] == "detail" {
             return .detail
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "notifications" {
+        if DevSwitch["START_AT"] == "notifications" {
             return .notifications
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "search" {
+        if DevSwitch["START_AT"] == "search" {
             return .search
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "filters" {
+        if DevSwitch["START_AT"] == "filters" {
             return .filters
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "explore" {
+        if DevSwitch["START_AT"] == "explore" {
             return .explore
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "exploremap" {
+        if DevSwitch["START_AT"] == "exploremap" {
             return .exploreMap
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "thread" {
+        if DevSwitch["START_AT"] == "thread" {
             return .chatThread
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "call" {
+        if DevSwitch["START_AT"] == "call" {
             return .call
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "profilescreen" {
+        if DevSwitch["START_AT"] == "profilescreen" {
             return .profileScreen
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "notifications" {
+        if DevSwitch["START_AT"] == "notificationsdemo" {
             return .notificationsDemo
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "owner" {
+        if DevSwitch["START_AT"] == "owner" {
             return .ownerDashboard
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "addlisting" {
+        if DevSwitch["START_AT"] == "addlisting" {
             return .addListing
         }
-        if ProcessInfo.processInfo.environment["START_AT"] == "ownerstats" {
+        if DevSwitch["START_AT"] == "ownerstats" {
             return .ownerStats
         }
-        if ProcessInfo.processInfo.environment["SKIP_SPLASH"] == "1" {
+        if DevSwitch["SKIP_SPLASH"] == "1" {
             return .onboarding
         }
         return .splash
@@ -250,7 +250,7 @@ struct RootView: View {
                 // Debug route: show either a synthetic owner-photos listing
                 // (when the DEBUG_OWNER_PHOTOS hook is set) or the first live
                 // one from the store.
-                if ProcessInfo.processInfo.environment["DEBUG_OWNER_PHOTOS"] == "1" {
+                if DevSwitch["DEBUG_OWNER_PHOTOS"] == "1" {
                     ListingDetailView(listing: Self.debugOwnerListing())
                         .transition(.opacity)
                 } else if let first = ListingStore.shared.listings.first {
@@ -267,7 +267,7 @@ struct RootView: View {
 
             case .search:
                 // SEARCH_CAT=<catégorie> mimics a Home category tap; otherwise a plain query.
-                if let cat = ProcessInfo.processInfo.environment["SEARCH_CAT"], !cat.isEmpty {
+                if let cat = DevSwitch["SEARCH_CAT"], !cat.isEmpty {
                     SearchResultsView(initialCategory: cat)
                         .transition(.opacity)
                 } else {
@@ -298,14 +298,14 @@ struct RootView: View {
             case .profileScreen:
                 NavigationStack {
                     Group {
-                        switch ProcessInfo.processInfo.environment["PROFILE_SCREEN"] {
+                        switch DevSwitch["PROFILE_SCREEN"] {
                         case "edit": EditProfileView()
                         case "notif": NotificationsSettingsView()
                         case "privacy": PrivacySecurityView()
                         case "about": AboutView()
                         case "legal": LegalHubView()
                         case "legaldoc":
-                            LegalDocumentView(doc: LegalLibrary.doc(ProcessInfo.processInfo.environment["LEGAL_DOC"] ?? "cgu") ?? LegalLibrary.cgu)
+                            LegalDocumentView(doc: LegalLibrary.doc(DevSwitch["LEGAL_DOC"] ?? "cgu") ?? LegalLibrary.cgu)
                         case "identity": IdentityVerificationView()
                         case "language": LanguageView()
                         default: BecomeOwnerView()
@@ -479,7 +479,7 @@ struct RootView: View {
             about: "Studio moderne au cœur d'Akwa. Toutes les photos ci-dessous sont des photos que le propriétaire a téléversées."
         )
         // A chambre's Disposition, as the publish wizard records it.
-        if ProcessInfo.processInfo.environment["DEBUG_CHAMBRE"] == "1" {
+        if DevSwitch["DEBUG_CHAMBRE"] == "1" {
             listing.category = "Chambres"
             listing.features = ["Cuisines": "1", "Douches": "1"]
         }

@@ -19,7 +19,7 @@ final class NetworkMonitor: ObservableObject {
         #if DEBUG
         // FORCE_OFFLINE=1: show the offline state without cutting the Mac's
         // network, for checking layouts under the connection banner.
-        if ProcessInfo.processInfo.environment["FORCE_OFFLINE"] == "1" {
+        if DevSwitch["FORCE_OFFLINE"] == "1" {
             isConnected = false
             return
         }

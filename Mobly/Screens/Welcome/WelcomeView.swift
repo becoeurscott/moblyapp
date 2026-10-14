@@ -183,10 +183,10 @@ private struct GlassListingChip: View {
             .frame(width: 46, height: 46)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Votre espace")
+                Text("Bienvenue sur Mobly")
                     .font(.moblyHeading(14))
                     .foregroundStyle(.white)
-                Text("Espace disponible")
+                Text("Votre espace, à portée de main.")
                     .font(.moblyBody(11))
                     .foregroundStyle(Color.white.opacity(0.7))
             }

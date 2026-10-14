@@ -52,7 +52,7 @@ final class Session: ObservableObject {
 
     private init() {
         // Debug hook: START_AT flows can force owner mode for screenshotting.
-        if ProcessInfo.processInfo.environment["AS_OWNER"] == "1" { isOwner = true }
+        if DevSwitch["AS_OWNER"] == "1" { isOwner = true }
         if Self.forceVisitor { isOwner = false }
     }
 
@@ -60,7 +60,7 @@ final class Session: ObservableObject {
     /// what non-owners see. Debug builds only.
     private static var forceVisitor: Bool {
         #if DEBUG
-        return ProcessInfo.processInfo.environment["AS_OWNER"] == "0"
+        return DevSwitch["AS_OWNER"] == "0"
         #else
         return false
         #endif

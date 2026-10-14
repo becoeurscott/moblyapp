@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 /// Profile of the other party in a conversation — the WhatsApp-style contact
 /// sheet you get when tapping the chat header. Shows their name, avatar, when
@@ -22,6 +23,11 @@ struct PeerProfileView: View {
     @State private var loading = true
     @State private var reportDraft = ""
     @State private var showReport = false
+    @State private var sendingReport = false
+    @State private var reportReason: String?
+    @State private var reportPhotos: [UIImage] = []
+    @State private var reportPickerItems: [PhotosPickerItem] = []
+    @State private var reportError: String?
     @State private var confirmBlock = false
 
     private var peerId: String? { thread.peerId }
@@ -300,48 +306,187 @@ struct PeerProfileView: View {
         .padding(.vertical, 14)
     }
 
+    /// Why the person is being reported. One must be picked before sending.
+    private static let reportReasons = [
+        "Arnaque ou fraude",
+        "Faux profil ou fausse annonce",
+        "Harcèlement ou propos insultants",
+        "Spam ou publicité",
+        "Contenu inapproprié",
+        "Autre",
+    ]
+
+    private var reportTrimmed: String { reportDraft.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// A reason, plus an explanation or at least one proof photo.
+    private var canSendReport: Bool {
+        reportReason != nil && (!reportTrimmed.isEmpty || !reportPhotos.isEmpty) && !sendingReport
+    }
+
     private var reportSheet: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Signaler \(peerName)")
-                    .font(.moblyHeading(20))
-                    .padding(.top, 8)
-                Text("Décrivez le problème. L'équipe Mobly examinera ce signalement.")
-                    .font(.moblyBody(13))
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
-                TextEditor(text: $reportDraft)
-                    .font(.moblyBody(13.5))
-                    .padding(10)
-                    .frame(minHeight: 180)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(hex: 0xF4F5F8)))
-                Spacer()
-                Button {
-                    SessionTracker.shared.log("chat.report_user", [
-                        "peerId": peerId ?? "unknown",
-                        "reason": reportDraft
-                    ])
-                    reportDraft = ""
-                    showReport = false
-                } label: {
-                    Text("Envoyer le signalement")
-                        .font(.moblyHeading(15))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Signaler \(peerName)")
+                        .font(.moblyHeading(20))
+                        .padding(.top, 8)
+                    Text("L'équipe Mobly examinera ce signalement. Votre identité n'est pas communiquée.")
+                        .font(.moblyBody(13))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+
+                    reportLabel("Motif")
+                    VStack(spacing: 8) {
+                        ForEach(Self.reportReasons, id: \.self) { reason in
+                            Button {
+                                withAnimation(Motion.instant) { reportReason = reason }
+                            } label: {
+                                HStack {
+                                    Text(reason)
+                                        .font(.moblyBody(14, weight: .medium))
+                                        .foregroundStyle(Color.moblyTextPrimary)
+                                    Spacer()
+                                    Image(systemName: reportReason == reason ? "largecircle.fill.circle" : "circle")
+                                        .font(.system(size: 18))
+                                        .foregroundStyle(reportReason == reason ? Color(hex: 0xE5484D) : Color(hex: 0xC4C7D2))
+                                }
+                                .padding(.horizontal, 14).padding(.vertical, 12)
+                                .background(RoundedRectangle(cornerRadius: 12)
+                                    .fill(reportReason == reason ? Color(hex: 0xFDEDED) : Color(hex: 0xF4F5F8)))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    reportLabel("Expliquez ce qui s'est passé")
+                    TextEditor(text: $reportDraft)
+                        .font(.moblyBody(13.5))
+                        .scrollContentBackground(.hidden)
+                        .padding(10)
+                        .frame(minHeight: 120)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color(hex: 0xF4F5F8)))
+
+                    reportLabel("Preuves (captures d'écran, photos)")
+                    HStack(spacing: 10) {
+                        ForEach(reportPhotos.indices, id: \.self) { i in
+                            Image(uiImage: reportPhotos[i])
+                                .resizable().scaledToFill()
+                                .frame(width: 72, height: 72)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .overlay(alignment: .topTrailing) {
+                                    Button {
+                                        withAnimation(Motion.quick) { _ = reportPhotos.remove(at: i) }
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 18))
+                                            .foregroundStyle(.white, Color.black.opacity(0.6))
+                                    }
+                                    .offset(x: 6, y: -6)
+                                }
+                        }
+                        if reportPhotos.count < 3 {
+                            PhotosPicker(selection: $reportPickerItems,
+                                         maxSelectionCount: 3 - reportPhotos.count,
+                                         matching: .images) {
+                                VStack(spacing: 4) {
+                                    Image(systemName: "photo.badge.plus").font(.system(size: 20))
+                                    Text("Ajouter").font(.moblyBody(11, weight: .semibold))
+                                }
+                                .foregroundStyle(Color.moblyPrimary)
+                                .frame(width: 72, height: 72)
+                                .background(RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(Color.moblyPrimary.opacity(0.4), style: StrokeStyle(lineWidth: 1.5, dash: [5])))
+                            }
+                        }
+                    }
+                    Text("Ajoutez une explication ou au moins une preuve.")
+                        .font(.moblyBody(11.5))
+                        .foregroundStyle(Color(hex: 0x9A9DAC))
+
+                    if let reportError {
+                        Text(reportError)
+                            .font(.moblyBody(12.5))
+                            .foregroundStyle(Color(hex: 0xE5484D))
+                    }
+
+                    Button(action: sendReport) {
+                        Group {
+                            if sendingReport {
+                                ProgressView().tint(.white)
+                            } else {
+                                Text("Envoyer le signalement").font(.moblyHeading(15))
+                            }
+                        }
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity).frame(height: 52)
                         .background(RoundedRectangle(cornerRadius: 14)
-                            .fill(reportDraft.trimmingCharacters(in: .whitespaces).isEmpty
-                                  ? Color(hex: 0xE5484D).opacity(0.5) : Color(hex: 0xE5484D)))
+                            .fill(Color(hex: 0xE5484D).opacity(canSendReport || sendingReport ? 1 : 0.5)))
+                    }
+                    .disabled(!canSendReport)
+                    .padding(.top, 4)
                 }
-                .disabled(reportDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                .padding(20)
             }
-            .padding(20)
+            .background(Color.white)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Annuler") { showReport = false }
                 }
             }
+            .onChange(of: reportPickerItems) { _, items in
+                guard !items.isEmpty else { return }
+                Task { @MainActor in
+                    for item in items {
+                        if let data = try? await item.loadTransferable(type: Data.self),
+                           let image = UIImage(data: data), reportPhotos.count < 3 {
+                            reportPhotos.append(image)
+                        }
+                    }
+                    reportPickerItems = []
+                }
+            }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
+        // Solid, not the default glass: the profile showing through made the
+        // form hard to read.
+        .presentationBackground(Color.white)
+    }
+
+    private func reportLabel(_ text: String) -> some View {
+        Text(LT(text))
+            .font(.moblyBody(12.5, weight: .semibold))
+            .foregroundStyle(Color(hex: 0x6B6F80))
+            .padding(.top, 4)
+    }
+
+    /// Uploads the proof photos, then files the report in the moderation
+    /// queue the admin dashboard reads. It used to be an analytics event
+    /// only, so it reached no one.
+    private func sendReport() {
+        guard let peerId, let reason = reportReason else { return }
+        let details = String(reportTrimmed.prefix(1000))
+        let photos = reportPhotos
+        sendingReport = true
+        reportError = nil
+        Task { @MainActor in
+            defer { sendingReport = false }
+            do {
+                var evidence: [String] = []
+                for photo in photos {
+                    guard let jpeg = photo.jpegData(compressionQuality: 0.7) else { continue }
+                    evidence.append(try await MoblyAPI.shared.uploadChatImage(jpeg))
+                }
+                try await MoblyAPI.shared.fileReport(target: "USER", targetId: peerId, reason: reason,
+                                                     details: details.isEmpty ? nil : details,
+                                                     evidence: evidence)
+                SessionTracker.shared.log("chat.report_user", ["peerId": peerId, "reason": reason])
+                reportDraft = ""
+                reportReason = nil
+                reportPhotos = []
+                showReport = false
+            } catch {
+                reportError = "Le signalement n'a pas pu être envoyé. Réessayez."
+            }
+        }
     }
 
     // MARK: Load

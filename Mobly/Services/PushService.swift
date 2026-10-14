@@ -153,6 +153,10 @@ extension PushService: UNUserNotificationCenterDelegate {
             await MainActor.run { PushService.shared.pendingDestination = .listing(listingId) }
         } else if info["screen"] as? String == "home" {
             await MainActor.run { PushService.shared.pendingHome = true }
+        } else {
+            // Nothing specific to open (welcome, announcements, tips…): show
+            // it in the notifications list rather than doing nothing.
+            await MainActor.run { PushService.shared.pendingDestination = .notifications }
         }
     }
 }
@@ -160,6 +164,16 @@ extension PushService: UNUserNotificationCenterDelegate {
 /// APNs callbacks only reach a `UIApplicationDelegate`, which SwiftUI wires up
 /// through `@UIApplicationDelegateAdaptor`.
 final class MoblyAppDelegate: NSObject, UIApplicationDelegate {
+    /// The notification-center delegate must be in place before launch
+    /// finishes, or the tap that cold-launched the app is never delivered and
+    /// it opens on Accueil instead of the push's screen. Creating the shared
+    /// service here sets it.
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        MainActor.assumeIsolated { _ = PushService.shared }
+        return true
+    }
+
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Task { @MainActor in PushService.shared.register(deviceToken: deviceToken) }

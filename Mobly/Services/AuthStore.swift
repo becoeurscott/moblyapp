@@ -681,14 +681,21 @@ final class AuthStore: ObservableObject {
     }
 
     /// Attach a password to the freshly created account so the user can sign in
-    /// with it next time. Best-effort: OTP already proved ownership of the
-    /// number, so failing here must not block signup.
-    func setPassword(_ password: String) async {
-        guard password.count >= 6 else { return }
+    /// with it next time. Returns false on failure so the change-password
+    /// sheet can say so; signup may ignore the result since OTP already proved
+    /// ownership of the number.
+    @discardableResult
+    func setPassword(_ password: String) async -> Bool {
+        guard password.count >= PasswordRules.minLength else { return false }
         struct Body: Encodable { let password: String }
-        _ = try? await api.request(
-            "auth/me", method: "PATCH", body: Body(password: password), authorized: true
-        ) as EmptyResponse
+        do {
+            _ = try await api.request(
+                "auth/me", method: "PATCH", body: Body(password: password), authorized: true
+            ) as EmptyResponse
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Overwrite the avatar URL on the local user without waiting for a
@@ -702,22 +709,10 @@ final class AuthStore: ObservableObject {
         if u.avatarUrl == url, let old = URL(string: url) {
             URLCache.shared.removeCachedResponse(for: URLRequest(url: old))
         }
-        let json = """
-        {"id":"\(u.id)","phone":"\(u.phone)","fullName":"\(u.fullName)",
-        "email":\(u.email.map { "\"\($0)\"" } ?? "null"),
-        "isOwner":\(u.isOwner),"verified":\(u.verified),
-        "city":\(u.city.map { "\"\($0)\"" } ?? "null"),
-        "region":\(u.region.map { "\"\($0)\"" } ?? "null"),
-        "rating":\(u.rating.map { String($0) } ?? "null"),
-        "avatarUrl":"\(url)",
-        "avatarColor":\(u.avatarColor.map { "\"\($0)\"" } ?? "null"),
-        "isAdmin":\(u.isAdmin ?? false)}
-        """
-        _ = u
-        if let data = json.data(using: .utf8),
-           let updated = try? JSONDecoder().decode(UserDTO.self, from: data) {
-            self.user = updated
-        }
+        // Copy the decoded user and swap only the URL, so verification and
+        // owner-trial fields survive the refresh.
+        u.avatarUrl = url
+        self.user = u
     }
 
     /// Flip the signed-in user to owner on the SERVER. Without this, a purely

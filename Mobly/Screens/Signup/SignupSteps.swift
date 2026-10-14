@@ -209,10 +209,19 @@ struct SignupOTPStep: View {
 
     private var isComplete: Bool { otp.count == length }
 
+    /// The server's devCode is only surfaced in Debug builds — Release never
+    /// shows a code shortcut, even if a misconfigured server sends one.
+    private var visibleDevCode: String? {
+        #if DEBUG
+        return devCode
+        #else
+        return nil
+        #endif
+    }
+
     var body: some View {
         VStack(spacing: 18) {
-            if let devCode {
-                // Dev builds only — the server stops sending this in production.
+            if let devCode = visibleDevCode {
                 HStack(spacing: 8) {
                     Image(systemName: "hammer.fill")
                         .foregroundStyle(Color(hex: 0x1F8A5B))

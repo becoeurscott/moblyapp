@@ -43,21 +43,21 @@ struct OwnerDashboardView: View {
     private var ownerLocked: Bool {
         // Dev hook: `FORCE_OWNER_LOCKED=1` simulates a lapsed trial so the
         // paywall can be demoed without waiting 7 days or touching the server.
-        if ProcessInfo.processInfo.environment["FORCE_OWNER_LOCKED"] == "1" { return true }
+        if DevSwitch["FORCE_OWNER_LOCKED"] == "1" { return true }
         return auth.user?.isOwner == true && auth.user?.isOwnerActive == false
     }
 
     /// Non-nil while the free trial is still running — drives the countdown banner.
     /// Dev hook: `FORCE_TRIAL_DAYS=<n>` simulates a running trial with n days left.
     private var trialDaysLeft: Int? {
-        if let s = ProcessInfo.processInfo.environment["FORCE_TRIAL_DAYS"], let i = Int(s) { return i }
+        if let s = DevSwitch["FORCE_TRIAL_DAYS"], let i = Int(s) { return i }
         return auth.user?.ownerTrialDaysLeft
     }
 
     /// Exact end of the running trial, for the live countdown. The server
     /// sends it with fractional seconds, which the default parser rejects.
     private var trialEndsAt: Date? {
-        if let s = ProcessInfo.processInfo.environment["FORCE_TRIAL_DAYS"], let i = Double(s) {
+        if let s = DevSwitch["FORCE_TRIAL_DAYS"], let i = Double(s) {
             return Date().addingTimeInterval(i * 86_400 - 3_600)
         }
         guard auth.user?.ownerTrialDaysLeft != nil, let raw = auth.user?.ownerTrialEndsAt else { return nil }
@@ -149,19 +149,19 @@ struct OwnerDashboardView: View {
             Task { await refreshDashboard(showInitialLoader: false, silentVisits: true) }
         }
         .onAppear {
-            if ProcessInfo.processInfo.environment["OPEN_VISITS"] == "1" {
+            if DevSwitch["OPEN_VISITS"] == "1" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { showVisits = true }
             }
-            if ProcessInfo.processInfo.environment["OPEN_BOOST"] == "1" {
+            if DevSwitch["OPEN_BOOST"] == "1" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     boostAnnonce = store.annonces.first { !$0.isBoosted }
                 }
             }
-            if ProcessInfo.processInfo.environment["DEMO_UNAVAILABLE"] == "1",
+            if DevSwitch["DEMO_UNAVAILABLE"] == "1",
                let a = store.annonces.first(where: { $0.available && !$0.isBoosted }) {
                 store.toggleAvailability(a)
             }
-            if ProcessInfo.processInfo.environment["OPEN_EDIT"] == "1" {
+            if DevSwitch["OPEN_EDIT"] == "1" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     editAnnonce = store.annonces.first
                 }

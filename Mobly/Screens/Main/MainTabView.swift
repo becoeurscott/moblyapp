@@ -58,10 +58,10 @@ struct MainTabView: View {
     @ObservedObject private var config = RemoteConfigStore.shared
 
     @State private var tab: MoblyTab = {
-        if ProcessInfo.processInfo.environment["MAIN_TAB"] == "explore" { return .explore }
-        if ProcessInfo.processInfo.environment["MAIN_TAB"] == "messages" { return .messages }
-        if ProcessInfo.processInfo.environment["MAIN_TAB"] == "favorites" { return .favorites }
-        if ProcessInfo.processInfo.environment["MAIN_TAB"] == "profile" { return .profile }
+        if DevSwitch["MAIN_TAB"] == "explore" { return .explore }
+        if DevSwitch["MAIN_TAB"] == "messages" { return .messages }
+        if DevSwitch["MAIN_TAB"] == "favorites" { return .favorites }
+        if DevSwitch["MAIN_TAB"] == "profile" { return .profile }
         return .home
     }()
     @State private var selectedListing: Listing?
@@ -196,6 +196,9 @@ struct MainTabView: View {
 
         case .verifyEmail:
             showEmailFromRoute = true
+
+        case .notifications:
+            showNotifications = true
         }
     }
 

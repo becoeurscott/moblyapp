@@ -12,6 +12,9 @@ enum NotificationTarget: Equatable {
     case becomeOwner
     /// Open the e-mail confirmation screen.
     case verifyEmail
+    /// The notifications list itself: where a push with no screen of its
+    /// own (welcome, announcements…) lands, so every tap goes somewhere.
+    case notifications
 }
 
 struct MoblyNotification: Identifiable {
@@ -127,7 +130,9 @@ struct MoblyNotification: Identifiable {
         case "NEW_LISTING":                                 k = .newListing
         case "REENGAGE_3D", "REENGAGE_7D", "REENGAGE_14D": k = .reengage
         case "WELCOME":                                     k = .welcome
-        case "OWNER_INVITE":                                k = .ownerInvite
+        case "OWNER_INVITE", "OWNER_TRIAL", "OWNER_STATS", "OWNER_TIP": k = .ownerInvite
+        case "IDENTITY":                                    k = .verified
+        case "REMINDER":                                    k = .reengage
         case "VERIFY_EMAIL":                                k = .verifyEmail
         default:                                            k = .message
         }
@@ -206,7 +211,7 @@ struct NotificationsView: View {
     /// `NOTIF_DEMO=1`: a fixed inbox for screenshotting the stacks without a
     /// signed-in account. Debug builds only.
     private static let demoNotifications: [NotificationDTO]? = {
-        guard ProcessInfo.processInfo.environment["NOTIF_DEMO"] == "1" else { return nil }
+        guard DevSwitch["NOTIF_DEMO"] == "1" else { return nil }
         let now = Date()
         func at(_ minutesAgo: Double) -> String {
             ISO8601DateFormatter().string(from: now.addingTimeInterval(-minutesAgo * 60))

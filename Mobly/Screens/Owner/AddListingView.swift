@@ -29,7 +29,7 @@ struct AddListingView: View {
         self.onSkip = onSkip
         self.onCommit = onCommit
         let l = editing?.listing
-        _category  = State(initialValue: l?.category ?? ProcessInfo.processInfo.environment["ADD_CAT"] ?? "")
+        _category  = State(initialValue: l?.category ?? DevSwitch["ADD_CAT"] ?? "")
         _stay      = State(initialValue: (l?.deals.contains("Court séjour") ?? false) ? .court : .long)
         let (n, c) = AddListingView.splitLocation(l?.location ?? "")
         let env = ProcessInfo.processInfo.environment
@@ -38,8 +38,8 @@ struct AddListingView: View {
         _region       = State(initialValue: env["ADD_REGION"]
                               ?? CameroonGeo.region(for: env["ADD_CITY"] ?? c)
                               ?? "")
-        _title     = State(initialValue: l?.title ?? ProcessInfo.processInfo.environment["ADD_TITLE"] ?? "")
-        _about     = State(initialValue: l?.about ?? ProcessInfo.processInfo.environment["ADD_ABOUT"] ?? "")
+        _title     = State(initialValue: l?.title ?? DevSwitch["ADD_TITLE"] ?? "")
+        _about     = State(initialValue: l?.about ?? DevSwitch["ADD_ABOUT"] ?? "")
         _rooms     = State(initialValue: AddListingView.parseRooms(l?.subtitle ?? "") ?? 1)
         _furnished = State(initialValue: l?.deals.contains("Meublé") ?? true)
         _priceValue = State(initialValue: (l?.price ?? "").filter(\.isNumber))
@@ -58,14 +58,14 @@ struct AddListingView: View {
         // grid can be inspected without going through the picker first.
         var initialPhotos = l?.customImageData.map { [$0] } ?? []
         if initialPhotos.isEmpty,
-           ProcessInfo.processInfo.environment["DEBUG_PHOTOS"] == "1" {
+           DevSwitch["DEBUG_PHOTOS"] == "1" {
             initialPhotos = ["ListingGreen","ListingPink","ListingYellow","ListingTwilight","ListingLoft"]
                 .compactMap { UIImage(named: $0)?.jpegData(compressionQuality: 0.8) }
         }
         _uploadedPhotos = State(initialValue: initialPhotos)
         _pinLat = State(initialValue: l?.lat)
         _pinLng = State(initialValue: l?.lng)
-        _showMapPicker = State(initialValue: ProcessInfo.processInfo.environment["OPEN_MAP_PICKER"] == "1")
+        _showMapPicker = State(initialValue: DevSwitch["OPEN_MAP_PICKER"] == "1")
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -83,7 +83,7 @@ struct AddListingView: View {
         return s
     }
     @State private var stepIndex: Int = {
-        if let raw = ProcessInfo.processInfo.environment["ADD_STEP"], let i = Int(raw) { return i }
+        if let raw = DevSwitch["ADD_STEP"], let i = Int(raw) { return i }
         return 0
     }()
     private var step: Step { steps[min(stepIndex, steps.count - 1)] }

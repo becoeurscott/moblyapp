@@ -1,5 +1,18 @@
 import Foundation
 
+/// Launch-environment switches used for screenshots and QA (START_AT,
+/// AS_OWNER, FORCE_OFFLINE…). Compiled out of Release so a shipped build
+/// can never be steered by environment variables.
+enum DevSwitch {
+    static subscript(_ key: String) -> String? {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment[key]
+        #else
+        return nil
+        #endif
+    }
+}
+
 /// REST client for the Mobly backend.
 ///
 /// Owns the session: tokens live in the Keychain, an expired access token is
@@ -27,7 +40,7 @@ final class MoblyAPI {
     /// with the real https:// host rather than silently falling back to
     /// someone's laptop.
     var baseURL: URL = {
-        if let raw = ProcessInfo.processInfo.environment["API_BASE_URL"],
+        if let raw = DevSwitch["API_BASE_URL"],
            !raw.isEmpty, let url = URL(string: raw) { return url }
         if let raw = Bundle.main.object(forInfoDictionaryKey: "MoblyAPIBaseURL") as? String,
            !raw.isEmpty, let url = URL(string: raw) { return url }
@@ -982,8 +995,34 @@ final class MoblyAPI {
         _ = try await request("listings/\(id)", method: "DELETE", authorized: true) as EmptyResponse
     }
 
+    /// File a report for the moderation queue (POST /reports). `target` is
+    /// "LISTING", "USER", "MESSAGE" or "REVIEW".
+    func fileReport(target: String, targetId: String, reason: String, details: String?,
+                    evidence: [String] = []) async throws {
+        struct Body: Encodable {
+            let target: String; let targetId: String; let reason: String
+            let details: String?; let evidence: [String]
+        }
+        _ = try await request("reports", method: "POST",
+                              body: Body(target: target, targetId: targetId, reason: reason,
+                                         details: details, evidence: evidence),
+                              authorized: true) as EmptyResponse
+    }
+
     func ownerOverview() async throws -> OwnerOverview {
         try await request("owner/overview", authorized: true)
+    }
+
+    /// The "Évolution" chart for one period: hourly buckets for 24h, daily
+    /// otherwise. `range` is "24h", "7d", "30d" or "90d".
+    struct OwnerSeries: Codable {
+        struct Point: Codable { let start: Date; let impressions: Int; let clicks: Int; let contacts: Int }
+        let range: String
+        let unit: String
+        let points: [Point]
+    }
+    func ownerSeries(range: String) async throws -> OwnerSeries {
+        try await request("owner/series", query: ["range": range], authorized: true)
     }
 
     /// Small owner-scoped cache for statistics. It lets the dashboard draw the
@@ -1519,7 +1558,8 @@ struct UserDTO: Decodable, Identifiable {
     let city: String?
     let region: String?
     let rating: Double?
-    let avatarUrl: String?
+    /// `var` so a fresh upload can be patched in place (AuthStore.applyAvatarUrl).
+    var avatarUrl: String?
     /// Personal accent colour picked by the user. Nil = use the deterministic
     /// palette fallback (`AvatarPalette.color(for:)`).
     let avatarColor: String?

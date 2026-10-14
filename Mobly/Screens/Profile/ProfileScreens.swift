@@ -600,6 +600,38 @@ struct NotificationsSettingsView: View {
     @State private var alerts = false
     @State private var promos = false
 
+    @State private var loading = true
+    @State private var saving = false
+    @State private var errorMessage: String?
+    private struct Preferences: Codable {
+        var messages: Bool, visits: Bool, newSpaces: Bool, priceDrops: Bool, alerts: Bool, promos: Bool
+    }
+    private var preferences: Preferences {
+        Preferences(messages: messages, visits: visits, newSpaces: newSpaces, priceDrops: priceDrops, alerts: alerts, promos: promos)
+    }
+    private func apply(_ p: Preferences) {
+        messages = p.messages; visits = p.visits; newSpaces = p.newSpaces
+        priceDrops = p.priceDrops; alerts = p.alerts; promos = p.promos
+    }
+    private func binding(_ value: Binding<Bool>) -> Binding<Bool> {
+        Binding(get: { value.wrappedValue }, set: { next in
+            let previous = preferences
+            value.wrappedValue = next
+            let updated = preferences
+            saving = true
+            Task {
+                do {
+                    let saved: Preferences = try await MoblyAPI.shared.request("notifications/preferences", method: "PUT", body: updated, authorized: true, retries: 0)
+                    apply(saved)
+                } catch {
+                    apply(previous)
+                    errorMessage = error.localizedDescription
+                }
+                saving = false
+            }
+        })
+    }
+
     var body: some View {
         ProfileScaffold(title: "Notifications") {
             card {
@@ -618,6 +650,16 @@ struct NotificationsSettingsView: View {
                 }
             }
         }
+        .task {
+            do {
+                let saved: Preferences = try await MoblyAPI.shared.request("notifications/preferences", authorized: true)
+                apply(saved)
+                loading = false
+            } catch { errorMessage = error.localizedDescription }
+        }
+        .alert("Notifications", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            Button("OK") { errorMessage = nil }
+        } message: { Text(errorMessage ?? "") }
     }
 
     private func toggleRow(_ label: String, _ icon: String, _ binding: Binding<Bool>) -> some View {
@@ -628,7 +670,7 @@ struct NotificationsSettingsView: View {
             }
             Text(LT(label)).font(.moblyBody(13.5, weight: .medium)).foregroundStyle(Color.moblyTextPrimary)
             Spacer()
-            Toggle("", isOn: binding).labelsHidden().tint(Color.moblyPrimary)
+            Toggle("", isOn: self.binding(binding)).labelsHidden().tint(Color.moblyPrimary).disabled(loading || saving)
         }
         .padding(.vertical, 9)
     }

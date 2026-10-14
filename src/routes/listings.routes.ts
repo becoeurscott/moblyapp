@@ -146,11 +146,9 @@ listingsRouter.get(
   })
 );
 
-/** GET /api/listings/:id — one listing (also bumps views + logs a raw
- *  ViewEvent so the owner stats can plot per-day traffic and source mix).
- *  `?source=` is a free-form tag from the client ("home", "explore",
- *  "search", "recommended", "detail-similar"). Owner self-views are not
- *  double-counted so the metric reflects real interest. */
+/** GET /api/listings/:id — one listing. New app builds set `track=false` and
+ * send explicit impression/click events. The legacy fallback keeps the
+ * already-released TestFlight build reporting until the update is installed. */
 listingsRouter.get(
   '/:id',
   optionalAuth,
@@ -167,23 +165,44 @@ listingsRouter.get(
     if ((!listing.available || !publicStatus) && !canSeePrivate) {
       throw new ApiError(404, 'Annonce introuvable', 'NOT_FOUND');
     }
-    // Skip the owner viewing their own annonce, for the counter as well as
-    // the raw event — otherwise the figures are inflated by the owner
-    // checking their own page.
-    if (listing.ownerId !== req.userId) {
-      await prisma.listing.update({
-        where: { id: listing.id },
-        data: { views: { increment: 1 } },
-      });
-      prisma.viewEvent.create({
-        data: { listingId: listing.id, userId: req.userId ?? null, source },
-      })
-        .then(() => emitToUsers([listing.ownerId], { type: 'owner:stats' }))
-        .catch(() => {});
+    if (req.query.track !== 'false' && listing.ownerId !== req.userId) {
+      await prisma.$transaction([
+        prisma.viewEvent.create({ data: { listingId: listing.id, userId: req.userId ?? null, source } }),
+        prisma.listing.update({ where: { id: listing.id }, data: { views: { increment: 1 } } }),
+      ]);
     }
     res.json({ listing: serializeListing(listing) });
   })
 );
+
+const listingMetricBody = z.object({ source: z.string().min(1).max(32).optional() });
+
+async function recordListingMetric(req: any, res: any, type: 'impression' | 'click') {
+  const body = listingMetricBody.safeParse(req.body);
+  if (!body.success) throw new ApiError(400, 'Données invalides', 'VALIDATION_FAILED');
+  const listing = await prisma.listing.findUnique({
+    where: { id: req.params.id }, select: { id: true, ownerId: true, available: true, status: true },
+  });
+  if (!listing || !listing.available || !PUBLIC_LISTING_STATUSES.includes(listing.status)) {
+    throw new ApiError(404, 'Annonce introuvable', 'NOT_FOUND');
+  }
+  if (listing.ownerId !== req.userId) {
+    const data = { listingId: listing.id, userId: req.userId ?? null, source: body.data.source ?? null };
+    if (type === 'impression') {
+      await prisma.impressionEvent.create({ data });
+    } else {
+      await prisma.$transaction([
+        prisma.viewEvent.create({ data }),
+        prisma.listing.update({ where: { id: listing.id }, data: { views: { increment: 1 } } }),
+      ]);
+    }
+    emitToUsers([listing.ownerId], { type: 'owner:stats' });
+  }
+  res.status(204).end();
+}
+
+listingsRouter.post('/:id/impression', optionalAuth, asyncHandler((req, res) => recordListingMetric(req, res, 'impression')));
+listingsRouter.post('/:id/click', optionalAuth, asyncHandler((req, res) => recordListingMetric(req, res, 'click')));
 
 const listingBody = z.object({
   title: z.string().min(1),

@@ -1317,6 +1317,7 @@ private struct ExploreCard: View {
                 .stroke(highlighted ? Color.moblyPrimary : Color.clear, lineWidth: 2))
             .shadow(color: .black.opacity(0.12), radius: 12, y: 6)
         }
+        .listingImpression(listing, source: listing.boosted ? "boost" : "explore")
         .buttonStyle(.plain)
     }
 }

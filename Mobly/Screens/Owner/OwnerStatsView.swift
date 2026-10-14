@@ -18,7 +18,8 @@ struct OwnerStatsView: View {
 
     /// Live counts if the server responded, otherwise the local snapshot from
     /// `OwnerListings` so the screen has something the moment it opens.
-    private var totalViews: Int    { stats?.metrics.views    ?? annonce.views }
+    private var totalImpressions: Int { stats?.metrics.impressions ?? 0 }
+    private var totalClicks: Int { stats?.metrics.clicks ?? annonce.views }
     private var totalContacts: Int { stats?.metrics.contacts ?? annonce.contacts }
     private var totalFavorites: Int { stats?.metrics.favorites ?? annonce.favorites }
     private var totalVisits: Int   { stats?.metrics.visits   ?? 0 }
@@ -176,8 +177,8 @@ struct OwnerStatsView: View {
         let rate = String(format: "%.1f%%", contactRate * 100)
         let d = stats?.metrics.deltas7d
         return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-            statCard("eye.fill", 0x3A4FF0, 0xEEF0FE, totalViews.formattedGrouped, "Impressions", d?.views)
-            statCard("arrow.up.right", 0x4C9BFF, 0xEAF3FF, totalViews.formattedGrouped, "Clics · ouvertures de l'annonce", d?.views)
+            statCard("eye.fill", 0x3A4FF0, 0xEEF0FE, totalImpressions.formattedGrouped, "Impressions", d?.impressions)
+            statCard("arrow.up.right", 0x4C9BFF, 0xEAF3FF, totalClicks.formattedGrouped, "Clics · ouvertures de l'annonce", d?.clicks)
             statCard("heart.fill", 0x4C9BFF, 0xEAF3FF, "\(totalFavorites)", "Favoris", d?.favorites)
             statCard("bubble.left.fill", 0x1F8A5B, 0xE9F9EF, "\(totalContacts)", "Contacts", d?.contacts)
         }

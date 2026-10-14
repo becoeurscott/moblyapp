@@ -396,6 +396,7 @@ struct ResultCard: View {
                 }
             }
         }
+        .listingImpression(listing, source: listing.boosted ? "boost" : "search")
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.white))

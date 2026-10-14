@@ -573,8 +573,8 @@ struct OwnerDashboardView: View {
                 // Totals come from the listings; the 30-day window and its
                 // deltas come from the raw event tables via /owner/overview.
                 perfStat("eye.fill",
-                         (overview?.last30d.views ?? 0).formattedGrouped,
-                         "Vues", overview?.deltas30d.views)
+                         (overview?.last30d.impressions ?? 0).formattedGrouped,
+                         "Impressions", overview?.deltas30d.impressions)
                 perfDivider
                 perfStat("bubble.left.fill",
                          "\(overview?.last30d.contacts ?? 0)",
@@ -873,7 +873,8 @@ private struct AnnonceCard: View {
                         }
                     }
                     HStack(spacing: 8) {
-                        metricPill("eye.fill", annonce.views.formattedGrouped, 0x9A9DAC, 0xF1F2F6)
+                        metricPill("eye.fill", annonce.impressions.formattedGrouped, 0x9A9DAC, 0xF1F2F6)
+                        metricPill("hand.tap.fill", annonce.views.formattedGrouped, 0x3A4FF0, 0xEEF0FE)
                         metricPill("bubble.left.fill", "\(annonce.contacts)", 0x1F8A5B, 0xE9F9EF)
                         metricPill("heart.fill", "\(annonce.favorites)", 0xE5484D, 0xFDEDED)
                     }

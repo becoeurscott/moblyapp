@@ -149,8 +149,28 @@ struct MainTabView: View {
     ///
     /// Threads reuse the push deep-link channel `MessagesView` already
     /// watches, so there is one path into a conversation rather than two.
+    private func consumePushDestination() {
+        guard let target = push.pendingDestination else { return }
+        push.pendingDestination = nil
+        let dismissing = showNotifications || selectedListing != nil || showSearch || showExplore
+        showNotifications = false
+        selectedListing = nil
+        showSearch = false
+        showExplore = false
+        welcomeBanner = nil
+        visitReminder = nil
+        showAppRatingPrompt = false
+        if dismissing {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { route(to: target) }
+        } else {
+            route(to: target)
+        }
+    }
+
     private func route(to target: NotificationTarget) {
         switch target {
+        case .home:
+            withAnimation(Motion.quick) { tab = .home }
         case .thread(let id):
             withAnimation(Motion.quick) { tab = .messages }
             guard config.isEnabled("chat.enabled") else { return }
@@ -424,6 +444,7 @@ struct MainTabView: View {
             if new == .home { Task { await checkAppRatingPrompt() } }
         }
         .task { await checkAppRatingPrompt() }
+        .task { consumePushDestination() }
         .fullScreenCover(isPresented: $showBecomeOwnerFromRoute) {
             BecomeOwnerView(
                 onClose: { showBecomeOwnerFromRoute = false },
@@ -552,6 +573,9 @@ struct MainTabView: View {
             guard pending else { return }
             push.pendingHome = false
             withAnimation(Motion.quick) { tab = .home }
+        }
+        .onChange(of: push.pendingDestination) { _, _ in
+            consumePushDestination()
         }
         .onChange(of: push.pendingThreadId) { _, threadId in
             guard threadId != nil, config.isEnabled("chat.enabled") else { return }

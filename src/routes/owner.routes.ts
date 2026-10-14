@@ -47,7 +47,16 @@ ownerRouter.get(
       include: ownerSelect,
       orderBy: { createdAt: 'desc' },
     });
-    res.json({ items: items.map(serializeListing) });
+    // Impressions aren't a column on Listing; count them per annonce here.
+    const impressions = await prisma.impressionEvent.groupBy({
+      by: ['listingId'],
+      where: { listingId: { in: items.map((l) => l.id) } },
+      _count: { _all: true },
+    });
+    const byListing = new Map(impressions.map((r) => [r.listingId, r._count._all]));
+    res.json({
+      items: items.map((l) => ({ ...serializeListing(l), impressions: byListing.get(l.id) ?? 0 })),
+    });
   })
 );
 
@@ -57,8 +66,10 @@ ownerRouter.get(
  *  and a per-annonce ranking. */
 async function overviewDetail(ownerId: string, d30: Date) {
   const mine = { listing: { ownerId } };
-  const [viewsAll, contactsAll, favoritesAll, visitsAll, viewsByDay, contactsByDay, viewsByListing, sources, listings] =
+  const [impressionsAll, viewsAll, contactsAll, favoritesAll, visitsAll,
+    impressionsByDay, viewsByDay, contactsByDay, impressionsByListing, viewsByListing, sources, listings] =
     await Promise.all([
+      prisma.impressionEvent.count({ where: mine }),
       prisma.viewEvent.count({ where: mine }),
       prisma.contactEvent.count({ where: mine }),
       prisma.favorite.count({ where: mine }),
@@ -68,6 +79,12 @@ async function overviewDetail(ownerId: string, d30: Date) {
       // has, only to count them by day in a loop — the payload grew with
       // traffic, and together with the rest of this fan-out it exhausted the
       // pooled connection and the endpoint 500'd after ~40s.
+      prisma.$queryRaw<{ day: Date; n: bigint }[]>`
+        SELECT date_trunc('day', ie."createdAt") AS day, COUNT(*)::bigint AS n
+        FROM "ImpressionEvent" ie
+        JOIN "Listing" l ON l.id = ie."listingId"
+        WHERE l."ownerId" = ${ownerId} AND ie."createdAt" >= ${d30}
+        GROUP BY 1`,
       prisma.$queryRaw<{ day: Date; n: bigint }[]>`
         SELECT date_trunc('day', ve."createdAt") AS day, COUNT(*)::bigint AS n
         FROM "ViewEvent" ve
@@ -80,6 +97,11 @@ async function overviewDetail(ownerId: string, d30: Date) {
         JOIN "Listing" l ON l.id = ce."listingId"
         WHERE l."ownerId" = ${ownerId} AND ce."createdAt" >= ${d30}
         GROUP BY 1`,
+      prisma.impressionEvent.groupBy({
+        by: ['listingId'],
+        where: { ...mine, createdAt: { gte: d30 } },
+        _count: { _all: true },
+      }),
       // Per-annonce 30-day views, previously derived from that same full scan.
       prisma.viewEvent.groupBy({
         by: ['listingId'],
@@ -95,19 +117,23 @@ async function overviewDetail(ownerId: string, d30: Date) {
         where: { ownerId },
         select: {
           id: true, title: true, coverUrl: true, imageName: true, available: true,
-          _count: { select: { viewEvents: true, contactEvents: true, favoritedBy: true } },
+          _count: { select: { impressionEvents: true, viewEvents: true, contactEvents: true, favoritedBy: true } },
         },
       }),
     ]);
 
   // Daily buckets, oldest first. Keyed by UTC date to stay stable server-side.
   const day = (d: Date) => d.toISOString().slice(0, 10);
-  const daily: { date: string; views: number; contacts: number }[] = [];
+  const daily: { date: string; impressions: number; views: number; contacts: number }[] = [];
   const index = new Map<string, number>();
   for (let i = 29; i >= 0; i--) {
     const key = day(new Date(Date.now() - i * 24 * 60 * 60 * 1000));
     index.set(key, daily.length);
-    daily.push({ date: key, views: 0, contacts: 0 });
+    daily.push({ date: key, impressions: 0, views: 0, contacts: 0 });
+  }
+  for (const r of impressionsByDay) {
+    const i = index.get(day(new Date(r.day)));
+    if (i !== undefined) daily[i].impressions += Number(r.n);
   }
   for (const r of viewsByDay) {
     const i = index.get(day(new Date(r.day)));
@@ -117,6 +143,9 @@ async function overviewDetail(ownerId: string, d30: Date) {
     const i = index.get(day(new Date(r.day)));
     if (i !== undefined) daily[i].contacts += Number(r.n);
   }
+  const impressions30ByListing = new Map<string, number>(
+    impressionsByListing.map((r) => [r.listingId, r._count._all])
+  );
   const views30ByListing = new Map<string, number>(
     viewsByListing.map((r) => [r.listingId, r._count._all])
   );
@@ -141,15 +170,18 @@ async function overviewDetail(ownerId: string, d30: Date) {
       title: l.title,
       coverUrl: l.coverUrl ?? l.imageName,
       available: l.available,
+      impressions: l._count.impressionEvents,
+      impressions30d: impressions30ByListing.get(l.id) ?? 0,
       views: l._count.viewEvents,
       views30d: views30ByListing.get(l.id) ?? 0,
       contacts: l._count.contactEvents,
       favorites: l._count.favoritedBy,
     }))
-    .sort((a, b) => b.views - a.views);
+    .sort((a, b) => b.impressions - a.impressions || b.views - a.views);
 
   return {
     totals: {
+      impressions: impressionsAll,
       views: viewsAll,
       contacts: contactsAll,
       favorites: favoritesAll,
@@ -190,7 +222,10 @@ ownerRouter.get(
     const d60 = new Date(now - 60 * 24 * 60 * 60 * 1000);
     const mine = { listing: { ownerId } };
 
-    const [vNow, vPrev, cNow, cPrev, fNow, fPrev] = await Promise.all([
+    const [iAll, iNow, iPrev, vNow, vPrev, cNow, cPrev, fNow, fPrev] = await Promise.all([
+      prisma.impressionEvent.count({ where: mine }),
+      prisma.impressionEvent.count({ where: { ...mine, createdAt: { gte: d30 } } }),
+      prisma.impressionEvent.count({ where: { ...mine, createdAt: { gte: d60, lt: d30 } } }),
       prisma.viewEvent.count({    where: { ...mine, createdAt: { gte: d30 } } }),
       prisma.viewEvent.count({    where: { ...mine, createdAt: { gte: d60, lt: d30 } } }),
       prisma.contactEvent.count({ where: { ...mine, createdAt: { gte: d30 } } }),
@@ -208,11 +243,13 @@ ownerRouter.get(
     res.json({
       listings: agg._count,
       boosted,
+      impressions: iAll,
       views: agg._sum.views ?? 0,
       contacts: agg._sum.contacts ?? 0,
       favorites: agg._sum.favorites ?? 0,
-      last30d: { views: vNow, contacts: cNow, favorites: fNow },
+      last30d: { impressions: iNow, views: vNow, contacts: cNow, favorites: fNow },
       deltas30d: {
+        impressions: pct(iNow, iPrev),
         views:     pct(vNow, vPrev),
         contacts:  pct(cNow, cPrev),
         favorites: pct(fNow, fPrev),
@@ -248,14 +285,18 @@ ownerRouter.get(
     const fourteenAgo = new Date(startOfDay(now)); fourteenAgo.setDate(fourteenAgo.getDate() - 13);
 
     const [
-      viewsAll, contactsAll, favoritesAll, visitsAll,
-      viewsThis, viewsPrev, contactsThis, contactsPrev, favsThis, favsPrev,
-      viewsByDay, sources, activeBoost, boostViews, boostContacts, boostFavorites,
+      impressionsAll, viewsAll, contactsAll, favoritesAll, visitsAll,
+      impressionsThis, impressionsPrev, viewsThis, viewsPrev, contactsThis, contactsPrev, favsThis, favsPrev,
+      viewsByDay, sources, activeBoost,
     ] = await Promise.all([
+      prisma.impressionEvent.count({ where: { listingId: listing.id } }),
       prisma.viewEvent.count({ where: { listingId: listing.id } }),
       prisma.contactEvent.count({ where: { listingId: listing.id } }),
       prisma.favorite.count({ where: { listingId: listing.id } }),
       prisma.visitRequest.count({ where: { listingId: listing.id } }),
+      prisma.impressionEvent.count({ where: { listingId: listing.id, createdAt: { gte: sevenAgo } } }),
+      prisma.impressionEvent.count({ where: { listingId: listing.id,
+                                              createdAt: { gte: fourteenAgo, lt: sevenAgo } } }),
       prisma.viewEvent.count({ where: { listingId: listing.id, createdAt: { gte: sevenAgo } } }),
       prisma.viewEvent.count({ where: { listingId: listing.id,
                                         createdAt: { gte: fourteenAgo, lt: sevenAgo } } }),
@@ -282,19 +323,19 @@ ownerRouter.get(
         where: { listingId: listing.id, expiresAt: { gt: now } },
         orderBy: { createdAt: 'desc' },
       }),
-      prisma.viewEvent.count({
-        where: { listingId: listing.id, source: 'boost',
-          ...(listing.boostExpiresAt ? { createdAt: { gte: listing.boostExpiresAt } } : {}) },
-      }),
-      prisma.contactEvent.count({
-        where: { listingId: listing.id,
-          ...(listing.boostExpiresAt ? { createdAt: { gte: listing.boostExpiresAt } } : {}) },
-      }),
-      prisma.favorite.count({
-        where: { listingId: listing.id,
-          ...(listing.boostExpiresAt ? { createdAt: { gte: listing.boostExpiresAt } } : {}) },
-      }),
     ]);
+
+    const boostWhere = activeBoost
+      ? { listingId: listing.id, createdAt: { gte: activeBoost.createdAt, lte: activeBoost.expiresAt } }
+      : null;
+    const [boostImpressions, boostClicks, boostContacts, boostFavorites] = boostWhere
+      ? await Promise.all([
+          prisma.impressionEvent.count({ where: boostWhere }),
+          prisma.viewEvent.count({ where: boostWhere }),
+          prisma.contactEvent.count({ where: boostWhere }),
+          prisma.favorite.count({ where: boostWhere }),
+        ])
+      : [0, 0, 0, 0];
 
     // 7-day series bucketed by local day. Keep labels short (FR weekday
     // abbreviations) so the client chart doesn't have to re-derive them.
@@ -345,13 +386,15 @@ ownerRouter.get(
     res.json({
       listing: serializeListing(listing),
       metrics: {
-        views: viewsAll,
+        impressions: impressionsAll,
+        clicks: viewsAll,
         contacts: contactsAll,
         favorites: favoritesAll,
         visits: visitsAll,
         contactRate: Number((contactRate * 100).toFixed(1)),
         deltas7d: {
-          views:     pct(viewsThis, viewsPrev),
+          impressions: pct(impressionsThis, impressionsPrev),
+          clicks:      pct(viewsThis, viewsPrev),
           contacts:  pct(contactsThis, contactsPrev),
           favorites: pct(favsThis, favsPrev),
         },
@@ -360,8 +403,8 @@ ownerRouter.get(
         startsAt: activeBoost.createdAt,
         expiresAt: activeBoost.expiresAt,
         days: activeBoost.days,
-        impressions: boostViews,
-        clicks: boostViews,
+        impressions: boostImpressions,
+        clicks: boostClicks,
         contacts: boostContacts,
         favorites: boostFavorites,
       } : null,

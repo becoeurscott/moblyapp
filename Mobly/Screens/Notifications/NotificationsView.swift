@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Where tapping a notification (or a visit card) should land.
 enum NotificationTarget: Equatable {
+    case home
     case thread(String)
     case listing(String)
     /// The visits hub. `visitId` and the server `type` let the router pick
@@ -95,6 +96,7 @@ struct MoblyNotification: Identifiable {
     /// Resolved destination for a tap. Nil when the server sent no target, in
     /// which case the row stays inert rather than pretending to lead somewhere.
     var destination: NotificationTarget? {
+        if payload["screen"] == "home" { return .home }
         switch payload["action"] {
         case "become_owner": return .becomeOwner
         case "verify_email": return .verifyEmail
@@ -185,9 +187,19 @@ struct NotificationsView: View {
 
     private var source: [NotificationDTO] {
         #if DEBUG
-        if let demo = Self.demoNotifications { return demo }
+        if let demo = Self.demoNotifications { return demo.filter { !removed.contains($0.id) } }
         #endif
         return userData.notifications
+    }
+
+    /// Rows removed on this screen. The store drops them too; this set is what
+    /// lets the debug demo inbox, which the store doesn't own, shrink as well.
+    @State private var removed: Set<String> = []
+
+    /// Opened or swiped away: the notification leaves the inbox for good.
+    private func remove(_ ids: [String]) {
+        withAnimation(Motion.standard) { removed.formUnion(ids) }
+        Task { await userData.dismissNotifications(ids) }
     }
 
     #if DEBUG
@@ -387,6 +399,8 @@ struct NotificationsView: View {
                 _ = expanded.insert(group.id)
             }
         }
+        // Swiping a collapsed stack clears the whole group, like iOS does.
+        .swipeToRemove { remove(group.items.map(\.id)) }
         .accessibilityElement(children: .combine)
         .accessibilityHint(Text("Afficher les \(group.items.count) notifications"))
     }
@@ -395,16 +409,15 @@ struct NotificationsView: View {
         NotificationRow(item: item)
             .contentShape(Rectangle())
             .onTapGesture {
-                // Mark-read of a single row is a next step; for now
-                // any tap flips the whole inbox to read.
-                Task { await userData.markAllNotificationsRead() }
-                // …and take the user to where it happened. Rows with
-                // no target stay put rather than bouncing you to a
-                // screen that has nothing to do with the alert.
+                // Opening a notification uses it up: it leaves the inbox
+                // and the user lands where it happened. Rows with no
+                // target are simply cleared.
+                remove([item.id])
                 if let target = item.destination {
                     onOpen(target)
                 }
             }
+            .swipeToRemove { remove([item.id]) }
     }
 
     private var emptyState: some View {

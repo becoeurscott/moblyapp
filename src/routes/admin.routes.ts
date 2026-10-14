@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { notificationAllowed } from '../services/notificationPreferences';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
@@ -1140,6 +1141,7 @@ adminRouter.delete(
 // ═════════════════════════════════════════════════════════════
 
 const broadcastBody = z.object({
+  destination: z.enum(['none', 'home', 'become_owner', 'verify_email']).optional(),
   type: z.string().default('ANNOUNCEMENT'),   // ANNOUNCEMENT | PROMO | ALERT
   title: z.string().min(1).max(120),
   body: z.string().min(1).max(500),
@@ -1149,6 +1151,15 @@ const broadcastBody = z.object({
   /** Optional city filter, matched case-insensitively against `User.city`. */
   city: z.string().trim().max(80).optional(),
 });
+
+function broadcastPayload(b: z.infer<typeof broadcastBody>): Record<string, string> {
+  if (!b.destination) return b.payload ?? {};
+  const payload = { ...b.payload };
+  for (const key of ['action', 'screen', 'threadId', 'listingId', 'visitId']) delete payload[key];
+  if (b.destination === 'home') payload.screen = 'home';
+  else if (b.destination !== 'none') payload.action = b.destination;
+  return payload;
+}
 
 /** Recipients of a broadcast: active accounts in the segment / city. */
 function broadcastWhere(segment: 'all' | 'owners' | 'visitors', city?: string) {
@@ -1205,7 +1216,8 @@ adminRouter.post(
   asyncHandler(async (req, res) => {
     const b = broadcastBody.parse(req.body);
     const city = b.city || undefined;
-    const users = await prisma.user.findMany({ where: broadcastWhere(b.segment, city), select: { id: true } });
+    const audience = await prisma.user.findMany({ where: broadcastWhere(b.segment, city), select: { id: true, notificationPreferences: true } });
+    const users = audience.filter((u) => notificationAllowed(u.notificationPreferences, b.type));
     // Bulk insert notifications; push fan-out happens per user so an APNs
     // failure on one recipient doesn't block the others.
     await prisma.notification.createMany({
@@ -1214,7 +1226,7 @@ adminRouter.post(
         type: b.type,
         title: b.title,
         body: b.body,
-        payload: b.payload ?? {},
+        payload: broadcastPayload(b),
       })),
     });
     // Best-effort push. Import lazily so this route is still usable on
@@ -1222,7 +1234,7 @@ adminRouter.post(
     const { pushToUser } = await import('../services/push');
     await Promise.all(
       users.map((u) =>
-        pushToUser(u.id, { title: b.title, body: b.body, data: b.payload }).catch(() => {})
+        pushToUser(u.id, { type: b.type, title: b.title, body: b.body, data: broadcastPayload(b) }).catch(() => {})
       )
     );
 
@@ -1235,7 +1247,7 @@ adminRouter.post(
           type: b.type,
           title: b.title,
           body: b.body,
-          payload: b.payload ?? {},
+          payload: broadcastPayload(b),
           scheduledAt: now,
           sentAt: now,
           sentCount: users.length,
@@ -1296,7 +1308,7 @@ adminRouter.post(
       type: b.type,
       title: b.title,
       body: b.body,
-      payload: b.payload,
+      payload: broadcastPayload(b),
     });
     res.json({ sent: 1 });
   })

@@ -840,24 +840,25 @@ final class MoblyAPI {
 
     func listing(id: String) async throws -> ListingDTO {
         struct Wrap: Decodable { let listing: ListingDTO }
-        let w: Wrap = try await request("listings/\(id)")
+        let w: Wrap = try await request("listings/\(id)", query: ["track": "false"],
+                                        authorized: isAuthenticated)
         return w.listing
     }
 
-    /// Fire-and-forget view tracker. Hits the same `GET /listings/:id` the
-    /// full loader would, but with a `source` tag so the owner's stats can
-    /// break traffic down by origin. Errors are swallowed — a missed view is
-    /// far cheaper than a blocked detail page.
+    /// Counts an intentional open of the listing detail page.
     @discardableResult
-    func trackListingView(id: String, source: String?) async throws -> Bool {
-        var q: [String: String] = [:]
-        if let s = source { q["source"] = s }
-        let _: ListingDTO? = try? await {
-            struct Wrap: Decodable { let listing: ListingDTO }
-            let w: Wrap = try await request("listings/\(id)", query: q)
-            return w.listing
-        }()
+    func trackListingClick(id: String, source: String?) async throws -> Bool {
+        struct Body: Encodable { let source: String? }
+        _ = try? await request("listings/\(id)/click", method: "POST",
+                                body: Body(source: source), authorized: isAuthenticated) as EmptyResponse
         return true
+    }
+
+    /// Counts a listing card that became visible in the feed.
+    func trackListingImpression(id: String, source: String) async {
+        struct Body: Encodable { let source: String }
+        _ = try? await request("listings/\(id)/impression", method: "POST",
+                                body: Body(source: source), authorized: isAuthenticated) as EmptyResponse
     }
 
     /// Publish an owner's annonce (POST /listings). Matches the zod schema on
@@ -890,7 +891,8 @@ final class MoblyAPI {
 
     struct OwnerListingStats: Codable {
         struct Metrics: Codable {
-            let views: Int
+            let impressions: Int
+            let clicks: Int
             let contacts: Int
             let favorites: Int
             let visits: Int
@@ -900,7 +902,8 @@ final class MoblyAPI {
             /// too little traffic for a percentage to mean anything. The UI
             /// hides the badge rather than printing a nonsense "+6100%".
             struct Deltas: Codable {
-                let views: Int?
+                let impressions: Int?
+                let clicks: Int?
                 let contacts: Int?
                 let favorites: Int?
             }
@@ -940,10 +943,12 @@ final class MoblyAPI {
     /// nil means there is no prior 30-day period to compare against, and the
     /// UI hides the trend badge rather than inventing one.
     struct OwnerOverview: Codable {
-        struct Window: Codable { let views: Int; let contacts: Int; let favorites: Int }
-        struct Deltas: Codable { let views: Int?; let contacts: Int?; let favorites: Int? }
+        // `impressions` fields are optional so a server without them still decodes.
+        struct Window: Codable { let impressions: Int?; let views: Int; let contacts: Int; let favorites: Int }
+        struct Deltas: Codable { let impressions: Int?; let views: Int?; let contacts: Int?; let favorites: Int? }
         let listings: Int
         let boosted: Int
+        let impressions: Int?
         let views: Int
         let contacts: Int
         let favorites: Int
@@ -956,14 +961,17 @@ final class MoblyAPI {
         let topListings: [Ranked]?
 
         struct Totals: Codable {
+            let impressions: Int?
             let views: Int; let contacts: Int; let favorites: Int
             let visits: Int; let contactRate: Double
         }
-        struct Day: Codable { let date: String; let views: Int; let contacts: Int }
+        struct Day: Codable { let date: String; let impressions: Int?; let views: Int; let contacts: Int }
         struct Source: Codable { let source: String; let count: Int; let percent: Int }
         struct Ranked: Codable, Identifiable {
             let id: String; let title: String; let coverUrl: String?
-            let available: Bool; let views: Int; let views30d: Int
+            let available: Bool
+            let impressions: Int?; let impressions30d: Int?
+            let views: Int; let views30d: Int
             let contacts: Int; let favorites: Int
         }
     }
@@ -1592,6 +1600,9 @@ struct ListingDTO: Codable, Identifiable {
     let status: String
     let boosted: Bool
     let views: Int
+    /// Times the card was shown in a feed. Only `/owner/annonces` sends it;
+    /// nil everywhere else and from servers that predate impressions.
+    let impressions: Int?
     let contacts: Int
     let favorites: Int
     let boostDaysLeft: Int?

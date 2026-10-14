@@ -211,6 +211,7 @@ model User {
   reviews          Review[]               @relation("ReviewAuthor")
   reviewsReceived  Review[]               @relation("ReviewSubject")
   messages         Message[]
+  notificationPreferences Json @default("{}")
   notifications    Notification[]
   appRating        AppRating?
   threads          ThreadParticipant[]
@@ -408,6 +409,7 @@ model Listing {
   contactEvents  ContactEvent[]
   visits         VisitRequest[]
   viewEvents     ViewEvent[]
+  impressionEvents ImpressionEvent[]
 
   publishedAt DateTime?
   archivedAt  DateTime? // soft delete — the app hides these, history survives
@@ -503,6 +505,21 @@ model ViewEvent {
   id        String   @id @default(cuid())
   listingId String
   userId    String? // null = anonymous / signed-out visitor
+  source    String?
+  createdAt DateTime @default(now())
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, createdAt])
+  @@index([listingId])
+}
+
+/// A card that was displayed to a visitor. `ViewEvent` records a detail-page
+/// open, keeping an impression separate from a click.
+model ImpressionEvent {
+  id        String   @id @default(cuid())
+  listingId String
+  userId    String?
   source    String?
   createdAt DateTime @default(now())
 

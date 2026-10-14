@@ -582,7 +582,13 @@ async function deliverPush(threadId: string, senderId: string, text: string) {
   ]);
 
   for (const p of participants) {
-    if (p.muted || isOnline(p.userId)) continue;
+    // A connected socket does not mean the recipient is viewing this chat.
+    // Another device or a background connection must not suppress APNs.
+    if (p.muted) continue;
+    const unread = await prisma.threadParticipant.aggregate({
+      where: { userId: p.userId },
+      _sum: { unreadCount: true },
+    });
     await notifyUser({
       userId: p.userId,
       type: 'message',
@@ -594,7 +600,7 @@ async function deliverPush(threadId: string, senderId: string, text: string) {
         ...(thread?.listing?.title ? { listingTitle: thread.listing.title } : {}),
       },
       threadId,
-      badge: p.unreadCount,
+      badge: unread._sum.unreadCount ?? 0,
     });
   }
 }

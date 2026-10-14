@@ -348,56 +348,12 @@ struct FavoriteRow: View {
     var onOpen: () -> Void
     var onUnfav: () -> Void
     @State private var liked = true
-    @State private var offsetX: CGFloat = 0
-    /// The finger moved: the touch-up that ends a swipe also reaches the
-    /// card's Button, which opened the listing instead of just removing it.
-    @State private var dragged = false
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            // Red delete revealed on swipe-left
-            RoundedRectangle(cornerRadius: 18)
-                .fill(Color(hex: 0xE5484D))
-                .overlay(
-                    VStack(spacing: 3) {
-                        Image(systemName: "heart.slash.fill").font(.system(size: 18, weight: .semibold))
-                        Text("Retirer").font(.moblyBody(11, weight: .semibold))
-                    }.foregroundStyle(.white).padding(.trailing, 22),
-                    alignment: .trailing
-                )
-
-            rowCard
-                .offset(x: offsetX)
-                // Simultaneous, not `.gesture`: the card is a Button inside a
-                // ScrollView, and a plain gesture there never received the
-                // drag on iOS 18 — the swipe did nothing. Running alongside
-                // the scroll, it only reacts to a clearly sideways drag, so
-                // vertical scrolling is unaffected.
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 20)
-                        .onChanged { v in
-                            if abs(v.translation.width) > 8 || abs(v.translation.height) > 8 { dragged = true }
-                            // right → left only, and only when the drag is
-                            // clearly sideways rather than a wobbly scroll.
-                            guard abs(v.translation.width) > abs(v.translation.height) * 1.5 else { return }
-                            if v.translation.width < 0 {
-                                offsetX = max(v.translation.width, -120)
-                            }
-                        }
-                        .onEnded { v in
-                            // Cleared after the Button has seen this touch-up.
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { dragged = false }
-                            let sideways = abs(v.translation.width) > abs(v.translation.height) * 1.5
-                            if sideways && v.translation.width < -80 {
-                                withAnimation(Motion.instant) { offsetX = -450 }
-                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { onUnfav() }
-                            } else {
-                                withAnimation(Motion.panel) { offsetX = 0 }
-                            }
-                        }
-                )
-        }
+        // Same swipe as the notifications inbox: the card follows the finger
+        // and slides off past a third of its width.
+        rowCard
+            .swipeToRemove(icon: "heart.slash.fill", label: "Retirer", onUnfav)
     }
 
     /// "Nouveau" until real avis exist, then the average — bottom-right of the card.
@@ -419,76 +375,78 @@ struct FavoriteRow: View {
         }
     }
 
+    /// A tap gesture rather than a Button: the touch-up that ends a swipe
+    /// would also fire a Button and open the listing being removed.
     private var rowCard: some View {
-        Button { if !dragged { onOpen() } } label: {
-            HStack(spacing: 13) {
-                ZStack(alignment: .topLeading) {
-                    // Shorter, same width: the list shows more saved spaces
-                    // per screen without shrinking the photo sideways.
-                    ListingCover(listing: fav.listing, width: ImageSlot.thumb)
-                        .frame(width: 108, height: 84)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .top) {
-                        Text(fav.listing.title).font(.moblyHeading(15)).foregroundStyle(Color.moblyTextPrimary)
-                            .lineLimit(1)
-                        Spacer()
-                        // Off the photo, top-right of the card: the photo
-                        // stays clean and the heart sits where the eye reads
-                        // first.
-                        Button {
-                            liked.toggle()
-                            if !liked { onUnfav() }
-                        } label: {
-                            Image(systemName: liked ? "heart.fill" : "heart")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Color.moblyAccent)
-                                .frame(width: 28, height: 28)
-                                .background(Circle().fill(Color.moblySurfaceTint))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    HStack(spacing: 4) {
-                        Image(systemName: "mappin.and.ellipse").font(.system(size: 11, weight: .medium))
-                        Text(fav.listing.location).font(.moblyBody(11.5))
-                    }
-                    .foregroundStyle(Color(hex: 0x9A9DAC))
-                    .lineLimit(1)
-                    .padding(.top, 3)
-
-                    if fav.priceDrop {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.down").font(.system(size: 10, weight: .bold))
-                            Text("Prix baissé").font(.moblyBody(10.5, weight: .semibold))
-                        }
-                        .foregroundStyle(Color(hex: 0x1F8A5B))
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(Capsule().fill(Color(hex: 0xE9F9EF)))
-                        .padding(.top, 5)
-                    }
-
-                    Spacer(minLength: 4)
-
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(fav.listing.price)\(LT(fav.listing.priceUnit))").font(.moblyHeading(15)).foregroundStyle(Color.moblyPrimary)
-                        if let old = fav.oldPrice {
-                            Text(old).font(.moblyBody(11)).foregroundStyle(Color(hex: 0xB4B7C2)).strikethrough()
-                        }
-                        Spacer(minLength: 4)
-                        ratingBadge
-                    }
-                }
-                .padding(.vertical, 3).padding(.trailing, 4)
+        HStack(spacing: 13) {
+            ZStack(alignment: .topLeading) {
+                // Shorter, same width: the list shows more saved spaces
+                // per screen without shrinking the photo sideways.
+                ListingCover(listing: fav.listing, width: ImageSlot.thumb)
+                    .frame(width: 108, height: 84)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            .frame(height: 84)
-            .padding(9)
-            .background(RoundedRectangle(cornerRadius: 18).fill(.white))
-            .shadow(color: Color(hex: 0x14152A).opacity(0.06), radius: 16, y: 4)
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top) {
+                    Text(fav.listing.title).font(.moblyHeading(15)).foregroundStyle(Color.moblyTextPrimary)
+                        .lineLimit(1)
+                    Spacer()
+                    // Off the photo, top-right of the card: the photo
+                    // stays clean and the heart sits where the eye reads
+                    // first.
+                    Button {
+                        liked.toggle()
+                        if !liked { onUnfav() }
+                    } label: {
+                        Image(systemName: liked ? "heart.fill" : "heart")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color.moblyAccent)
+                            .frame(width: 28, height: 28)
+                            .background(Circle().fill(Color.moblySurfaceTint))
+                    }
+                    .buttonStyle(.plain)
+                }
+                HStack(spacing: 4) {
+                    Image(systemName: "mappin.and.ellipse").font(.system(size: 11, weight: .medium))
+                    Text(fav.listing.location).font(.moblyBody(11.5))
+                }
+                .foregroundStyle(Color(hex: 0x9A9DAC))
+                .lineLimit(1)
+                .padding(.top, 3)
+
+                if fav.priceDrop {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down").font(.system(size: 10, weight: .bold))
+                        Text("Prix baissé").font(.moblyBody(10.5, weight: .semibold))
+                    }
+                    .foregroundStyle(Color(hex: 0x1F8A5B))
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Capsule().fill(Color(hex: 0xE9F9EF)))
+                    .padding(.top, 5)
+                }
+
+                Spacer(minLength: 4)
+
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(fav.listing.price)\(LT(fav.listing.priceUnit))").font(.moblyHeading(15)).foregroundStyle(Color.moblyPrimary)
+                    if let old = fav.oldPrice {
+                        Text(old).font(.moblyBody(11)).foregroundStyle(Color(hex: 0xB4B7C2)).strikethrough()
+                    }
+                    Spacer(minLength: 4)
+                    ratingBadge
+                }
+            }
+            .padding(.vertical, 3).padding(.trailing, 4)
         }
-        .buttonStyle(.plain)
+        .frame(height: 84)
+        .padding(9)
+        .background(RoundedRectangle(cornerRadius: 18).fill(.white))
+        .shadow(color: Color(hex: 0x14152A).opacity(0.06), radius: 16, y: 4)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onOpen)
+        .accessibilityAddTraits(.isButton)
     }
 }
 

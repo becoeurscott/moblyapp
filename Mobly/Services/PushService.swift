@@ -19,6 +19,7 @@ final class PushService: NSObject, ObservableObject {
     /// Visit to show in the visits hub, set when a visit notification is tapped.
     @Published var pendingVisitId: String?
     @Published var pendingHome = false
+    @Published var pendingDestination: NotificationTarget?
 
     private var deviceToken: String?
     private let askedKey = "pushPromptShown"
@@ -120,15 +121,17 @@ final class PushService: NSObject, ObservableObject {
 }
 
 extension PushService: UNUserNotificationCenterDelegate {
-    /// Chat messages suppress the banner (the socket already delivered them);
-    /// everything else (re-engagement, visits, announcements) shows a full alert.
+    /// Only suppress a message banner when its conversation is already visible.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
         let info = notification.request.content.userInfo
-        let isChat = info["threadId"] != nil
-        return isChat ? [.badge, .sound] : [.banner, .badge, .sound]
+        let threadId = info["threadId"] as? String
+        let viewingConversation = await MainActor.run {
+            threadId != nil && ChatStore.shared.activeThreadId == threadId
+        }
+        return viewingConversation ? [.badge] : [.banner, .badge, .sound]
     }
 
     /// Tapped — remember the thread so the UI can open it once it's ready.
@@ -137,11 +140,17 @@ extension PushService: UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse
     ) async {
         let info = response.notification.request.content.userInfo
-        if let visitId = info["visitId"] as? String, !visitId.isEmpty {
+        if let action = info["action"] as? String, action == "become_owner" {
+            await MainActor.run { PushService.shared.pendingDestination = .becomeOwner }
+        } else if let action = info["action"] as? String, action == "verify_email" {
+            await MainActor.run { PushService.shared.pendingDestination = .verifyEmail }
+        } else if let visitId = info["visitId"] as? String, !visitId.isEmpty {
             // Visit pushes open "Mes demandes" or "Demandes reçues", not the chat.
             await MainActor.run { PushService.shared.pendingVisitId = visitId }
         } else if let threadId = info["threadId"] as? String {
             await MainActor.run { PushService.shared.pendingThreadId = threadId }
+        } else if let listingId = info["listingId"] as? String, !listingId.isEmpty {
+            await MainActor.run { PushService.shared.pendingDestination = .listing(listingId) }
         } else if info["screen"] as? String == "home" {
             await MainActor.run { PushService.shared.pendingHome = true }
         }

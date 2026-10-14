@@ -89,6 +89,7 @@ final class UserDataStore: ObservableObject {
         favorites = []
         favoriteIds = []
         notifications = []
+        dismissedNotificationIds = []
         unreadNotifications = 0
         unreadMessages = 0
         myListings = []
@@ -170,7 +171,8 @@ final class UserDataStore: ObservableObject {
     /// appeared once something re-fetched `GET /notifications`, which is why an
     /// admin broadcast looked like it had done nothing until a pull-to-refresh.
     func receive(_ n: NotificationDTO) {
-        guard !notifications.contains(where: { $0.id == n.id }) else { return }
+        guard !notifications.contains(where: { $0.id == n.id }),
+              !dismissedNotificationIds.contains(n.id) else { return }
         withAnimation(Motion.content) {
             notifications.insert(n, at: 0)
             if !n.read { unreadNotifications += 1 }
@@ -181,7 +183,8 @@ final class UserDataStore: ObservableObject {
         guard api.isAuthenticated else { return }
         do {
             struct Wrap: Decodable { let items: [NotificationDTO] }
-            let w: Wrap = try await api.request("notifications", authorized: true)
+            let fetched: Wrap = try await api.request("notifications", authorized: true)
+            let w = Wrap(items: fetched.items.filter { !dismissedNotificationIds.contains($0.id) })
             let unread = w.items.filter { !$0.read }.count
             // Only animate when something really arrived — a poll that returns
             // the same list must leave the screen untouched.
@@ -192,6 +195,28 @@ final class UserDataStore: ObservableObject {
                 }
             }
         } catch {}
+    }
+
+    /// Ids removed this session. A poll that lands before the server delete
+    /// (or against a server without `/notifications/dismiss`) must not bring
+    /// a row the user just cleared back onto the screen.
+    private var dismissedNotificationIds: Set<String> = []
+
+    /// Remove notifications from the inbox — opened or swiped away. The rows
+    /// leave the screen at once; the server delete follows.
+    func dismissNotifications(_ ids: [String]) async {
+        let gone = Set(ids)
+        guard !gone.isEmpty else { return }
+        dismissedNotificationIds.formUnion(gone)
+        let unreadGone = notifications.filter { gone.contains($0.id) && !$0.read }.count
+        withAnimation(Motion.standard) {
+            notifications.removeAll { gone.contains($0.id) }
+            unreadNotifications = max(0, unreadNotifications - unreadGone)
+        }
+        struct Body: Encodable { let ids: [String] }
+        _ = try? await api.request("notifications/dismiss", method: "POST",
+                                   body: Body(ids: Array(gone)),
+                                   authorized: true) as EmptyResponse
     }
 
     func markAllNotificationsRead() async {

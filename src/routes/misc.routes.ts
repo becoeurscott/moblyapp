@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { resolveNotificationPreferences } from '../services/notificationPreferences';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ApiError } from '../lib/http';
@@ -46,6 +47,20 @@ miscRouter.get('/categories', (_req, res) => {
 
 // Notifications
 export const notificationsRouter = Router();
+const notificationPreferencesBody = z.object({
+  messages: z.boolean(), visits: z.boolean(), newSpaces: z.boolean(),
+  priceDrops: z.boolean(), alerts: z.boolean(), promos: z.boolean(),
+});
+notificationsRouter.get('/preferences', requireAuth, asyncHandler(async (req, res) => {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: req.userId! }, select: { notificationPreferences: true } });
+  res.json(resolveNotificationPreferences(user.notificationPreferences));
+}));
+notificationsRouter.put('/preferences', requireAuth, asyncHandler(async (req, res) => {
+  const preferences = notificationPreferencesBody.parse(req.body);
+  await prisma.user.update({ where: { id: req.userId! }, data: { notificationPreferences: preferences } });
+  res.json(preferences);
+}));
+
 
 notificationsRouter.get(
   '/',
@@ -65,6 +80,24 @@ notificationsRouter.post(
   asyncHandler(async (req, res) => {
     await prisma.notification.updateMany({ where: { userId: req.userId! }, data: { read: true } });
     res.json({ ok: true });
+  })
+);
+
+/**
+ * POST /notifications/dismiss — remove notifications from the inbox. The app
+ * calls it when a row is opened or swiped away (one id), or when a collapsed
+ * stack is swiped away (all its ids). Scoped to the caller, so a foreign id is
+ * a silent no-op.
+ */
+notificationsRouter.post(
+  '/dismiss',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { ids } = z.object({ ids: z.array(z.string().min(1).max(64)).min(1).max(200) }).parse(req.body);
+    const { count } = await prisma.notification.deleteMany({
+      where: { id: { in: ids }, userId: req.userId! },
+    });
+    res.json({ ok: true, removed: count });
   })
 );
 

@@ -149,16 +149,16 @@ struct OwnerOverallStatsView: View {
 
     private var heroCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Vues totales")
+            Text("Impressions totales")
                 .font(.moblyBody(13, weight: .medium))
                 .foregroundStyle(.white.opacity(0.75))
-            Text((totals?.views ?? data?.views ?? 0).formattedGrouped)
+            Text((totals?.impressions ?? data?.impressions ?? 0).formattedGrouped)
                 .font(.moblyHeading(38))
                 .foregroundStyle(.white)
                 .contentTransition(.numericText())
             HStack(spacing: 14) {
-                heroPill("\((data?.last30d.views ?? 0).formattedGrouped) sur 30 jours",
-                         delta: data?.deltas30d.views)
+                heroPill("\((data?.last30d.impressions ?? 0).formattedGrouped) sur 30 jours",
+                         delta: data?.deltas30d.impressions)
                 heroPill("\(data?.listings ?? store.annonces.count) annonce\((data?.listings ?? 0) > 1 ? "s" : "")",
                          delta: nil)
             }
@@ -190,12 +190,21 @@ struct OwnerOverallStatsView: View {
     private var statGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
                   spacing: 12) {
+            // Clics = the annonce was opened; taux de clic = clics / impressions.
+            tile("hand.tap.fill", "Clics", (totals?.views ?? data?.views ?? 0).formattedGrouped, 0x3A4FF0)
+            tile("cursorarrow.click", "Taux de clic", String(format: "%.1f%%", clickRate), 0xF5B301)
             tile("bubble.left.fill", "Contacts", "\(totals?.contacts ?? data?.contacts ?? 0)", 0x1F8A5B)
             tile("heart.fill", "Favoris", "\(totals?.favorites ?? data?.favorites ?? 0)", 0xE5484D)
             tile("calendar", "Demandes de visite", "\(totals?.visits ?? 0)", 0x8B5CF6)
             tile("percent", "Taux de contact",
                  String(format: "%.1f%%", totals?.contactRate ?? 0), 0x4C9BFF)
         }
+    }
+
+    private var clickRate: Double {
+        let shown = totals?.impressions ?? data?.impressions ?? 0
+        let opened = totals?.views ?? data?.views ?? 0
+        return shown > 0 ? Double(opened) / Double(shown) * 100 : 0
     }
 
     private func tile(_ icon: String, _ label: String, _ value: String, _ tint: UInt32) -> some View {
@@ -234,7 +243,8 @@ struct OwnerOverallStatsView: View {
         parser.timeZone = TimeZone(identifier: "UTC")
         return (data?.daily30d ?? []).flatMap { d -> [Point] in
             guard let date = parser.date(from: d.date) else { return [] }
-            return [Point(date: date, value: d.views, series: "Vues"),
+            return [Point(date: date, value: d.impressions ?? 0, series: "Impressions"),
+                    Point(date: date, value: d.views, series: "Clics"),
                     Point(date: date, value: d.contacts, series: "Contacts")]
         }
     }
@@ -251,7 +261,7 @@ struct OwnerOverallStatsView: View {
                 LineMark(x: .value("Jour", p.date), y: .value("Nombre", p.value))
                     .foregroundStyle(by: .value("Série", p.series))
                     .interpolationMethod(.catmullRom)
-                if p.series == "Vues" {
+                if p.series == "Impressions" {
                     AreaMark(x: .value("Jour", p.date), y: .value("Nombre", p.value))
                         .foregroundStyle(LinearGradient(
                             colors: [Color.moblyPrimary.opacity(0.22), Color.moblyPrimary.opacity(0)],
@@ -259,7 +269,9 @@ struct OwnerOverallStatsView: View {
                         .interpolationMethod(.catmullRom)
                 }
             }
-            .chartForegroundStyleScale(["Vues": Color.moblyPrimary, "Contacts": Color(hex: 0x1F8A5B)])
+            .chartForegroundStyleScale(["Impressions": Color.moblyPrimary,
+                                        "Clics": Color(hex: 0xF5B301),
+                                        "Contacts": Color(hex: 0x1F8A5B)])
             .chartXAxis {
                 AxisMarks(values: .stride(by: .day, count: 7)) { _ in
                     AxisValueLabel(format: .dateTime.day().month(.abbreviated))
@@ -280,13 +292,13 @@ struct OwnerOverallStatsView: View {
         let rows = data?.sources30d ?? []
         return VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Origine des vues").font(.moblyHeading(16)).foregroundStyle(Color.moblyTextPrimary)
+                Text("Origine des clics").font(.moblyHeading(16)).foregroundStyle(Color.moblyTextPrimary)
                 Spacer()
                 Text("30 derniers jours").font(.moblyBody(12, weight: .medium))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
             }
             if rows.isEmpty {
-                Text("Aucune vue enregistrée sur les 30 derniers jours.")
+                Text("Aucun clic enregistré sur les 30 derniers jours.")
                     .font(.moblyBody(12.5))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
             } else {
@@ -365,14 +377,15 @@ struct OwnerOverallStatsView: View {
                                 .foregroundStyle(Color.moblyTextPrimary)
                                 .lineLimit(1)
                             HStack(spacing: 10) {
-                                metric("eye.fill", r.views)
+                                metric("eye.fill", r.impressions ?? 0)
+                                metric("hand.tap.fill", r.views)
                                 metric("bubble.left.fill", r.contacts)
                                 metric("heart.fill", r.favorites)
                             }
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text("+\(r.views30d)")
+                            Text("+\(r.impressions30d ?? 0)")
                                 .font(.moblyHeading(13.5))
                                 .foregroundStyle(Color.moblyPrimary)
                             Text("30 j")

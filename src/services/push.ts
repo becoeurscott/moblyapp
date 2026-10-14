@@ -1,4 +1,5 @@
 import http2 from 'node:http2';
+import { notificationAllowed } from './notificationPreferences';
 import { SignJWT, importPKCS8 } from 'jose';
 import { prisma } from '../lib/prisma';
 import { env } from '../config/env';
@@ -45,6 +46,7 @@ async function providerToken(): Promise<string> {
 }
 
 export interface PushPayload {
+  type?: string;
   title: string;
   body: string;
   /** Unread total, shown on the app icon. */
@@ -136,6 +138,8 @@ async function sendOne(deviceToken: string, payload: PushPayload): Promise<SendR
  */
 export async function pushToUser(userId: string, payload: PushPayload): Promise<void> {
   if (!pushConfigured()) return;
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { isActive: true, notificationPreferences: true } });
+  if (!user?.isActive || !notificationAllowed(user.notificationPreferences, payload.type ?? '')) return;
   if (!isFlagEnabled('notifications.push', await getConfig())) return;
 
   const devices = await prisma.device.findMany({
@@ -180,6 +184,8 @@ export async function notifyUser(opts: {
   threadId?: string;
   badge?: number;
 }): Promise<void> {
+  const recipient = await prisma.user.findUnique({ where: { id: opts.userId }, select: { isActive: true, notificationPreferences: true } });
+  if (!recipient?.isActive || !notificationAllowed(recipient.notificationPreferences, opts.type)) return;
   const row = await prisma.notification.create({
     data: {
       userId: opts.userId,
@@ -201,6 +207,7 @@ export async function notifyUser(opts: {
       type: row.type,
       title: row.title,
       body: row.body,
+      payload: row.payload,
       read: row.read,
       createdAt: row.createdAt,
     });
@@ -210,6 +217,7 @@ export async function notifyUser(opts: {
     console.error('[notify] socket delivery failed', err);
   }
   await pushToUser(opts.userId, {
+    type: opts.type,
     title: opts.title,
     body: opts.body,
     badge: opts.badge,

@@ -121,7 +121,10 @@ enum PublishOutcome {
 /// so it renders anywhere a listing does, while carrying host-only data.
 struct OwnerAnnonce: Identifiable, Hashable {
     var listing: Listing
+    /// Clicks: the annonce was opened.
     var views: Int
+    /// Times the card was shown in a feed.
+    var impressions: Int = 0
     var contacts: Int
     var favorites: Int
     var available: Bool = true
@@ -164,6 +167,7 @@ final class OwnerListings: ObservableObject {
             OwnerAnnonce(
                 listing: dto.asListing,
                 views: dto.views,
+                impressions: dto.impressions ?? 0,
                 contacts: dto.contacts,
                 favorites: dto.favorites,
                 available: dto.available,

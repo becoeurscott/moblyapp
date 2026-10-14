@@ -247,7 +247,7 @@ struct ListingDetailView: View {
             // availability GET — on a cold backend that meant a page showing
             // "4.2" next to "0 avis" for as long as those took.
             Task {
-                _ = try? await MoblyAPI.shared.trackListingView(
+                _ = try? await MoblyAPI.shared.trackListingClick(
                     id: listing.id, source: source ?? "detail")
             }
             Task {
@@ -1161,17 +1161,12 @@ struct ListingDetailView: View {
             }
         }
         .padding(.horizontal, 22)
-        .padding(.top, passiveBar ? 9 : 14)
-        // The CTA row keeps a comfortable 30pt above the home indicator so the
-        // buttons are not mis-tapped. The own-listing notice is a passive
-        // label with nothing to hit, so it drops to the safe-area inset alone
-        // and sits at the bottom edge instead of floating on a band of blur.
-        // CTA row keeps 30pt clear of the home indicator so the buttons are not
-        // mis-tapped. The own-listing notice is a passive label with nothing to
-        // hit, so it drops to just above the indicator instead of floating on a
-        // band of blur.
-        // Content clears the home indicator...
-        .padding(.bottom, 2 + safeAreaBottom)
+        .padding(.top, passiveBar ? 9 : 10)
+        // The bar already sits above the home-indicator inset, so a small gap
+        // is enough. Adding `safeAreaBottom` here as well (as it used to)
+        // counted the inset twice and left a tall empty band of blur under
+        // the buttons.
+        .padding(.bottom, 8)
         .background(
             Rectangle().fill(AnyShapeStyle.frosted(.ultraThinMaterial))
                 .shadow(color: Color(hex: 0x14152A).opacity(0.08), radius: 16, y: -4)

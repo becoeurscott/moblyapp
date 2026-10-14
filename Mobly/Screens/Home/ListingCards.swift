@@ -113,6 +113,7 @@ private struct HeroCard: View {
             .shadow(color: Color(hex: 0x14152A).opacity(0.18), radius: 16, y: 10)
         }
         .buttonStyle(.pressable)
+        .listingImpression(listing, source: listing.boosted ? "boost" : "home")
     }
 }
 
@@ -191,6 +192,29 @@ struct RecommendedCard: View {
             .shadow(color: Color(hex: 0x14152A).opacity(0.05), radius: 10, y: 4)
         }
         .buttonStyle(.pressable)
+        .listingImpression(listing, source: listing.boosted ? "boost" : "recommended")
+    }
+}
+
+/// Sends one impression when this card becomes visible. A local flag avoids
+/// counting SwiftUI layout updates as additional appearances.
+private struct ListingImpressionModifier: ViewModifier {
+    let listing: Listing
+    let source: String
+    @State private var recorded = false
+
+    func body(content: Content) -> some View {
+        content.onAppear {
+            guard !recorded else { return }
+            recorded = true
+            Task { await MoblyAPI.shared.trackListingImpression(id: listing.id, source: source) }
+        }
+    }
+}
+
+extension View {
+    func listingImpression(_ listing: Listing, source: String) -> some View {
+        modifier(ListingImpressionModifier(listing: listing, source: source))
     }
 }
 

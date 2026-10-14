@@ -95,5 +95,5 @@ export async function resendWelcomePushOnFirstDevice(userId: string): Promise<vo
   });
   if (claimed.count !== 1) return; // another registration got there first
 
-  await pushToUser(userId, { title: n.title, body: n.body ?? '', data: payload });
+  await pushToUser(userId, { type: n.type, title: n.title, body: n.body ?? '', data: payload });
 }

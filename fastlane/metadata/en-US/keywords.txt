@@ -1,0 +1,1 @@
+rent,rental,room,studio,apartment,villa,office,shop,coworking,housing,Douala,Yaounde,Cameroon,home

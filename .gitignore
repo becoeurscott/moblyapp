@@ -58,3 +58,7 @@ backups/
 .roo
 .trae
 .windsurf
+
+# App Review demo credentials (never commit)
+fastlane/metadata/review_information/demo_user.txt
+fastlane/metadata/review_information/demo_password.txt

@@ -1,0 +1,14 @@
+Mobly is a marketplace for renting spaces in Cameroon (rooms, studios, apartments, villas, offices, shops, coworking). The app content is in French.
+
+How to test:
+1. Sign in with the demo account provided above: open the Connexion screen, type the demo email in the phone/email field and the demo password, then sign in. No SMS code is needed. Browsing listings also works before signing in.
+2. Browse: the Home tab lists listings; use the filters and the Explore tab to see listings on a map. Open any listing to see photos, details, price and reviews.
+3. Chat: on a listing, tap the contact button to open a conversation with the owner. Messages are in the Messages tab.
+4. Request a visit: on a listing, tap the visit request button, pick a date and confirm. The request appears in the visits section of the Messages tab, and reminders are sent before the visit.
+5. Owner mode: the demo account is already an owner (free trial active, no payment). From the Profile tab, switch to owner mode to see the owner dashboard (listings, visit requests, statistics) and the flow to publish a listing.
+
+Privacy: users' phone numbers are never displayed. Chat and in app calls keep the phone number masked.
+
+Payments: this version contains no purchases. Owners publish listings during a free 7 day trial; paid publishing and listing boosts are switched off and do not appear anywhere in the app.
+
+Users can report listings and other users; reported content is moderated by the Mobly team.

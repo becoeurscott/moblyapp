@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { env } from './config/env';
 import { api } from './routes';
+import { legalPages } from './legal/pages';
 import { errorHandler, notFound } from './middleware/error';
 import { globalLimiter, requestId, corsOrigin } from './middleware/security';
 
@@ -69,6 +70,8 @@ export function createApp() {
   app.get('/', (_req, res) =>
     res.json({ service: 'mobly-backend', api: env.apiPrefix, health: `${env.apiPrefix}/health` })
   );
+  // Public legal/support pages (App Store privacy & support URLs).
+  app.use(legalPages);
   app.use(env.apiPrefix, api);
   // Legacy alias so clients pinned to /api keep working after API_PREFIX moved.
   if (env.apiPrefix !== '/api') app.use('/api', api);

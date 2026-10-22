@@ -1,0 +1,1 @@
+location,louer,chambre,studio,appartement,villa,bureau,boutique,coworking,logement,Douala,Yaoundé

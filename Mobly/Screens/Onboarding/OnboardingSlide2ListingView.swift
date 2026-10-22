@@ -6,13 +6,19 @@ struct OnboardingSlide2ListingView: View {
     var onStart: () -> Void
 
     @State private var entered = false
+    @ObservedObject private var config = RemoteConfigStore.shared
+
+    /// Boosts are only advertised once the operator has explicitly switched
+    /// them on: a fresh install (no config yet) or boosts turned off, as
+    /// during App Review, shows the free publishing pitch only.
+    private var boostsOn: Bool { config.config.flags["boost.enabled"]?.enabled == true }
 
     var body: some View {
         VStack(spacing: 0) {
             OnboardingTopBar(skipTint: Color(hex: 0x9A9DAC), onSkip: onSkip)
                 .padding(.top, 12)
 
-            BoostHero(entered: entered)
+            BoostHero(entered: entered, boostsOn: boostsOn)
                 .padding(.horizontal, 30)
                 .padding(.top, 10)
 
@@ -22,13 +28,13 @@ struct OnboardingSlide2ListingView: View {
                 PageIndicator(count: 2, current: 1)
                     .padding(.bottom, 22)
 
-                Text("Publiez et boostez vos annonces")
+                Text(boostsOn ? "Publiez et boostez vos annonces" : "Publiez vos annonces")
                     .font(.moblyHeading(25))
                     .foregroundStyle(Color.moblyTextPrimary)
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Mettez votre espace en ligne gratuitement, puis boostez-le pour passer en tête et toucher jusqu'à 3× plus de locataires, dès 500 FCFA.")
+                Text(boostsOn ? "Mettez votre espace en ligne gratuitement, puis boostez-le pour passer en tête et toucher jusqu'à 3× plus de locataires, dès 500 FCFA." : "Mettez votre espace en ligne gratuitement et recevez vos demandes de visite directement dans l'app.")
                     .font(.moblyBody(14))
                     .foregroundStyle(Color(hex: 0x9A9DAC))
                     .lineSpacing(3)
@@ -52,6 +58,7 @@ struct OnboardingSlide2ListingView: View {
 
 private struct BoostHero: View {
     var entered: Bool
+    var boostsOn: Bool = true
     @State private var float = false
     @State private var pulse = false
     /// Showcase rows: a studio (boosted), an office, a shop.
@@ -80,12 +87,14 @@ private struct BoostHero: View {
                     .animation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true), value: float)
 
                 chip("bolt.fill", "×3 plus de vues", tint: 0x4C9BFF)
+                    .opacity(boostsOn ? 1 : 0)
                     .position(x: w * 0.78, y: w * 0.90 + (float ? 7 : -5))
                     .opacity(entered ? 1 : 0)
                     .animation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true), value: float)
 
                 // Boost seal pops in
                 boltBadge
+                    .opacity(boostsOn ? 1 : 0)
                     .position(x: w * 0.82, y: w * 0.10)
                     .scaleEffect(entered ? (pulse ? 1.06 : 1) : 0.3)
                     .opacity(entered ? 1 : 0)
@@ -150,7 +159,7 @@ private struct BoostHero: View {
                     .font(.moblyBody(11)).foregroundStyle(Color(hex: 0x9A9DAC)).lineLimit(1)
             }
             Spacer()
-            if boosted { boostedBadge }
+            if boosted && boostsOn { boostedBadge }
         }
         .padding(9)
         .background(RoundedRectangle(cornerRadius: 15)
@@ -168,7 +177,7 @@ private struct BoostHero: View {
                 Text(LT(sub)).font(.moblyBody(11)).foregroundStyle(Color(hex: 0x9A9DAC))
             }
             Spacer()
-            if boosted { boostedBadge }
+            if boosted && boostsOn { boostedBadge }
         }
         .padding(9)
         .background(RoundedRectangle(cornerRadius: 15)
